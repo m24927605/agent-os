@@ -22,3 +22,11 @@ Non-blocking findings recorded for later slices (do not let them recur silently)
   internals, so a sibling module could reach another module's behavior via `../index.js` and bypass
   `not-to-internal` (top-barrel is exempt). Follow-up: replace blanket `export *` with a curated
   public surface. Pairs naturally with the iam barrel-migration slice.
+- **S0.8 review MINOR — Go cascade empty-plane guard (for the P1 kernel slice).** `scripts/verify-go.sh`
+  relies on `go vet ./...` exiting non-zero for a zero-package plane to prevent fake-green; this is
+  Go-version-dependent. When the P1 Go kernel slice lands the real gate, add an explicit
+  "packages exist" assertion + a real `.golangci.yml` + ensure `golangci-lint` is required.
+- **S0.8 review MINOR — py cascade `uvx`/`ruff` diagnostic (for the P3 SDK slice).** `scripts/verify-py.sh`
+  accepts `uvx` in the toolchain check but the gate invokes bare `ruff`; still fail-closed (safe), but
+  the failure message is misleading. Fix when the P3 Python gate is implemented (invoke via `uvx ruff`
+  when only `uvx` is present).

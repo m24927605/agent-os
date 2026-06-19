@@ -22,9 +22,14 @@ The OpenShell runtime adapter (CLI/SDK/gRPC) lands in a later task under `src/ru
 
 ```bash
 pnpm install
-pnpm run verify   # typecheck + lint + build + test + secret-scan (the universal gate)
+pnpm run verify   # typecheck + lint + build + test + deps:check + verify:go + verify:py + secret-scan
 pnpm test         # unit tests only
 ```
+
+`verify` is a **polyglot cascade**: `verify:go` / `verify:py` are fail-closed — they skip cleanly
+when that language plane is absent, but FAIL if a plane is present with its gate unconfigured (so a
+future Go/Python plane cannot silently bypass the gate). `deps:check` (dependency-cruiser) enforces
+low coupling / high cohesion.
 
 A `pre-commit` guard runs `pnpm run verify` and blocks commits that don't pass
 (`git config core.hooksPath .githooks`). Never skip it.
