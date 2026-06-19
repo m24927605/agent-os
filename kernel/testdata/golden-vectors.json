@@ -82,12 +82,31 @@
       "sequence": 9007199254740991,
       "canonicalBytesHex": "7b226576656e744964223a2265222c227265736f75726365223a222f78227d",
       "entryHash": "sha256:c48441dba462737ece777774250b08c21881cc27dc7c35a87c3a83110ca41b4f"
+    },
+    {
+      "name": "numbers",
+      "event": {
+        "nums": [
+          0,
+          42,
+          -5,
+          1700000000000,
+          0.1,
+          1e-7,
+          1e+21
+        ],
+        "n": 100000000000
+      },
+      "prevHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "sequence": 5,
+      "canonicalBytesHex": "7b226e223a3130303030303030303030302c226e756d73223a5b302c34322c2d352c313730303030303030303030302c302e312c31652d372c31652b32315d7d",
+      "entryHash": "sha256:77df47aa15dd545cdd4bc27fc07e39eb64527089b7df07bd67d7fecec0e45926"
     }
   ],
   "checkpoint": {
     "headEntryHash": "sha256:a2405d0097851f15f8cdb25cb827b17bbcfb7a4c356a6e549424316aceefe59b",
     "length": 1,
-    "publicKeySpkiBase64": "MCowBQYDK2VwAyEApQfq2maz5Tq17k12QiD2GrmjfiMU2+NQ8OIMNM3VSyA=",
-    "signatureBase64": "fyVrnwG7Izpy+VNlyaDqyHlSBs4QjyokutlwkqNZRqoj03CUIXTepkM9lxi1xgL6t+LI9IFjSdk9z1JREkKSAA=="
+    "publicKeySpkiBase64": "MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+    "signatureBase64": "sgzkcTGiJ7mMaHY7G6G6UcQz8NiKBj4wrWHO8Al9avPIWhmUi7LwQZxWT90CJobrnKLu1TrmCZCeNvhu9hIPCA=="
   }
 }

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // Redacted is the replacement token (must match src/audit/redact.ts REDACTED).
@@ -83,7 +84,7 @@ func writeValue(b *bytes.Buffer, v any) error {
 		if math.IsNaN(x) || math.IsInf(x, 0) {
 			return fmt.Errorf("canonical: non-finite number is not serializable")
 		}
-		b.WriteString(strconv.FormatFloat(x, 'g', -1, 64))
+		b.WriteString(formatJSNumber(x))
 	case json.Number:
 		i, err := x.Int64()
 		if err != nil {
@@ -154,4 +155,50 @@ func writeJSONString(b *bytes.Buffer, s string) {
 		}
 	}
 	b.WriteByte('"')
+}
+
+// formatJSNumber renders a finite float64 exactly like JS Number::toString / JSON.stringify
+// (ECMA-262 §7.1.12.1), so canonical bytes match the TS reference for numeric values (e.g.
+// 1700000000000 -> "1700000000000", 1e21 -> "1e+21", 1e-7 -> "1e-7"), not Go's default 'g' form.
+func formatJSNumber(f float64) string {
+	if f == 0 {
+		return "0" // also covers -0 (JSON.stringify(-0) === "0")
+	}
+	neg := f < 0
+	abs := f
+	if neg {
+		abs = -f
+	}
+	// shortest round-trip digits + decimal exponent via the 'e' form: "d.dddde±XX".
+	s := strconv.FormatFloat(abs, 'e', -1, 64)
+	ei := strings.IndexByte(s, 'e')
+	exp, _ := strconv.Atoi(s[ei+1:])
+	digits := strings.Replace(s[:ei], ".", "", 1)
+	k := len(digits)
+	n := exp + 1 // ECMA-262: value = digits × 10^(n-k)
+	var out string
+	switch {
+	case k <= n && n <= 21:
+		out = digits + strings.Repeat("0", n-k)
+	case 0 < n && n <= 21:
+		out = digits[:n] + "." + digits[n:]
+	case -6 < n && n <= 0:
+		out = "0." + strings.Repeat("0", -n) + digits
+	default:
+		mant := digits
+		if k > 1 {
+			mant = digits[:1] + "." + digits[1:]
+		}
+		e := n - 1
+		sign := "+"
+		if e < 0 {
+			sign = "-"
+			e = -e
+		}
+		out = mant + "e" + sign + strconv.Itoa(e)
+	}
+	if neg {
+		out = "-" + out
+	}
+	return out
 }

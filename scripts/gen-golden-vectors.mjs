@@ -8,7 +8,7 @@
 // conformance is asserted by a Go test that assembles the canary at RUNTIME (see
 // kernel/internal/canonical/redaction_test.go), so the committed fixture stays secret-clean.
 // The signing private key is generated in memory and never written (only public key + signature).
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { canonicalizeAuditEvent } from "../dist/audit/canonical.js";
 import { checkpointBytes, computeEntryHash, GENESIS_PREV_HASH } from "../dist/audit/kernel/log.js";
@@ -51,6 +51,13 @@ const events = [
     event: { eventId: "e", resource: "/x" },
     prevHash: GENESIS_PREV_HASH, sequence: 9007199254740991,
   },
+  {
+    // Locks JS Number::toString / JSON.stringify formatting in canonical bytes (the float path):
+    // integers print in full (no exponent) up to 1e21; >=1e21 and small fractions use exponential.
+    name: "numbers",
+    event: { nums: [0, 42, -5, 1700000000000, 0.1, 1e-7, 1e21], n: 100000000000 },
+    prevHash: GENESIS_PREV_HASH, sequence: 5,
+  },
 ];
 
 const vectors = events.map((e) => ({
@@ -62,8 +69,16 @@ const vectors = events.map((e) => ({
   entryHash: computeEntryHash(e.event, e.prevHash, e.sequence),
 }));
 
-// Checkpoint vector: TS signs checkpointBytes(headEntryHash, length) with a fresh ed25519 key.
-const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+// Checkpoint vector: TS signs checkpointBytes(headEntryHash, length) with a DETERMINISTIC ed25519
+// key derived from a fixed 32-byte seed (PKCS8 DER), so regenerating the fixture is reproducible.
+// The seed is a test-only constant, not a credential; only the public key + signature are written.
+const seed = Buffer.alloc(32, 7);
+const privateKey = createPrivateKey({
+  key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]),
+  format: "der",
+  type: "pkcs8",
+});
+const publicKey = createPublicKey(privateKey);
 const headEntryHash = vectors[0].entryHash;
 const length = 1;
 const signatureBase64 = sign(null, checkpointBytes(headEntryHash, length), privateKey).toString("base64");
