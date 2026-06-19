@@ -19,12 +19,19 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   Update/Delete; persists the **redacted** event) + `internal/verify` (`VerifyChain`, standalone:
   it does NOT import `internal/log`) + `cmd/verifier` (CLI: exit 0 intact, non-zero on
   tamper/reorder/gap/bad-sig/unparseable/missing-key — fail-closed).
+- **P1-S4** — `internal/store` (durable append-only file: `[8-byte BE len][body]`, committed only
+  after **fsync**; `Load()` REJECTS a torn/truncated tail — no silent truncation; no
+  Update/Delete/Truncate surface; pure persistence — imports neither chain nor verify) +
+  `internal/sequence` (per-source **monotonic** ingest with **gap** + regression/replay detection,
+  0-based first-seen; `Rebuild` reconstructs per-source state from the durable log so a restart
+  cannot silently re-open a gap). Startup self-check (feed `Load()` records to `verify`) is the
+  caller's job, keeping the verifier independent.
 
-**Not yet (do not assume):** `internal/log` is **in-memory, reference-only — NOT durable and NOT
-process-isolated**. Durable WORM storage + monotonic per-source sequence + gap detection = **P1-S4**;
-transactional outbox + synchronous-commit-before-effect = **P1-S5**; gRPC ingest + kernel as a
-separate process where the control plane can only append = **P1-S6**; two-way TS↔Go cross-language
-conformance = **P1-S7**; real Tessera tile-log + RFC-3161 anchoring + WASM verifier = **P4**.
+**Not yet (do not assume):** the durable store is **single-process, in-process Go API** — NOT
+process-isolated and with no commit↔effect timing guarantee yet. Transactional outbox + synchronous
+commit-before-effect = **P1-S5**; gRPC ingest + kernel as a separate process where the control plane
+can only append = **P1-S6**; two-way TS↔Go cross-language conformance = **P1-S7**; per-tenant Merkle
+tree / keys = **P3**; real Tessera tile-log + RFC-3161 anchoring + WASM verifier = **P4**.
 
 ## Run
 
