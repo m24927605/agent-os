@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import { parseAgentContext } from "./ids.js";
 
 const valid = {
@@ -33,16 +34,16 @@ describe("parseAgentContext — fail-closed identity aggregate", () => {
       requestId: valid.requestId,
       // tenantId omitted
     };
-    expect(() => parseAgentContext(missing)).toThrow();
+    expect(() => parseAgentContext(missing)).toThrow(ZodError);
   });
 
   it("throws on an empty or whitespace-only id", () => {
-    expect(() => parseAgentContext({ ...valid, actorId: "" })).toThrow();
-    expect(() => parseAgentContext({ ...valid, requestId: "   " })).toThrow();
+    expect(() => parseAgentContext({ ...valid, actorId: "" })).toThrow(ZodError);
+    expect(() => parseAgentContext({ ...valid, requestId: "   " })).toThrow(ZodError);
   });
 
   it("throws on a non-object input (fail-closed)", () => {
-    expect(() => parseAgentContext(null)).toThrow();
-    expect(() => parseAgentContext("nope")).toThrow();
+    expect(() => parseAgentContext(null)).toThrow(ZodError);
+    expect(() => parseAgentContext("nope")).toThrow(ZodError);
   });
 });
