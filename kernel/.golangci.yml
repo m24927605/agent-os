@@ -49,3 +49,7 @@ linters-settings:
         deny:
           - pkg: github.com/agent-os/kernel/internal/commitgate
             desc: "outbox must not import commitgate (commitgate -> outbox is the only direction; HARD CONSTRAINT A)"
+issues:
+  # SLICE-P1-006a: protoc-generated files are not hand-written and follow generator conventions.
+  exclude-files:
+    - ".*\\.pb\\.go$"

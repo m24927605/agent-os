@@ -33,6 +33,12 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   double-appends; `CheckDedup` returns no-op on same hash, `ErrContentConflict` on a different hash;
   append-only, no Update/Delete) + `internal/commitgate` (`Guard`: durably commit evidence BEFORE
   running the side effect; commit failure or non-durable receipt → effect never runs, fail-closed).
+- **P1-S6a** — gRPC/protobuf dependency + codegen foundation (zero behavior): `proto/ingest.proto`
+  defines an **append-only** `AppendService` (exactly one RPC, `Append`; no Update/Delete/Rewrite),
+  generated into `internal/ingestpb/` (committed); `pnpm run proto:gen` regenerates, `pnpm run
+  proto:check` (in `verify`) fails on drift / skips if the protoc toolchain is absent. Deps pinned to
+  `grpc v1.64.0` + `protobuf v1.34.2` (go-1.22-compatible; see `docs/guardrails.md`). Generated
+  `*.pb.go` are excluded from golangci-lint. Server/client BEHAVIOR is P1-S6.
 
 **Not yet (do not assume):** the kernel is still a **single-process, in-process Go API** — NOT
 process-isolated. gRPC ingest + kernel as a separate process where the control plane can only append
