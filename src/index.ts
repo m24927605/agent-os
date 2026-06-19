@@ -11,3 +11,4 @@ export * from "./policy/evaluate.js";
 export * from "./audit/event.js";
 export * from "./audit/redact.js";
 export * from "./audit/serialize.js";
+export * from "./audit/canonical.js";
