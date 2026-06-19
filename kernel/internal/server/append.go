@@ -49,10 +49,14 @@ func NewIngestServer(st *store.Store, audit AuditSink) (*IngestServer, error) {
 	return &IngestServer{store: st, audit: audit, next: next, head: head}, nil
 }
 
-func (s *IngestServer) deny(req *ingestpb.AppendRequest, code ingestpb.AppendError_Code, detail string) *ingestpb.AppendResponse {
+func (s *IngestServer) deny(req *ingestpb.AppendRequest, code ingestpb.AppendError_Code, detail string) (*ingestpb.AppendResponse, error) {
 	// detail is a static reason / field name only — it never echoes canonical_event content.
-	_ = s.audit.RecordDenial(req.GetSourceId(), req.GetSequence(), code.String(), detail)
-	return &ingestpb.AppendResponse{Result: &ingestpb.AppendResponse_Error{Error: &ingestpb.AppendError{Code: code, Detail: detail}}}
+	// FAIL-CLOSED: a denial is not "recorded" until its durable audit lands; if the audit write fails,
+	// return an internal error rather than handing back a typed deny with no audit behind it.
+	if err := s.audit.RecordDenial(req.GetSourceId(), req.GetSequence(), code.String(), detail); err != nil {
+		return nil, status.Error(codes.Internal, "denial audit write failed")
+	}
+	return &ingestpb.AppendResponse{Result: &ingestpb.AppendResponse_Error{Error: &ingestpb.AppendError{Code: code, Detail: detail}}}, nil
 }
 
 // Append enforces append-only + monotonic per-source sequence; never returns CODE_UNSPECIFIED as a
@@ -62,15 +66,15 @@ func (s *IngestServer) Append(_ context.Context, req *ingestpb.AppendRequest) (*
 	defer s.mu.Unlock()
 
 	if len(req.GetCanonicalEvent()) == 0 || !json.Valid(req.GetCanonicalEvent()) {
-		return s.deny(req, ingestpb.AppendError_MALFORMED, "canonical_event is empty or not valid canonical JSON"), nil
+		return s.deny(req, ingestpb.AppendError_MALFORMED, "canonical_event is empty or not valid canonical JSON")
 	}
 
 	expected := s.next[req.GetSourceId()]
 	switch {
 	case req.GetSequence() > expected:
-		return s.deny(req, ingestpb.AppendError_SEQUENCE_GAP, "sequence ahead of expected next (gap)"), nil
+		return s.deny(req, ingestpb.AppendError_SEQUENCE_GAP, "sequence ahead of expected next (gap)")
 	case req.GetSequence() < expected:
-		return s.deny(req, ingestpb.AppendError_SEQUENCE_REPLAY, "sequence already settled; append-only refuses rewrite"), nil
+		return s.deny(req, ingestpb.AppendError_SEQUENCE_REPLAY, "sequence already settled; append-only refuses rewrite")
 	}
 
 	// accept: hashes are computed from the canonical bytes; the client cannot set them.

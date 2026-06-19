@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/agent-os/kernel/internal/ingestpb"
 	"github.com/agent-os/kernel/internal/store"
@@ -146,6 +150,32 @@ func TestDenyDoesNotLeakCanary(t *testing.T) {
 		if strings.Contains(d, canary) {
 			t.Fatalf("audit reason leaked canary: %s", d)
 		}
+	}
+}
+
+type erroringAudit struct{}
+
+func (erroringAudit) RecordDenial(string, uint64, string, string) error {
+	return errors.New("audit disk full")
+}
+
+// If the durable denial-audit write fails, the server must NOT hand back a typed deny with no audit
+// behind it — it fails closed with an internal error (a denial is not recorded until its audit lands).
+func TestDenyFailsClosedWhenAuditWriteFails(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "k.wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := NewIngestServer(st, erroringAudit{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.Append(context.Background(), appendReq("S", 0, "not json")) // would be MALFORMED deny
+	if err == nil || status.Code(err) != codes.Internal {
+		t.Fatalf("audit-write failure must fail closed with codes.Internal, got resp=%v err=%v", resp, err)
+	}
+	if resp != nil {
+		t.Fatalf("must not return a response when the denial audit fails, got %v", resp)
 	}
 }
 
