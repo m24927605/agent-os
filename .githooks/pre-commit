@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Pre-Commit Guard (dev-loop Tier 0, event-based).
+# Borrowed from loops.elorm.xyz "Pre-Commit Guard". The feedback gate is a real
+# command; only its exit code decides allow/deny. Failure BLOCKS the commit.
+# Never skip this hook (see CLAUDE.md). To bypass in a true emergency: git commit --no-verify
+set -euo pipefail
+
+echo "[pre-commit] Pre-Commit Guard: running 'pnpm run verify' before allowing commit..."
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "[pre-commit] pnpm not found; cannot run verify gate — blocking commit (fail-closed)." >&2
+  exit 1
+fi
+
+pnpm run verify
+echo "[pre-commit] verify passed — commit allowed."
