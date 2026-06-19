@@ -33,3 +33,11 @@ linters-settings:
         deny:
           - pkg: github.com/agent-os/kernel/internal/log
             desc: "the standalone verifier must not import internal/log; it verifies the public chain only (HARD CONSTRAINT A)"
+      # SLICE-P1-004: store is pure persistence below sequence; sequence -> store is the only direction.
+      store-no-sequence:
+        files:
+          - "**/internal/store/**"
+        list-mode: lax
+        deny:
+          - pkg: github.com/agent-os/kernel/internal/sequence
+            desc: "store must not import sequence (sequence -> store is the only direction; HARD CONSTRAINT A)"
