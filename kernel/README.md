@@ -27,12 +27,17 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   cannot silently re-open a gap). Startup self-check (feed `Load()` records to `verify`) is the
   caller's job, keeping the verifier independent. `SourceID`/`SourceSeq` are out-of-leaf metadata
   (not hashed, not redacted) — **`SourceID` must be a non-secret namespace id, never a data sink.**
+- **P1-S5** — `internal/outbox` (producer-side transactional outbox: durable op-log, per-source
+  monotonic sequence allocated by the outbox, fsync-on-commit; at-least-once delivery via an injected
+  `Sink` deduped by a **durable delivered-set** so a crash between commit and delivery never
+  double-appends; `CheckDedup` returns no-op on same hash, `ErrContentConflict` on a different hash;
+  append-only, no Update/Delete) + `internal/commitgate` (`Guard`: durably commit evidence BEFORE
+  running the side effect; commit failure or non-durable receipt → effect never runs, fail-closed).
 
-**Not yet (do not assume):** the durable store is **single-process, in-process Go API** — NOT
-process-isolated and with no commit↔effect timing guarantee yet. Transactional outbox + synchronous
-commit-before-effect = **P1-S5**; gRPC ingest + kernel as a separate process where the control plane
-can only append = **P1-S6**; two-way TS↔Go cross-language conformance = **P1-S7**; per-tenant Merkle
-tree / keys = **P3**; real Tessera tile-log + RFC-3161 anchoring + WASM verifier = **P4**.
+**Not yet (do not assume):** the kernel is still a **single-process, in-process Go API** — NOT
+process-isolated. gRPC ingest + kernel as a separate process where the control plane can only append
+= **P1-S6**; two-way TS↔Go cross-language conformance = **P1-S7**; per-tenant Merkle tree / keys =
+**P3**; real Tessera tile-log + RFC-3161 anchoring + WASM verifier = **P4**.
 
 ## Run
 

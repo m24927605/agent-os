@@ -41,3 +41,11 @@ linters-settings:
         deny:
           - pkg: github.com/agent-os/kernel/internal/sequence
             desc: "store must not import sequence (sequence -> store is the only direction; HARD CONSTRAINT A)"
+      # SLICE-P1-005: commitgate -> outbox is the only direction; forbid the reverse.
+      outbox-no-commitgate:
+        files:
+          - "**/internal/outbox/**"
+        list-mode: lax
+        deny:
+          - pkg: github.com/agent-os/kernel/internal/commitgate
+            desc: "outbox must not import commitgate (commitgate -> outbox is the only direction; HARD CONSTRAINT A)"
