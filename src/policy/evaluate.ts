@@ -7,7 +7,7 @@
  *  - Every decision sets `auditRequired: true`.
  *  - Reasons never echo request values that could carry secrets (only field names / static text).
  */
-import { type AllowRule, type PolicyDecision, PolicyRequest } from "./types.js";
+import { type AllowRule, type PolicyDecision, PolicyRequest, type PolicyRuleSet } from "./types.js";
 
 function deny(reason: string): PolicyDecision {
   return { effect: "deny", reason, auditRequired: true };
@@ -48,11 +48,40 @@ export function matchResource(pattern: string, resource: string): boolean {
 }
 
 /**
- * Evaluate a (possibly untrusted) policy request against a set of explicit allow rules.
- * `input` is intentionally `unknown`: callers may pass unvalidated data and rely on the
- * evaluator to fail closed.
+ * Deny matching: like `matchResource`, but a wildcard-only pattern OVER-matches (matches
+ * everything). This is fail-safe — a wildcard-only deny can only deny MORE, never grant.
  */
-export function evaluatePolicy(input: unknown, rules: readonly AllowRule[]): PolicyDecision {
+export function matchDenyResource(pattern: string, resource: string): boolean {
+  if (pattern === resource) {
+    return true;
+  }
+  if (!pattern.includes("*")) {
+    return false;
+  }
+  if (pattern.replace(/\*/g, "").length === 0) {
+    return true;
+  }
+  return globToRegExp(pattern).test(resource);
+}
+
+/**
+ * Evaluate a (possibly untrusted) policy request. Accepts either a legacy allow-rule list or a
+ * full `PolicyRuleSet` ({ allow, deny }). Invariants (PDP seed):
+ *  - DENY-PRECEDENCE: any matching deny rule wins over every allow rule.
+ *  - DENY-BY-DEFAULT: no matching allow (and no matching deny) => deny.
+ *  - FAIL-CLOSED: malformed input or an evaluation error => deny, never allow.
+ *  - Reasons never echo request values (only rule ids / field names / static text).
+ */
+export function evaluatePolicy(input: unknown, rules: readonly AllowRule[]): PolicyDecision;
+export function evaluatePolicy(input: unknown, rules: PolicyRuleSet): PolicyDecision;
+export function evaluatePolicy(
+  input: unknown,
+  rules: readonly AllowRule[] | PolicyRuleSet,
+): PolicyDecision {
+  const ruleSet: PolicyRuleSet = Array.isArray(rules)
+    ? { allow: rules, deny: [] }
+    : (rules as PolicyRuleSet);
+
   const parsed = PolicyRequest.safeParse(input);
   if (!parsed.success) {
     const fields = parsed.error.issues.map((issue) => issue.path.join(".") || "<root>").join(", ");
@@ -61,14 +90,27 @@ export function evaluatePolicy(input: unknown, rules: readonly AllowRule[]): Pol
 
   const request = parsed.data;
   try {
-    const match = rules.find(
+    // Deny precedence: any matching deny wins over every allow.
+    const denied = ruleSet.deny.find(
+      (rule) =>
+        rule.action === request.action && matchDenyResource(rule.resource, request.resource),
+    );
+    if (denied) {
+      return {
+        effect: "deny",
+        reason: `matched deny rule '${denied.id}'`,
+        matchedRule: denied.id,
+        auditRequired: true,
+      };
+    }
+    const allowed = ruleSet.allow.find(
       (rule) => rule.action === request.action && matchResource(rule.resource, request.resource),
     );
-    if (match) {
+    if (allowed) {
       return {
         effect: "allow",
-        reason: `matched allow rule '${match.id}'`,
-        matchedRule: match.id,
+        reason: `matched allow rule '${allowed.id}'`,
+        matchedRule: allowed.id,
         auditRequired: true,
       };
     }
