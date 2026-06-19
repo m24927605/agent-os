@@ -39,3 +39,20 @@ export interface AllowRule {
   readonly action: string;
   readonly resource: string;
 }
+
+/**
+ * An explicit deny rule (same shape as AllowRule). A matching deny ALWAYS wins over any allow
+ * (deny-precedence). Unlike allow, a wildcard-only deny pattern (`*` / `**`) is honoured and
+ * OVER-matches (fail-safe: it can only deny more, never grant).
+ */
+export interface DenyRule {
+  readonly id: string;
+  readonly action: string;
+  readonly resource: string;
+}
+
+/** A policy rule set: explicit allow + explicit deny. Deny is evaluated first (deny-precedence). */
+export interface PolicyRuleSet {
+  readonly allow: readonly AllowRule[];
+  readonly deny: readonly DenyRule[];
+}

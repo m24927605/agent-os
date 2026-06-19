@@ -84,3 +84,66 @@ describe("matchResource", () => {
     expect(matchResource("**", "/anything")).toBe(false);
   });
 });
+
+describe("evaluatePolicy — deny-precedence (PolicyRuleSet form)", () => {
+  const denyRule = { id: "deny-secrets", action: "fs:read", resource: "/workspace/secrets/**" };
+
+  it("denies when a request matches both an allow and a deny rule (deny precedence)", () => {
+    const req = { ...validRequest, resource: "/workspace/secrets/key.txt" };
+    const decision = evaluatePolicy(req, { allow: [readRule], deny: [denyRule] });
+    expect(decision.effect).toBe("deny");
+    expect(decision.matchedRule).toBe("deny-secrets");
+    expect(decision.auditRequired).toBe(true);
+  });
+
+  it("allows only when an allow matches and no deny matches", () => {
+    const decision = evaluatePolicy(validRequest, { allow: [readRule], deny: [denyRule] });
+    expect(decision.effect).toBe("allow");
+    expect(decision.matchedRule).toBe("allow-workspace-read");
+  });
+
+  it("denies by default on an empty ruleset", () => {
+    const decision = evaluatePolicy(validRequest, { allow: [], deny: [] });
+    expect(decision.effect).toBe("deny");
+    expect(decision.reason).toContain("deny-by-default");
+  });
+
+  it("fails closed on a malformed deny rule — null (throws) or non-throwing garbage", () => {
+    // null deny element (throws in the matcher) -> fail-closed
+    expect(
+      evaluatePolicy(validRequest, {
+        allow: [readRule],
+        deny: [null as unknown as typeof denyRule],
+      }).effect,
+    ).toBe("deny");
+
+    // A non-throwing garbage deny (action is not a string) MUST NOT be silently skipped:
+    // a deny meant to protect /workspace/secrets/** must fail closed, never let an allow grant.
+    const req = { ...validRequest, resource: "/workspace/secrets/key.txt" };
+    const decision = evaluatePolicy(req, {
+      allow: [readRule],
+      deny: [{ id: "d", action: 0 as unknown as string, resource: "/workspace/secrets/**" }],
+    });
+    expect(decision.effect).toBe("deny");
+    expect(decision.reason).toContain("fail-closed");
+  });
+
+  it("wildcard-only deny over-matches (denies more) and overrides any allow", () => {
+    const decision = evaluatePolicy(validRequest, {
+      allow: [readRule],
+      deny: [{ id: "deny-all", action: "fs:read", resource: "**" }],
+    });
+    expect(decision.effect).toBe("deny");
+    expect(decision.matchedRule).toBe("deny-all");
+  });
+
+  it("wildcard-only allow still does NOT grant (allow side stays strict)", () => {
+    const decision = evaluatePolicy(validRequest, {
+      allow: [{ id: "allow-all", action: "fs:read", resource: "**" }],
+      deny: [],
+    });
+    expect(decision.effect).toBe("deny");
+    // deny-by-default (no valid allow matched), NOT a fail-closed error path.
+    expect(decision.reason).toContain("deny-by-default");
+  });
+});
