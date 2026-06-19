@@ -1,5 +1,12 @@
 # Phase 0 Slices — INDEX
 
+> **狀態（2026-06-19）：Phase 0 全部完成 ✅** — S0.1–S0.7（含後補的 S0.7）皆走完
+> branch → **RED test-first** → `pnpm run verify` → **fresh-context 對抗式 code review = PASS** →
+> `--no-ff` merge 進 main。S0.6 對抗式 review 抓到一個 deny fail-closed **BLOCKER**（非拋錯的畸形
+> deny 規則被靜默跳過），已修正並以「對 pre-fix 紅、對 HEAD 綠」的鎖定測試 + 重審 PASS。
+> main 上 `pnpm run verify` 綠（**51 tests** / deps:check / secret-scan）。**未開的 Phase-0 周邊項**：
+> verify polyglot 級聯入口、upstream Rust PR（屬 infra/外部，見 §0 與 roadmap §2）。
+
 > **Phase 0 的唯一意圖：延續（extend，**非**rewrite）現有 ~500 行 scaffold，把它推向 P0 substrate。**
 > 對應 [architecture-approach.md](../../research/architecture-approach.md) §4「Phase 0（延續 scaffold，非重寫）」與
 > [slice-spec.md](../../standards/slice-spec.md) §2 的 P0 範圍。**AGENTS.md 在任何衝突上勝出。**
