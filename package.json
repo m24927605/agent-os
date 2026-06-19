@@ -21,6 +21,7 @@
     "deps:check": "depcruise src --config .dependency-cruiser.cjs",
     "proto:gen": "bash scripts/proto-gen.sh",
     "proto:check": "bash scripts/proto-check.sh",
+    "verify:p1-exit": "bash scripts/verify-p1-exit.sh",
     "verify:go": "env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local bash scripts/verify-go.sh",
     "verify:py": "bash scripts/verify-py.sh",
     "secret-scan": "bash scripts/scan_secrets.sh",

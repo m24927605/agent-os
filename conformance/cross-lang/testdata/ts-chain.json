@@ -1,0 +1,54 @@
+{
+  "version": "agentos.cross-lang-chain.v1",
+  "publicKey": "ed25519:MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "entries": [
+    {
+      "sequence": 0,
+      "event": {
+        "eventId": "e0",
+        "action": "payments.refund.propose",
+        "resource": "acct/123",
+        "note": "中文 😀 quote-\" backslash-\\",
+        "nested": {
+          "arr": [
+            "a",
+            "b",
+            {
+              "deep": "x"
+            }
+          ],
+          "empty": {}
+        }
+      },
+      "prevHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "entryHash": "sha256:9eb14a8ea806c57219c7a920f17b507bd228cd42b9f139c0a4d451f973d21dce"
+    },
+    {
+      "sequence": 1,
+      "event": {
+        "eventId": "e1",
+        "action": "crm.update",
+        "apiKey": "[REDACTED]",
+        "resource": "/x/[REDACTED]",
+        "note": "keep"
+      },
+      "prevHash": "sha256:9eb14a8ea806c57219c7a920f17b507bd228cd42b9f139c0a4d451f973d21dce",
+      "entryHash": "sha256:4633f8e19391e3932b89accf21f448e7fa4572f2991e495b04ecaf203e7ebac4"
+    },
+    {
+      "sequence": 2,
+      "event": {
+        "eventId": "e2",
+        "action": "fs.read",
+        "resource": "/workspace/a"
+      },
+      "prevHash": "sha256:4633f8e19391e3932b89accf21f448e7fa4572f2991e495b04ecaf203e7ebac4",
+      "entryHash": "sha256:b026251b6a4dddd8dea7fb59202593675da2b42216703e585fb49f4895a1f219"
+    }
+  ],
+  "checkpoint": {
+    "length": 3,
+    "headEntryHash": "sha256:b026251b6a4dddd8dea7fb59202593675da2b42216703e585fb49f4895a1f219",
+    "signature": "WjS17fDUEit5cgLVp/zxKphwlv8/MQhyUvm9Pw6UAHfhwqifdCV6dMaKvBuPutp+YCd4xGov7iQSjzH5pXNnBA=="
+  }
+}
