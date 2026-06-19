@@ -12,7 +12,7 @@ Early scaffold. The first slice is the security core of the product/orchestratio
 
 - `src/iam` — branded identity primitives + the `AgentContext` aggregate (the OCSF AgentContext mapping start; fail-closed, and the single source of identity for every `AuditEvent`).
 - `src/policy` — `PolicyRequest` / `PolicyDecision` and a **deny-by-default, fail-closed** evaluator.
-- `src/audit` — a complete, schema-validated `AuditEvent` (identity drawn from `AgentContext`) and **redaction-safe** serialization.
+- `src/audit` — a complete, schema-validated `AuditEvent` (identity drawn from `AgentContext`), **redaction-safe** serialization, and deterministic **canonical serialization + `sha256:` content-addressing** (the verifier-reproducible, chain-ready path for the evidence kernel; the `sha256:` prefix is versioned so P1 can move to `blake3:`).
 - Dev gate `pnpm run verify` includes `deps:check` (dependency-cruiser) enforcing low coupling / high cohesion.
 
 The OpenShell runtime adapter (CLI/SDK/gRPC) lands in a later task under `src/runtime/openshell`.
