@@ -28,19 +28,31 @@ The OS analogy is literal: Policy engine ≈ syscalls/permissions, Sandbox ≈ p
 Approval workflow ≈ sudo, AuditEvent ≈ syslog, Task/AgentSession ≈ process/scheduler, Credential
 provider + Inference routing ≈ device/credential management.
 
-**One governance core, three surfaces of the same OS** (founder decision 2026-06-20 — we build all
-three; they share one core, they are not three separate products). The shared core = the evidence
-kernel (WORM + standalone verifier + per-source sequence/gap + outbox + commit-before-effect +
-append-only ingest) + the governance plane (deny-by-default policy, credential-blind redaction,
-AgentContext, tenant isolation) + the `ExecutionSubstrate` abstraction (OpenShell is substrate #1,
-not the product) + the SDK. The three surfaces over it:
-- **Personal Agent Workstation surface** — single user, local-first; integrates the user's machine /
-  browser / email / calendar / files / terminal; agents run through the same policy gate + audit
-  kernel. (Also serves as the internal dogfooding forge; never monetized as a consumer SKU.)
-- **Enterprise Agent Governance Plane surface** — multi-tenant (gateway-per-tenant), fleet governance,
-  the signed WORM bundle a customer's CISO/TPRM/auditor/insurer can independently verify.
-- **Developer surface** — SDK + ExecutionSubstrate + observability + deploy, to build and run agents
-  on the platform. (Exposed honestly as a developer top-of-funnel, never sold as a commodity runtime.)
+**One governance core, three co-equal PRIMARY products of the same OS** (founder decision 2026-06-20 —
+all three are primary, monetized products on ONE shared core; not one product + two funnels. The ban
+is on the PRICING AXIS, not on monetization: **no surface is ever sold on a price / compute /
+convenience axis — every surface leads with trust / governance / accountability** and monetizes the
+SAME moat for a different third-party-bearing buyer). The shared core = the evidence kernel (WORM +
+standalone verifier + per-source sequence/gap + outbox + commit-before-effect + append-only ingest) +
+the governance plane (deny-by-default policy, credential-blind redaction, AgentContext, tenant
+isolation) + the `ExecutionSubstrate` abstraction (OpenShell is substrate #1, not the product) + SDK.
+The three surfaces over it (each: buyer / pricing axis — never price/compute/convenience):
+- **Personal — Fiduciary-Grade Personal Agent** — local-first; integrates the practitioner's machine /
+  browser / email / calendar / files / terminal. Buyer = regulated/fiduciary solo or small-firm
+  professionals (lawyer / CPA / RIA / clinician) whose independent relying party (client / bar / court
+  / regulator / malpractice insurer) is mandated by law. Pricing axis = adversarial admissibility:
+  per-fiduciary-seat + per-matter WORM Evidence Pack + per-independent-verification event + carrier-
+  endorsed premium share. Honestly Tier-Brokered (Tier-SDK parts must be labelled forgeable-upstream).
+- **Enterprise — Agent Governance Plane** — multi-tenant (gateway-per-tenant) governance of fleets of
+  UNTRUSTED third-party agents. Buyer = the accountability/liability owner (CLO/CRO/CCO/Model-Risk/
+  Internal-Audit) co-funded by the customer CISO/TPRM. Pricing axis = compliance/liability/risk-transfer:
+  per-governed-third-party-agent + admissibility/assurance tier + per-evidence-pack issuance. The ACV
+  flagship; beachhead c3 Tenant-Sealed Fleet → c6 Agent Escrow.
+- **Developer — Governance-native runtime** — SDK + ExecutionSubstrate + observability + deploy:
+  "deploy your agent here; the evidence is signed by something you don't control." Buyer = platform-eng/
+  app-sec shipping agents into production, blocked by security review (relying party = their CISO /
+  customer TPRM / external auditor — NOT the developer). Pricing axis = per-attested-action + governance
+  seat; compute passed through at cost / BYOC, margin in the governance layer — NEVER $/vCPU-hr.
 
 **Guarantee Ladder (honest scoping — never let a weaker surface imply a stronger one's guarantee):**
 - **Tier-Hosted** — agent runs in an Agent-OS-managed ExecutionSubstrate (e.g. OpenShell): the full
@@ -51,10 +63,28 @@ not the product) + the SDK. The three surfaces over it:
 - **Tier-SDK** — foreign-runtime self-report: a tamper-evident ledger of *what was reported*, explicitly
   NOT proof-of-negative and forgeable upstream of the SDK. Sell it as exactly that.
 
-> Business gate (non-engineering, does NOT block the build): before scaling GTM on the c1/c2/c4
-> evidence-grade value, secure SF3 — a design-partner's outside counsel / auditor / E&O underwriter
-> confirming **in writing** that a signed, independently-verifiable WORM bundle is preferred-and-admissible
-> (an asset, not a discoverable liability). Beachhead motion: c3 Tenant-Sealed Fleet, then c6 Agent Escrow.
+**Pricing discipline (binding):** per-attested-action / admissibility-tier pricing is honest ONLY on a
+tier with (a) an **externalized signing root** (customer-held KMS/HSM, or an external transparency log /
+eIDAS QTSP) AND (b) enforced isolation in force. Until the signing root is externalized, cap external
+claims + pricing at **"tamper-evident (post-hoc), separate-process — NOT separate-org"**; do not charge a
+"every action notarized by an independent third party" premium we cannot yet back.
+
+**THE cross-surface moat guardrail (NON-NEGOTIABLE — release-blocking, same tier as deny-by-default):**
+The standalone verifier MUST verify signature + chain + gap **offline, without the Agent OS backend, and
+without trusting the operator**; this is a release-blocking conformance suite. **Any design that re-binds
+the attester to the operator** (operator admin can rewrite the chain; the signing root is held by us/the
+operator yet claimed independent; the verifier must trust our backend to verify) **is a critical,
+ship-blocking failure** — forbidden to ship, forbidden to price. It is the single common root of
+Personal's admissibility, Developer's per-attested-action pricing, and Enterprise's "independent third
+party"; violate it and all three collapse into a commodity audit-log / seat price war.
+
+> Business gates (non-engineering, do NOT block the build): **SF3** — before scaling evidence-grade GTM,
+> a design-partner's outside counsel / auditor / E&O underwriter confirms **in writing** that a signed,
+> independently-verifiable WORM bundle is preferred-and-admissible (a binary go/no-go, not advisory).
+> **SF6** — externalize the signing root (customer KMS/HSM or external transparency log / QTSP) before
+> charging per-attested-action / admissibility premiums. Beachhead motion: c3 Tenant-Sealed Fleet → c6.
+> Monetization sequencing: ship/sell **Enterprise c3 first** (its third party is mandated by law, why-now
+> is real); Personal + Developer ship as shared-core extensions, monetized after c3 scales.
 
 Built as a **layer ABOVE NVIDIA OpenShell** (integration **strategy B**; we do **not** fork it):
 OpenShell is the kernel + security primitives (sandbox isolation, policy proxy, credential injection,
