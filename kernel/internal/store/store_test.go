@@ -80,8 +80,25 @@ func TestLoadRejectsTornPartialLengthPrefix(t *testing.T) {
 	_, _ = f.Write([]byte{0, 0, 0}) // 3 stray bytes < 8-byte length prefix
 	_ = f.Close()
 	s1, _ := Open(path)
-	if _, _, err := s1.Load(); err == nil {
-		t.Fatal("torn partial length-prefix must error (no silent truncation)")
+	if _, _, err := s1.Load(); err == nil || !strings.Contains(err.Error(), "torn tail") {
+		t.Fatalf("torn partial length-prefix must error with a torn-tail error, got %v", err)
+	}
+}
+
+func TestLoadRejectsImplausibleLength(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.wal")
+	s, _ := Open(path)
+	_, _ = s.Append(buildRecords(t, []any{map[string]any{"a": "1"}})[0])
+	_ = s.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	var lb [8]byte
+	binary.BigEndian.PutUint64(lb[:], 1<<62) // forged enormous length prefix
+	_, _ = f.Write(lb[:])
+	_ = f.Close()
+	s2, _ := Open(path)
+	// MUST return an error (fail-closed), never panic/OOM on make([]byte, hugeLen).
+	if _, _, err := s2.Load(); err == nil || !strings.Contains(err.Error(), "torn tail") {
+		t.Fatalf("implausible body length must error (not panic), got %v", err)
 	}
 }
 
@@ -97,8 +114,8 @@ func TestLoadRejectsTruncatedBody(t *testing.T) {
 	_, _ = f.Write([]byte("short")) // ...but only 5 present
 	_ = f.Close()
 	s2, _ := Open(path)
-	if _, _, err := s2.Load(); err == nil {
-		t.Fatal("truncated body must error (no silent truncation)")
+	if _, _, err := s2.Load(); err == nil || !strings.Contains(err.Error(), "torn tail") {
+		t.Fatalf("truncated body must error with a torn-tail error (not corrupt-json fallback), got %v", err)
 	}
 }
 

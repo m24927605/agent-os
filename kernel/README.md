@@ -25,7 +25,8 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   `internal/sequence` (per-source **monotonic** ingest with **gap** + regression/replay detection,
   0-based first-seen; `Rebuild` reconstructs per-source state from the durable log so a restart
   cannot silently re-open a gap). Startup self-check (feed `Load()` records to `verify`) is the
-  caller's job, keeping the verifier independent.
+  caller's job, keeping the verifier independent. `SourceID`/`SourceSeq` are out-of-leaf metadata
+  (not hashed, not redacted) — **`SourceID` must be a non-secret namespace id, never a data sink.**
 
 **Not yet (do not assume):** the durable store is **single-process, in-process Go API** — NOT
 process-isolated and with no commit↔effect timing guarantee yet. Transactional outbox + synchronous

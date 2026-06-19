@@ -24,9 +24,16 @@ type LogRecord struct {
 	Event     any    `json:"event"`
 	PrevHash  string `json:"prevHash"`
 	EntryHash string `json:"entryHash"`
+	// SourceID is an ingest-completeness NAMESPACE identifier; it is persisted verbatim (NOT
+	// redacted, not in the leaf) — callers must keep it a non-secret identifier, never a sink for
+	// free-form/secret-bearing data.
 	SourceID  string `json:"sourceId"`
 	SourceSeq uint64 `json:"sourceSeq"`
 }
+
+// maxRecordSize bounds a single record's body so a torn/forged length prefix cannot trigger an
+// unbounded allocation (OOM / panic). 64 MiB is far above any real redacted audit event.
+const maxRecordSize = 64 << 20
 
 // Store is a durable append-only file. Not safe for concurrent Append from multiple goroutines.
 type Store struct {
@@ -79,9 +86,15 @@ func (s *Store) Load() (records []LogRecord, headEntryHash string, err error) {
 		return nil, "", err
 	}
 	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, "", err
+	}
+	fileSize := info.Size()
 	r := bufio.NewReader(f)
 
 	head := "sha256:" + zeros64 // genesis if empty (kept local; see note below)
+	var offset int64
 	for {
 		var lenBuf [8]byte
 		n, rerr := io.ReadFull(r, lenBuf[:])
@@ -91,11 +104,20 @@ func (s *Store) Load() (records []LogRecord, headEntryHash string, err error) {
 		if rerr != nil {
 			return nil, "", fmt.Errorf("store: torn tail: partial length prefix (%d bytes): %w", n, rerr)
 		}
+		offset += 8
 		bodyLen := binary.BigEndian.Uint64(lenBuf[:])
+		// Bound BEFORE allocating: a forged/torn length prefix must error, never panic or OOM.
+		if bodyLen > maxRecordSize {
+			return nil, "", fmt.Errorf("store: torn tail: implausible body length %d (max %d)", bodyLen, maxRecordSize)
+		}
+		if int64(bodyLen) > fileSize-offset {
+			return nil, "", fmt.Errorf("store: torn tail: body length %d exceeds remaining %d bytes", bodyLen, fileSize-offset)
+		}
 		body := make([]byte, bodyLen)
 		if _, rerr := io.ReadFull(r, body); rerr != nil {
 			return nil, "", fmt.Errorf("store: torn tail: truncated body (want %d): %w", bodyLen, rerr)
 		}
+		offset += int64(bodyLen)
 		var rec LogRecord
 		if jerr := json.Unmarshal(body, &rec); jerr != nil {
 			return nil, "", fmt.Errorf("store: corrupt record: %w", jerr)
