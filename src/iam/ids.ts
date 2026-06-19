@@ -29,3 +29,24 @@ export type EventId = z.infer<typeof EventId>;
 
 export const SandboxId = nonEmpty.brand<"SandboxId">();
 export type SandboxId = z.infer<typeof SandboxId>;
+
+/**
+ * OCSF AgentContext — the validated aggregate of identity primitives carried by every
+ * privileged action and AuditEvent. `sandboxId` is optional (not every action runs in a sandbox).
+ * This is the OCSF AgentContext mapping start; downstream slices (canonical serialize, evidence
+ * kernel ingest) draw an event's identity from here, eliminating field drift.
+ */
+export const AgentContext = z.object({
+  actorId: ActorId,
+  tenantId: TenantId,
+  projectId: ProjectId,
+  taskId: TaskId,
+  requestId: RequestId,
+  sandboxId: SandboxId.optional(),
+});
+export type AgentContext = z.infer<typeof AgentContext>;
+
+/** Validate untrusted input into an AgentContext. Fail-closed: missing/empty id throws. */
+export function parseAgentContext(input: unknown): AgentContext {
+  return AgentContext.parse(input);
+}
