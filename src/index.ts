@@ -12,3 +12,5 @@ export * from "./audit/event.js";
 export * from "./audit/redact.js";
 export * from "./audit/serialize.js";
 export * from "./audit/canonical.js";
+export * from "./audit/kernel/log.js";
+export * from "./audit/kernel/verify.js";
