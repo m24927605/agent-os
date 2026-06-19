@@ -39,6 +39,11 @@ func CanonicalBytes(event any) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// RedactEvent returns a redacted copy of an event (by-key + by-value). It is idempotent, so the
+// kernel can persist the REDACTED event in the chain while a verifier that redacts again recomputes
+// the identical canonical bytes / entryHash. Credentials never reach a persisted entry.
+func RedactEvent(event any) any { return redact(event) }
+
 // redact: by-KEY (value under a secret-like key -> REDACTED) + by-VALUE (secret-shape substrings
 // scrubbed). Mirrors src/audit/redact.ts.
 func redact(v any) any {

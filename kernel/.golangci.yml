@@ -25,3 +25,11 @@ linters-settings:
         deny:
           - pkg: github.com/agent-os/kernel/internal/chain
             desc: "canonical must not import chain (chain -> canonical is the only direction; HARD CONSTRAINT A)"
+      # SLICE-P1-003: the standalone verifier must not import the producer (log) — independence by construction.
+      verify-no-log:
+        files:
+          - "**/internal/verify/**"
+        list-mode: lax
+        deny:
+          - pkg: github.com/agent-os/kernel/internal/log
+            desc: "the standalone verifier must not import internal/log; it verifies the public chain only (HARD CONSTRAINT A)"
