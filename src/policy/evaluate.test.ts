@@ -108,10 +108,21 @@ describe("evaluatePolicy — deny-precedence (PolicyRuleSet form)", () => {
     expect(decision.reason).toContain("deny-by-default");
   });
 
-  it("fails closed when a deny rule is malformed", () => {
-    const decision = evaluatePolicy(validRequest, {
+  it("fails closed on a malformed deny rule — null (throws) or non-throwing garbage", () => {
+    // null deny element (throws in the matcher) -> fail-closed
+    expect(
+      evaluatePolicy(validRequest, {
+        allow: [readRule],
+        deny: [null as unknown as typeof denyRule],
+      }).effect,
+    ).toBe("deny");
+
+    // A non-throwing garbage deny (action is not a string) MUST NOT be silently skipped:
+    // a deny meant to protect /workspace/secrets/** must fail closed, never let an allow grant.
+    const req = { ...validRequest, resource: "/workspace/secrets/key.txt" };
+    const decision = evaluatePolicy(req, {
       allow: [readRule],
-      deny: [null as unknown as typeof denyRule],
+      deny: [{ id: "d", action: 0 as unknown as string, resource: "/workspace/secrets/**" }],
     });
     expect(decision.effect).toBe("deny");
     expect(decision.reason).toContain("fail-closed");
@@ -132,5 +143,7 @@ describe("evaluatePolicy — deny-precedence (PolicyRuleSet form)", () => {
       deny: [],
     });
     expect(decision.effect).toBe("deny");
+    // deny-by-default (no valid allow matched), NOT a fail-closed error path.
+    expect(decision.reason).toContain("deny-by-default");
   });
 });

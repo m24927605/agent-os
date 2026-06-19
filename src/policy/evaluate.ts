@@ -13,6 +13,26 @@ function deny(reason: string): PolicyDecision {
   return { effect: "deny", reason, auditRequired: true };
 }
 
+/**
+ * A rule is trustworthy only if id/action/resource are all non-empty strings. A malformed DENY
+ * rule must never be silently skipped (it may be intended to block this request) — see the
+ * fail-closed handling in `evaluatePolicy`.
+ */
+function isWellFormedRule(rule: unknown): rule is { id: string; action: string; resource: string } {
+  if (typeof rule !== "object" || rule === null) {
+    return false;
+  }
+  const candidate = rule as Record<string, unknown>;
+  return (
+    typeof candidate.id === "string" &&
+    candidate.id.trim().length > 0 &&
+    typeof candidate.action === "string" &&
+    candidate.action.trim().length > 0 &&
+    typeof candidate.resource === "string" &&
+    candidate.resource.trim().length > 0
+  );
+}
+
 /** Translate a restricted glob (`*`, `**`) into an anchored RegExp. */
 function globToRegExp(pattern: string): RegExp {
   let source = "";
@@ -90,18 +110,21 @@ export function evaluatePolicy(
 
   const request = parsed.data;
   try {
-    // Deny precedence: any matching deny wins over every allow.
-    const denied = ruleSet.deny.find(
-      (rule) =>
-        rule.action === request.action && matchDenyResource(rule.resource, request.resource),
-    );
-    if (denied) {
-      return {
-        effect: "deny",
-        reason: `matched deny rule '${denied.id}'`,
-        matchedRule: denied.id,
-        auditRequired: true,
-      };
+    // Deny precedence + fail-closed: a deny rule we cannot trust (non-string / empty id, action,
+    // or resource) must NOT be silently skipped — it may be intended to block this request.
+    // "If I cannot prove a deny rule does not match, I must deny."
+    for (const rule of ruleSet.deny) {
+      if (!isWellFormedRule(rule)) {
+        return deny("malformed deny rule (fail-closed)");
+      }
+      if (rule.action === request.action && matchDenyResource(rule.resource, request.resource)) {
+        return {
+          effect: "deny",
+          reason: `matched deny rule '${rule.id}'`,
+          matchedRule: rule.id,
+          auditRequired: true,
+        };
+      }
     }
     const allowed = ruleSet.allow.find(
       (rule) => rule.action === request.action && matchResource(rule.resource, request.resource),
