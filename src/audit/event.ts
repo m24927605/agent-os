@@ -8,7 +8,16 @@
  */
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ActorId, EventId, ProjectId, RequestId, SandboxId, TaskId, TenantId } from "../iam/ids.js";
+import {
+  ActorId,
+  EventId,
+  ProjectId,
+  RequestId,
+  SandboxId,
+  TaskId,
+  TenantId,
+  parseAgentContext,
+} from "../iam/ids.js";
 
 export const AuditResult = z.enum(["success", "denied", "error"]);
 export type AuditResult = z.infer<typeof AuditResult>;
@@ -68,15 +77,24 @@ export function createAuditEvent(
   input: AuditEventInput,
   clock: AuditClock = systemClock,
 ): AuditEvent {
-  const candidate = {
-    eventId: input.eventId ?? clock.newId(),
-    requestId: input.requestId,
-    timestamp: input.timestamp ?? clock.now(),
+  // Identity fields flow only through a validated AgentContext (single source; fail-closed).
+  const context = parseAgentContext({
+    actorId: input.actorId,
     tenantId: input.tenantId,
     projectId: input.projectId,
     taskId: input.taskId,
-    actorId: input.actorId,
+    requestId: input.requestId,
     sandboxId: input.sandboxId,
+  });
+  const candidate = {
+    eventId: input.eventId ?? clock.newId(),
+    requestId: context.requestId,
+    timestamp: input.timestamp ?? clock.now(),
+    tenantId: context.tenantId,
+    projectId: context.projectId,
+    taskId: context.taskId,
+    actorId: context.actorId,
+    sandboxId: context.sandboxId,
     action: input.action,
     resource: input.resource,
     policyDecision: input.policyDecision,

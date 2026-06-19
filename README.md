@@ -10,9 +10,10 @@ Core principles: deny-by-default for every capability, credentials never persist
 
 Early scaffold. The first slice is the security core of the product/orchestration layer:
 
-- `src/iam` — branded identity primitives (TenantId, ProjectId, TaskId, ActorId, RequestId…).
+- `src/iam` — branded identity primitives + the `AgentContext` aggregate (the OCSF AgentContext mapping start; fail-closed, and the single source of identity for every `AuditEvent`).
 - `src/policy` — `PolicyRequest` / `PolicyDecision` and a **deny-by-default, fail-closed** evaluator.
-- `src/audit` — a complete, schema-validated `AuditEvent` and **redaction-safe** serialization.
+- `src/audit` — a complete, schema-validated `AuditEvent` (identity drawn from `AgentContext`) and **redaction-safe** serialization.
+- Dev gate `pnpm run verify` includes `deps:check` (dependency-cruiser) enforcing low coupling / high cohesion.
 
 The OpenShell runtime adapter (CLI/SDK/gRPC) lands in a later task under `src/runtime/openshell`.
 
