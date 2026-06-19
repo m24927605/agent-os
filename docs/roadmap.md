@@ -334,7 +334,7 @@
 | Phase | 範圍 | 狀態 | 證明指令 |
 |---|---|---|---|
 | **P0** | scaffold 延續 + boundary gate + F2/F3 + upstream PR 啟動 | ☐ 進行中 | `pnpm run verify` exit 0 + boundary RED fixture 證閘有效 |
-| **P1** | Go evidence kernel（F1 起步 + verifier + 完整性） | ☐ slices authored（`docs/slices/phase-1/`） | `pnpm run verify`（含 `verify:go`）+ 竄改/gap 測試 |
+| **P1** | Go evidence kernel（F1 起步 + verifier + 完整性） | ☑ **DONE** — S1–S7 + S6a merged；六條退出條件 `pnpm run verify:p1-exit` 綠 | `pnpm run verify`（含 `verify:go`）+ `pnpm run verify:p1-exit`（6/6） |
 | **P2** | Personal beachhead c24 | ☐ 未開始 | 端到端 demo test + non-leak 掃描 + resume idempotency |
 | **P3** | c6 Escrow + c3 Fleet（Enterprise lighthouse） | ☐ 未開始 | release-blocking 跨租 conformance + 受管路徑唯一 bypass 測試 |
 | **P4** | c1 Oversight + c4 Maker-Checker（+ F1 完整 + c2 投影） | ☐ 未開始 | WASM verifier 竄改測試 + c4 by-construction property test |
