@@ -84,6 +84,11 @@ requirements, not suggestions:**
    non-leak). Its findings drive a fix → re-verify loop until clean.
 8. **Guardrails Learning.** If the same failure appears **twice**, record it in `docs/guardrails.md`
    (symptom → root cause → guardrail) **before** continuing.
+9. **Slice discipline + mandatory adversarial code review.** Implementation proceeds in small,
+   independently-verifiable **slices** (see `docs/standards/slice-spec.md`). **Every completed slice
+   MUST pass an adversarial code review** — a reviewer with fresh context whose job is to BREAK it
+   (see `docs/standards/adversarial-code-review.md`) — **before it merges**. No slice merges on
+   self-review alone.
 
 ### Tier map (full tables in `docs/dev-loops.md`)
 
@@ -105,6 +110,24 @@ requirements, not suggestions:**
 - Never add a dependency without justification.
 - Add/update docs when behavior, commands, APIs, policies, or configuration change.
 
+### Low coupling, high cohesion (HARD CONSTRAINT)
+
+Non-negotiable for every module, slice, and component:
+
+- **High cohesion** — one clear responsibility per module; unrelated concerns live elsewhere.
+- **Low coupling** — minimal, explicit, one-directional dependencies. A module is used only through
+  its **public surface** (`index.*` / a declared interface); **no deep imports into another
+  module's internals**.
+- **Acyclic, inward-pointing dependencies** (domain ← application ← adapters). **No dependency
+  cycles.** The OpenShell adapter, the Go evidence kernel, the SDKs, and the UI communicate only
+  through typed contracts (proto / Zod), never each other's internals.
+- **Concerns do not leak across layers** (CLI/UI · orchestration · approval · tool registry · policy
+  · credential · sandbox adapter · inference · audit · persistence · tenant/IAM).
+- **Depend on interfaces, not implementations**; inject dependencies; no hidden global state.
+- **Enforced, not aspirational** — illegal or cyclic cross-module dependencies MUST fail
+  `pnpm run verify` (a dependency-boundary check), and coupling/cohesion is an explicit, blocking
+  dimension of the adversarial code review every slice must pass.
+
 ## Definition of Done (apply to every task)
 
 - [ ] **Test-first**: a failing test existed before the implementation.
@@ -112,4 +135,8 @@ requirements, not suggestions:**
 - [ ] **Independent Verifier Pass = PASS** (invariants adversarially probed; findings resolved).
 - [ ] secret-scan clean; no secret-like value in any source/log/output.
 - [ ] Docs updated if behavior/commands/policies changed.
+- [ ] **Low coupling / high cohesion**: no new cross-module or cyclic dependency; the touched module
+  is reached only via its public surface (dependency-boundary check green).
+- [ ] **Adversarial code review = PASS** for the slice (a fresh-context reviewer tried to break it;
+  findings resolved) — required before merge.
 - [ ] Stage review gate run where applicable. **Never claim done without command proof.**
