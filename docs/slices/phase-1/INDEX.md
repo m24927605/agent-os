@@ -1,9 +1,10 @@
 # Phase 1 Slices — INDEX
 
-> **狀態（2026-06-19）：Phase 1 slices 已 authored（DRAFT）。** Phase 0 全部完成（S0.1–S0.8 merged）；本目錄為 P1
-> 的 slice 級拆解，依 `docs/standards/slice-spec.md` 範本撰寫，**尚未實作**——每個 slice 仍須走
+> **狀態（2026-06-20）：Phase 1 已實作並全部 merge（P1-S1..P1-S7 + P1-S6a）。** 每個 slice 都走完
 > branch → **RED test-first** → `pnpm run verify`（含級聯 `verify:go`）→ **fresh-context 對抗式 code review = PASS**
-> → `--no-ff` merge。**本 INDEX 只是計畫；任何「綠/通過/done」都必須以執行時的指令 exit code 為憑（only command output is truth）。**
+> → `--no-ff` merge（過程中對抗式 review 攔下 6 個真實缺陷：S2 float 格式靜默分歧、S4 torn-tail panic、S4 弱測試、
+> S6 deny-audit fail-open 等，皆修正後 re-review PASS）。Phase-1 六條退出條件以 `pnpm run verify:p1-exit`
+> （fail-closed 聚合）可重跑驗收。**only command output is truth：以執行時 exit code 為憑。**
 
 > **Phase 1 的唯一意圖：實作 Go evidence kernel —— 一個 durable、append-only、hash-chained、SIGNED WORM audit spine，
 > 跑在獨立的進程 / 身分 / 語言（Go），TS Governance Plane 與 OpenShell supervisor 對它 ONLY APPEND（永不改寫）。**

@@ -1,0 +1,21 @@
+[
+  {
+    "eventId": "e0",
+    "action": "payments.refund.propose",
+    "resource": "acct/123",
+    "note": "中文 😀 quote-\" backslash-\\",
+    "nested": { "arr": ["a", "b", { "deep": "x" }], "empty": {} }
+  },
+  {
+    "eventId": "e1",
+    "action": "crm.update",
+    "apiKey": "__CANARY__",
+    "resource": "/x/__CANARY__",
+    "note": "keep"
+  },
+  {
+    "eventId": "e2",
+    "action": "fs.read",
+    "resource": "/workspace/a"
+  }
+]

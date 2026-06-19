@@ -47,12 +47,20 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   proto:check` (in `verify`) fails on drift / skips if the protoc toolchain is absent. Deps pinned to
   `grpc v1.64.0` + `protobuf v1.34.2` (go-1.22-compatible; see `docs/guardrails.md`). Generated
   `*.pb.go` are excluded from golangci-lint. Server/client BEHAVIOR is P1-S6.
+- **P1-S7** — TS↔Go **cross-language conformance** + Phase-1 exit-criteria closeout (zero kernel
+  behavior). `conformance/cross-lang/` holds a language-neutral chain fixture (pure data — the only
+  cross-plane coupling). A TS-produced chain verifies in the Go verifier and a Go-produced chain
+  verifies in the TS `verifyChain`; each language detects tamper/reorder/gap/bad-sig in the OTHER's
+  chain; the two fixtures (same seeded key + same events) agree byte-for-byte on entryHash/head/
+  signature; the SPKI↔raw ed25519 key encoding round-trips. `pnpm run verify:p1-exit` re-runs all six
+  roadmap §3.1 exit criteria as a fail-closed aggregation.
 
-**Not yet (do not assume):** the kernel now runs as a separate process with an append-only ingest
-contract, but identity hardening is NOT done — **mTLS / tenant-keyed process identity / gateway-per-tenant
-= P3** (the current process boundary + typed proto *demonstrates* attester≠actor; production identity
-isolation is P3). TS-side control-plane integration = **P2**; two-way TS↔Go cross-language conformance
-closeout = **P1-S7**; real Tessera tile-log + RFC-3161 anchoring + WASM verifier = **P4**.
+**Not yet (do not assume):** identity hardening is NOT done — **mTLS / tenant-keyed process identity /
+gateway-per-tenant = P3** (the current process boundary + typed proto *demonstrates* attester≠actor;
+production identity isolation is P3). TS-side control-plane integration = **P2**; real Tessera tile-log
++ RFC-3161 anchoring + WASM verifier = **P4** (the cross-lang fixture is the future WASM verifier's
+conformance vector). Cross-equality is bounded to sequence ≤ 2^53−1 (TS number limit; true-uint64
+cross-equality deferred).
 
 ## Run
 
