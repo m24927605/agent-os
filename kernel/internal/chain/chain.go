@@ -56,3 +56,15 @@ func ComputeEntryHash(event any, prevHash string, sequence int) (string, error) 
 func CheckpointBytes(headEntryHash string, length int) []byte {
 	return Frame([]byte(headEntryHash), []byte(strconv.Itoa(length)))
 }
+
+// EntryHashFromCanonical computes the entryHash directly from ALREADY-canonical bytes (the ingest
+// path receives canonical_event over the wire, not an event object). It is identical to
+// ComputeEntryHash(event, ...) when canonicalBytes == CanonicalBytes(event) — same frame, same sha256.
+func EntryHashFromCanonical(canonicalBytes []byte, prevHash string, sequence int) string {
+	return sha256Prefixed(Frame(canonicalBytes, []byte(prevHash), []byte(strconv.Itoa(sequence))))
+}
+
+// ContentAddress is the "sha256:"-prefixed content address of already-canonical bytes.
+func ContentAddress(canonicalBytes []byte) string {
+	return sha256Prefixed(canonicalBytes)
+}

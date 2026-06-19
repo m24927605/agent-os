@@ -4,23 +4,42 @@ package agentos.kernel.ingest.v1;
 
 option go_package = "github.com/agent-os/kernel/internal/ingestpb;ingestpb";
 
-// AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: there is
-// intentionally exactly one RPC (Append) and no Update/Delete/Rewrite/Truncate — the control plane
-// can only append, never rewrite history (HARD CONSTRAINT; gating c1/c4).
+// AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: exactly one RPC
+// (Append) and no Update/Delete/Rewrite/Upsert/Overwrite — the control plane can only append, never
+// rewrite history (HARD CONSTRAINT; gating c1/c4). The server additionally enforces monotonic
+// per-source sequence and fails closed (typed AppendError + audit) on replay/gap/malformed.
 service AppendService {
-  rpc Append(AppendRequest) returns (AppendReceipt);
+  rpc Append(AppendRequest) returns (AppendResponse);
 }
 
 message AppendRequest {
-  string source_id = 1;       // ingest-completeness namespace (non-secret)
-  uint64 source_seq = 2;      // per-source monotonic sequence
-  string content_hash = 3;    // sha256: content address of canonical_event
-  bytes canonical_event = 4;  // already-redacted S0.2 canonical bytes
+  string source_id = 1;       // per-source monotonic sequence key (P3 binds tenant identity)
+  uint64 sequence = 2;        // the expected next sequence for this source (kernel enforces monotonic)
+  bytes canonical_event = 3;  // ALREADY-redacted S0.2 canonical bytes (kernel never holds the raw secret)
 }
 
-message AppendReceipt {
-  uint64 sequence = 1;        // chain position assigned by the kernel
-  string prev_hash = 2;       // "sha256:"-prefixed
-  string entry_hash = 3;      // "sha256:"-prefixed
-  bool durable = 4;           // true once fsync'd
+// Receipt — the server computes prev_hash/entry_hash/content_hash; the client cannot set them.
+message Receipt {
+  uint64 sequence = 1;
+  string content_hash = 2;    // "sha256:"-prefixed (versioned prefix; not hardcoded to sha256 forever)
+  string prev_hash = 3;       // "sha256:"-prefixed
+  string entry_hash = 4;      // "sha256:"-prefixed
+}
+
+message AppendError {
+  enum Code {
+    CODE_UNSPECIFIED = 0;     // proto3 zero value -> treated as deny (fail-closed), never success
+    SEQUENCE_GAP = 1;         // sequence > next: gap detected
+    SEQUENCE_REPLAY = 2;      // sequence < next: position already settled -> rewrite refused (append-only)
+    MALFORMED = 3;            // canonical_event not parseable / not canonical
+  }
+  Code code = 1;
+  string detail = 2;          // static reason / field name only — never echoes canonical_event content
+}
+
+message AppendResponse {
+  oneof result {
+    Receipt receipt = 1;
+    AppendError error = 2;
+  }
 }

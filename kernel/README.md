@@ -33,6 +33,14 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   double-appends; `CheckDedup` returns no-op on same hash, `ErrContentConflict` on a different hash;
   append-only, no Update/Delete) + `internal/commitgate` (`Guard`: durably commit evidence BEFORE
   running the side effect; commit failure or non-durable receipt → effect never runs, fail-closed).
+- **P1-S6** — kernel as a **separate process** (`cmd/kernel`, a gRPC server) with an **append-only**
+  ingest contract: `internal/server` enforces append-only + monotonic per-source sequence and fails
+  closed (typed `AppendError` SEQUENCE_GAP/SEQUENCE_REPLAY/MALFORMED + a durable denial audit under
+  source `kernel.audit`) on replay/gap/malformed — a rejected rewrite never mutates the store, and
+  the response oneof is never `CODE_UNSPECIFIED`. It durably commits (fsync) BEFORE returning a
+  `Receipt` (commit-before-effect at the RPC boundary). `internal/client` exposes ONLY `Append` (no
+  mutate method; raw stub not exposed). The control plane reaches the kernel ONLY via the proto
+  (zero shared internals); `internal/verify` may not import server/client (depguard `verify-no-log`).
 - **P1-S6a** — gRPC/protobuf dependency + codegen foundation (zero behavior): `proto/ingest.proto`
   defines an **append-only** `AppendService` (exactly one RPC, `Append`; no Update/Delete/Rewrite),
   generated into `internal/ingestpb/` (committed); `pnpm run proto:gen` regenerates, `pnpm run
@@ -40,10 +48,11 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   `grpc v1.64.0` + `protobuf v1.34.2` (go-1.22-compatible; see `docs/guardrails.md`). Generated
   `*.pb.go` are excluded from golangci-lint. Server/client BEHAVIOR is P1-S6.
 
-**Not yet (do not assume):** the kernel is still a **single-process, in-process Go API** — NOT
-process-isolated. gRPC ingest + kernel as a separate process where the control plane can only append
-= **P1-S6**; two-way TS↔Go cross-language conformance = **P1-S7**; per-tenant Merkle tree / keys =
-**P3**; real Tessera tile-log + RFC-3161 anchoring + WASM verifier = **P4**.
+**Not yet (do not assume):** the kernel now runs as a separate process with an append-only ingest
+contract, but identity hardening is NOT done — **mTLS / tenant-keyed process identity / gateway-per-tenant
+= P3** (the current process boundary + typed proto *demonstrates* attester≠actor; production identity
+isolation is P3). TS-side control-plane integration = **P2**; two-way TS↔Go cross-language conformance
+closeout = **P1-S7**; real Tessera tile-log + RFC-3161 anchoring + WASM verifier = **P4**.
 
 ## Run
 
