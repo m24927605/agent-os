@@ -26,11 +26,12 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: there is
-// intentionally exactly one RPC (Append) and no Update/Delete/Rewrite/Truncate — the control plane
-// can only append, never rewrite history (HARD CONSTRAINT; gating c1/c4).
+// AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: exactly one RPC
+// (Append) and no Update/Delete/Rewrite/Upsert/Overwrite — the control plane can only append, never
+// rewrite history (HARD CONSTRAINT; gating c1/c4). The server additionally enforces monotonic
+// per-source sequence and fails closed (typed AppendError + audit) on replay/gap/malformed.
 type AppendServiceClient interface {
-	Append(ctx context.Context, in *AppendRequest, opts ...grpc.CallOption) (*AppendReceipt, error)
+	Append(ctx context.Context, in *AppendRequest, opts ...grpc.CallOption) (*AppendResponse, error)
 }
 
 type appendServiceClient struct {
@@ -41,9 +42,9 @@ func NewAppendServiceClient(cc grpc.ClientConnInterface) AppendServiceClient {
 	return &appendServiceClient{cc}
 }
 
-func (c *appendServiceClient) Append(ctx context.Context, in *AppendRequest, opts ...grpc.CallOption) (*AppendReceipt, error) {
+func (c *appendServiceClient) Append(ctx context.Context, in *AppendRequest, opts ...grpc.CallOption) (*AppendResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AppendReceipt)
+	out := new(AppendResponse)
 	err := c.cc.Invoke(ctx, AppendService_Append_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -55,11 +56,12 @@ func (c *appendServiceClient) Append(ctx context.Context, in *AppendRequest, opt
 // All implementations must embed UnimplementedAppendServiceServer
 // for forward compatibility.
 //
-// AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: there is
-// intentionally exactly one RPC (Append) and no Update/Delete/Rewrite/Truncate — the control plane
-// can only append, never rewrite history (HARD CONSTRAINT; gating c1/c4).
+// AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: exactly one RPC
+// (Append) and no Update/Delete/Rewrite/Upsert/Overwrite — the control plane can only append, never
+// rewrite history (HARD CONSTRAINT; gating c1/c4). The server additionally enforces monotonic
+// per-source sequence and fails closed (typed AppendError + audit) on replay/gap/malformed.
 type AppendServiceServer interface {
-	Append(context.Context, *AppendRequest) (*AppendReceipt, error)
+	Append(context.Context, *AppendRequest) (*AppendResponse, error)
 	mustEmbedUnimplementedAppendServiceServer()
 }
 
@@ -70,7 +72,7 @@ type AppendServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAppendServiceServer struct{}
 
-func (UnimplementedAppendServiceServer) Append(context.Context, *AppendRequest) (*AppendReceipt, error) {
+func (UnimplementedAppendServiceServer) Append(context.Context, *AppendRequest) (*AppendResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Append not implemented")
 }
 func (UnimplementedAppendServiceServer) mustEmbedUnimplementedAppendServiceServer() {}
