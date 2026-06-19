@@ -17,3 +17,11 @@ linters-settings:
             desc: "kernel must not deep-import the TS control-plane source tree"
           - pkg: github.com/agent-os/sdk
             desc: "kernel must not import the SDK; cross-plane only via typed contract"
+      # SLICE-P1-002: chain -> canonical is the only direction; forbid the reverse.
+      canonical-no-reverse-dep:
+        files:
+          - "**/internal/canonical/**"
+        list-mode: lax
+        deny:
+          - pkg: github.com/agent-os/kernel/internal/chain
+            desc: "canonical must not import chain (chain -> canonical is the only direction; HARD CONSTRAINT A)"

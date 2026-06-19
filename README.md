@@ -33,8 +33,9 @@ plane cannot silently bypass the gate). The **Go plane (`kernel/`) now exists**,
 plane yet). `deps:check` (dependency-cruiser) enforces low coupling / high cohesion.
 
 > Go toolchain note: this dev env has a gvm/brew `GOROOT` mismatch (PATH `go` is 1.22.4 but `GOROOT`
-> points at a 1.24.3 stdlib). `verify:go` runs `scripts/verify-go.sh` under `env -u GOROOT` so Go uses
-> its own bundled stdlib; `golangci-lint` v1.60.3 is a prebuilt binary on PATH (not `go install`d).
+> points at a 1.24.3 stdlib). `verify:go` runs `scripts/verify-go.sh` under `env -u GOROOT CGO_ENABLED=0`
+> so Go uses its own bundled stdlib and the internal linker (macOS `crypto/x509` cgo otherwise emits a
+> binary without `LC_UUID` that dyld rejects); `golangci-lint` v1.60.3 is a prebuilt binary on PATH.
 
 A `pre-commit` guard runs `pnpm run verify` and blocks commits that don't pass
 (`git config core.hooksPath .githooks`). Never skip it.
