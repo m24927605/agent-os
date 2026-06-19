@@ -4,10 +4,38 @@
 repository. It is the authoritative operating contract. If a tool also reads `CLAUDE.md`, that file
 only adds tool-specific mechanics — **AGENTS.md wins on any conflict.**
 
-## What this repo is
+## What Agent OS is (north star)
 
-Agent OS — a secure, policy-governed agent runtime built as a **layer ABOVE NVIDIA OpenShell**
-(integration **strategy B**; we do **not** fork OpenShell). Background and decisions:
+**Agent OS is an operating system for untrusted, autonomous AI agents.** It is the runtime/platform
+that lets agents do real work — run processes, read/write files, reach the network, use credentials,
+call inference — while every capability is deny-by-default, every privileged action is auditable and
+approvable, and credentials never leak. It makes "letting an agent act" safe by construction.
+
+Scope and stance (confirmed product decisions):
+- **We do NOT build an agent.** Agent OS *hosts* existing third-party agents (Claude Code, OpenClaw,
+  Codex, …) as untrusted "applications" and governs them. The agent is the app; Agent OS is the OS.
+- **Any autonomous agent, not only coding agents.** Keep the domain model (Task, AgentSession,
+  ToolManifest, …) agent-type-agnostic — do not bake in coding-specific assumptions.
+- **API/SDK-first.** The primary surface is a programmatic API/SDK that other systems integrate to
+  run agents safely; CLI and UI are secondary consumers of that same API.
+
+The OS analogy is literal: Policy engine ≈ syscalls/permissions, Sandbox ≈ process isolation,
+Approval workflow ≈ sudo, AuditEvent ≈ syslog, Task/AgentSession ≈ process/scheduler, Credential
+provider + Inference routing ≈ device/credential management.
+
+Two deployment modes of the same OS:
+- **Personal Agent Workstation** — local-first, single user, per-task sandboxes, approval inbox,
+  logs/timeline/artifacts.
+- **Enterprise Agent Runtime Platform** — multi-tenant, gateway/control-plane, tenant isolation,
+  credential providers, inference routing, audit, compliance.
+
+Built as a **layer ABOVE NVIDIA OpenShell** (integration **strategy B**; we do **not** fork it):
+OpenShell is the kernel + security primitives (sandbox isolation, policy proxy, credential injection,
+OCSF audit); Agent OS is the userland + product layer that adds the domain objects OpenShell lacks
+(Task, Tool registry, ApprovalRequest, Tenant, AgentSession, timeline, Artifact) and drives OpenShell
+via gRPC / SDK / CLI.
+
+Background and decisions:
 - `docs/research/decision-integration-strategy.md` — why strategy B.
 - `docs/research/openshell.md` — what we reuse from OpenShell vs. build ourselves.
 - `docs/research/loops.md` — loop research and the product's 8 security custom loops.
