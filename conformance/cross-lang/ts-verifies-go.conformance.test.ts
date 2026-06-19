@@ -69,4 +69,15 @@ describe("TS verifies the Go-produced chain (cross-language, direction B)", () =
     expect(raw).not.toMatch(/sk-a{16,}/);
     expect(raw).toContain("[REDACTED]");
   });
+
+  it.each(["go-chain-single.json", "go-chain-empty.json"])(
+    "verifies the Go-produced boundary chain %s (single / empty)",
+    (name) => {
+      const fx = JSON.parse(readFileSync(new URL(`testdata/${name}`, import.meta.url), "utf8")) as Fixture;
+      const der = Buffer.from(fx.publicKey.replace(/^ed25519:/, ""), "base64");
+      const pub = createPublicKey({ key: der, format: "der", type: "spki" });
+      const res = verifyChain({ entries: fx.entries, checkpoint: fx.checkpoint }, pub);
+      expect(res).toEqual({ ok: true, length: fx.entries.length });
+    },
+  );
 });

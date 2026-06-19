@@ -1,0 +1,32 @@
+{
+  "version": "agentos.cross-lang-chain.v1",
+  "publicKey": "ed25519:MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "entries": [
+    {
+      "sequence": 0,
+      "event": {
+        "action": "payments.refund.propose",
+        "eventId": "e0",
+        "nested": {
+          "arr": [
+            "a",
+            "b",
+            {
+              "deep": "x"
+            }
+          ],
+          "empty": {}
+        },
+        "note": "中文 😀 quote-\" backslash-\\",
+        "resource": "acct/123"
+      },
+      "prevHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "entryHash": "sha256:9eb14a8ea806c57219c7a920f17b507bd228cd42b9f139c0a4d451f973d21dce"
+    }
+  ],
+  "checkpoint": {
+    "length": 1,
+    "headEntryHash": "sha256:9eb14a8ea806c57219c7a920f17b507bd228cd42b9f139c0a4d451f973d21dce",
+    "signature": "P0Iqyfg17FUo/aEUhbahFNkuCDqxM9RkWBiqDxRxF9vAdDYtG25wHqJjIoW+aoWTD/IN8q1fXby2hguTNGZdBw=="
+  }
+}

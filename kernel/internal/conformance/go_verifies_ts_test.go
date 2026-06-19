@@ -1,6 +1,10 @@
 package conformance
 
 import (
+	"encoding/hex"
+	"encoding/json"
+	"os"
+
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -15,6 +19,84 @@ const (
 	tsFixture = "../../../conformance/cross-lang/testdata/ts-chain.json"
 	goFixture = "../../../conformance/cross-lang/testdata/go-chain.json"
 )
+
+// boundaryScenarios are the supplementary empty + single-entry chains (the multi-entry chain is the
+// main subject above). Each has a TS-produced and a Go-produced fixture.
+var boundaryScenarios = []struct{ ts, goFx string }{
+	{"../../../conformance/cross-lang/testdata/ts-chain-single.json", "../../../conformance/cross-lang/testdata/go-chain-single.json"},
+	{"../../../conformance/cross-lang/testdata/ts-chain-empty.json", "../../../conformance/cross-lang/testdata/go-chain-empty.json"},
+}
+
+func TestGoVerifiesTSChainBoundaries(t *testing.T) {
+	for _, sc := range boundaryScenarios {
+		c, err := Load(sc.ts)
+		if err != nil {
+			t.Fatalf("load %s: %v", sc.ts, err)
+		}
+		pub, err := c.PublicKey25519()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res := verify.VerifyChain(c.SignedChain(), pub); !res.Ok || res.Length != len(c.Entries) {
+			t.Fatalf("%s: Go must verify the TS chain: %+v", sc.ts, res)
+		}
+	}
+}
+
+func TestCrossEqualityBoundaries(t *testing.T) {
+	for _, sc := range boundaryScenarios {
+		ts, err := Load(sc.ts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gofx, err := Load(sc.goFx)
+		if err != nil {
+			t.Fatalf("go boundary fixture missing (regenerate with AGENTOS_GEN_FIXTURE=1): %v", err)
+		}
+		if ts.Checkpoint.HeadEntryHash != gofx.Checkpoint.HeadEntryHash || ts.Checkpoint.Signature != gofx.Checkpoint.Signature {
+			t.Errorf("%s vs %s: head/signature differ (empty/single boundary)", sc.ts, sc.goFx)
+		}
+	}
+}
+
+// 2^53-1 (Number.MAX_SAFE_INTEGER) sequence cross-equality is proven against the P1-S2 TS-produced
+// golden (the append API assigns 0-based sequences, so the large value is exercised via the golden's
+// "large-sequence" vector). >2^53-1 is out of scope (TS number cannot round-trip it).
+func TestBigSequenceConformsToTSGolden(t *testing.T) {
+	b, err := os.ReadFile("../../testdata/golden-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g struct {
+		Vectors []struct {
+			Name              string `json:"name"`
+			PrevHash          string `json:"prevHash"`
+			Sequence          int64  `json:"sequence"`
+			CanonicalBytesHex string `json:"canonicalBytesHex"`
+			EntryHash         string `json:"entryHash"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(b, &g); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, v := range g.Vectors {
+		if v.Sequence != 9007199254740991 { // 2^53-1
+			continue
+		}
+		found = true
+		cb, err := hex.DecodeString(v.CanonicalBytesHex)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := chain.EntryHashFromCanonical(cb, v.PrevHash, int(v.Sequence)); got != v.EntryHash {
+			t.Fatalf("2^53-1 sequence: Go %s != TS golden %s", got, v.EntryHash)
+		}
+	}
+	if !found {
+		t.Fatal("expected a golden vector with sequence 2^53-1 (large-sequence)")
+	}
+}
 
 // Direction A: Go verifies a chain PRODUCED BY TS.
 func TestGoVerifiesTSChain(t *testing.T) {

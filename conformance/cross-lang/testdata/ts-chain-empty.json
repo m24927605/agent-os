@@ -1,0 +1,10 @@
+{
+  "version": "agentos.cross-lang-chain.v1",
+  "publicKey": "ed25519:MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "entries": [],
+  "checkpoint": {
+    "length": 0,
+    "headEntryHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "signature": "+AaLvqOl0PH4uttxjDj1x1C1trs0oMB0om8miOYZ0yCz8eVoSRdeFb02cGshKVeYCx817Z2N2HFAt+m4VT++DA=="
+  }
+}

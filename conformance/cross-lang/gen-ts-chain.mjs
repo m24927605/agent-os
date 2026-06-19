@@ -25,23 +25,32 @@ const privateKey = createPrivateKey({
 });
 const publicKey = createPublicKey(privateKey);
 
-const log = new InMemoryAppendOnlyLog({ publicKey, privateKey });
-for (const ev of events) {
-  log.append(redactSecrets(ev)); // redact BEFORE append so the stored/fixture event holds no canary
-}
-const entries = log.entries().map((e) => ({
-  sequence: e.sequence,
-  event: e.event,
-  prevHash: e.prevHash,
-  entryHash: e.entryHash,
-}));
-const cp = log.checkpoint();
+const publicKeyEnc = `ed25519:${publicKey.export({ type: "spki", format: "der" }).toString("base64")}`;
 
-const fixture = {
-  version: "agentos.cross-lang-chain.v1",
-  publicKey: `ed25519:${publicKey.export({ type: "spki", format: "der" }).toString("base64")}`,
-  entries,
-  checkpoint: { length: cp.length, headEntryHash: cp.headEntryHash, signature: cp.signature },
-};
-writeFileSync(new URL("testdata/ts-chain.json", here), `${JSON.stringify(fixture, null, 2)}\n`);
-console.log(`wrote testdata/ts-chain.json (${entries.length} entries, TS-produced)`);
+function buildAndWrite(suffix, eventCount) {
+  const log = new InMemoryAppendOnlyLog({ publicKey, privateKey });
+  for (const ev of events.slice(0, eventCount)) {
+    log.append(redactSecrets(ev)); // redact BEFORE append so the stored/fixture event holds no canary
+  }
+  const entries = log.entries().map((e) => ({
+    sequence: e.sequence,
+    event: e.event,
+    prevHash: e.prevHash,
+    entryHash: e.entryHash,
+  }));
+  const cp = log.checkpoint();
+  const fixture = {
+    version: "agentos.cross-lang-chain.v1",
+    publicKey: publicKeyEnc,
+    entries,
+    checkpoint: { length: cp.length, headEntryHash: cp.headEntryHash, signature: cp.signature },
+  };
+  writeFileSync(new URL(`testdata/ts-chain${suffix}.json`, here), `${JSON.stringify(fixture, null, 2)}\n`);
+  console.log(`wrote testdata/ts-chain${suffix}.json (${entries.length} entries, TS-produced)`);
+}
+
+// Full multi-entry chain + boundary chains (empty, single-entry). Big-sequence (2^53-1) cross-equality
+// is covered separately against the P1-S2 golden (TS cannot round-trip > 2^53-1).
+buildAndWrite("", events.length);
+buildAndWrite("-single", 1);
+buildAndWrite("-empty", 0);

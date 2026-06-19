@@ -94,10 +94,11 @@ func testSeed() []byte {
 	return s
 }
 
-// GenerateFixture produces the Go-side fixture from the shared events.json (same key + same events as
-// the TS generator), so the two fixtures are cross-verifiable and entryHash/head/signature-equal.
-// The canary is assembled at runtime and redacted on append (the log stores only redacted events).
-func GenerateFixture(eventsPath, outPath string) error {
+// GenerateFixture produces the Go-side fixture from the first eventCount events of the shared
+// events.json (same key + same events as the TS generator), so the two fixtures are cross-verifiable
+// and entryHash/head/signature-equal. eventCount<0 means "all". The canary is assembled at runtime and
+// redacted on append (the log stores only redacted events).
+func GenerateFixture(eventsPath, outPath string, eventCount int) error {
 	raw, err := os.ReadFile(eventsPath)
 	if err != nil {
 		return err
@@ -106,6 +107,9 @@ func GenerateFixture(eventsPath, outPath string) error {
 	var events []any
 	if err := json.Unmarshal([]byte(strings.ReplaceAll(string(raw), "__CANARY__", canary)), &events); err != nil {
 		return err
+	}
+	if eventCount >= 0 && eventCount < len(events) {
+		events = events[:eventCount]
 	}
 
 	priv := ed25519.NewKeyFromSeed(testSeed())
