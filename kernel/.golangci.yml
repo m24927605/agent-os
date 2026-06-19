@@ -1,0 +1,19 @@
+# Go-side HARD CONSTRAINT A enforcement (SLICE-P1-001). depguard v2 rule schema; golangci-lint >= v1.55.0.
+# Wired into `pnpm run verify:go` (the S0.8 fail-closed cascade). Later P1 slices only ADD deny rules
+# (e.g. internal/canonical must not import internal/chain); they do not relax these cross-plane denies.
+linters:
+  enable:
+    - depguard
+    - govet
+linters-settings:
+  depguard:
+    rules:
+      kernel-no-cross-plane:
+        list-mode: lax
+        deny:
+          - pkg: github.com/agent-os/agent-os
+            desc: "kernel must not import the control plane / SDK; cross-plane only via gRPC proto (HARD CONSTRAINT A)"
+          - pkg: agent-os/src
+            desc: "kernel must not deep-import the TS control-plane source tree"
+          - pkg: github.com/agent-os/sdk
+            desc: "kernel must not import the SDK; cross-plane only via typed contract"

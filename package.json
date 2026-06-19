@@ -19,7 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "deps:check": "depcruise src --config .dependency-cruiser.cjs",
-    "verify:go": "bash scripts/verify-go.sh",
+    "verify:go": "env -u GOROOT bash scripts/verify-go.sh",
     "verify:py": "bash scripts/verify-py.sh",
     "secret-scan": "bash scripts/scan_secrets.sh",
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run verify:go && pnpm run verify:py && pnpm run secret-scan"

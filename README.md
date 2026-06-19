@@ -28,8 +28,13 @@ pnpm test         # unit tests only
 
 `verify` is a **polyglot cascade**: `verify:go` / `verify:py` are fail-closed — they skip cleanly
 when that language plane is absent, but FAIL if a plane is present with its gate unconfigured (so a
-future Go/Python plane cannot silently bypass the gate). `deps:check` (dependency-cruiser) enforces
-low coupling / high cohesion.
+plane cannot silently bypass the gate). The **Go plane (`kernel/`) now exists**, so `verify:go` is
+**enforcing** (`go vet` + `go test` + `golangci-lint`/depguard); `verify:py` still skips (no Python
+plane yet). `deps:check` (dependency-cruiser) enforces low coupling / high cohesion.
+
+> Go toolchain note: this dev env has a gvm/brew `GOROOT` mismatch (PATH `go` is 1.22.4 but `GOROOT`
+> points at a 1.24.3 stdlib). `verify:go` runs `scripts/verify-go.sh` under `env -u GOROOT` so Go uses
+> its own bundled stdlib; `golangci-lint` v1.60.3 is a prebuilt binary on PATH (not `go install`d).
 
 A `pre-commit` guard runs `pnpm run verify` and blocks commits that don't pass
 (`git config core.hooksPath .githooks`). Never skip it.

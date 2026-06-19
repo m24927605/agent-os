@@ -8,6 +8,7 @@ symptom → root cause → guardrail — **before** continuing. See `AGENTS.md` 
 | Date | Symptom | Root cause | Guardrail (how we prevent recurrence) |
 |------|---------|------------|----------------------------------------|
 | 2026-06-19 | Cyclic deps / cross-module deep imports could erode low coupling unnoticed | HARD CONSTRAINT A was eye-enforced only | `deps:check` (dependency-cruiser: `no-circular`, `inward-only-domain-pure`, `not-to-internal`) is wired into `pnpm run verify` (SLICE-P0-003); violations exit non-zero. `src/iam/ids` is interim-allowlisted until the iam barrel-migration slice. |
+| 2026-06-19 | `go build/test` fails: `compile: version "go1.24.3" does not match go tool version "go1.22.4"` | gvm exports `GOROOT` (go1.24.3 stdlib) in the shell profile, but the `go` first on PATH is brew's 1.22.4 → compiler/stdlib mismatch | Run Go under `env -u GOROOT` so `go` uses its own bundled GOROOT. `verify:go` (package.json) is `env -u GOROOT bash scripts/verify-go.sh`; all P1 Go commands use `env -u GOROOT`. golangci-lint v1.60.3 installed as a PREBUILT binary (not `go install`, which hits the same mismatch). Fix the env properly (align gvm/PATH) when convenient. |
 
 ## Tracked follow-ups (from adversarial review)
 
