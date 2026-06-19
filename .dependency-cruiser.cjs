@@ -49,6 +49,10 @@ module.exports = {
   options: {
     tsConfig: { fileName: "tsconfig.json" },
     tsPreCompilationDeps: true,
+    // Carve-out (review MINOR #1, tracked follow-up): test files are excluded so existing test
+    // fixtures (e.g. audit test importing policy) do not trip the cross-module rules. This is an
+    // EXPLICIT, intentional gap — not silent. Revisit: hold tests to `not-to-internal` with an
+    // allowlist for legitimate test imports (see docs/guardrails.md follow-ups).
     exclude: { path: "\\.test\\.ts$" },
     doNotFollow: { dependencyTypes: ["npm", "npm-dev", "npm-peer", "npm-optional", "core"] },
   },
