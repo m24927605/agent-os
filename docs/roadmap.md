@@ -14,6 +14,33 @@
 
 ---
 
+## 定位與願景（2026-06-20，founder 決定）
+
+> **Agent OS ＝ agent 時代的作業系統**（Windows 之於 PC 時代的格局）。如同真正的 OS 是「**一個 kernel +
+> 多個 edition**」，Agent OS 是「**一個治理核心 + 三個 surface**」，三者**全做**、共用同一核心：
+>
+> - **共用核心（＝目前在建、三 surface 共用的「NT kernel」）**：evidence kernel（WORM hash-chain +
+>   standalone verifier + per-source sequence/gap + outbox + commit-before-effect + append-only ingest）
+>   + governance plane（deny-by-default policy、credential-blind redaction、AgentContext、tenant isolation）
+>   + `ExecutionSubstrate` 抽象（OpenShell ＝ substrate #1，非產品本體）+ SDK。
+> - **三個 surface**：① Personal Agent Workstation（單人 local-first，接本機/瀏覽器/email/calendar/檔案/terminal；
+>   兼內部 dogfooding forge）② Enterprise Agent Governance Plane（多租 gateway-per-tenant、fleet 治理、給
+>   稽核/CISO/承保人的可獨立驗證 WORM bundle）③ Developer surface（SDK + ExecutionSubstrate + 觀測 + 部署）。
+>
+> **護城河＝信任/治理核心，不是 runtime。** 「幫你跑 agent」是 commodity（Cloudflare/AWS/模型廠的 $/vCPU-hr
+> 削價戰）；別人抄不走的是「**attester ≠ attested actor**」——簽章、可獨立驗證、agent 與 operator 都偽造不了的
+> WORM system-of-record。**建構順序：先把治理 kernel 做成系統基座（P1，三 surface 共用）→ 再疊三個 edition。**
+>
+> **Guarantee Ladder（誠實 scope，弱 surface 不得暗示強 surface 的保證）**：Tier-Hosted（受管 substrate，
+> by construction 全套含 attest-the-negative）/ Tier-Brokered（creds+maker-checker+commit-before-effect 成立）
+> / Tier-SDK（外部 runtime 自報，僅證明「被回報了什麼」、上游可偽造）。
+>
+> **商業 gate（非工程、不擋 build）**：規模化 c1/c2/c4 證據級價值前，先取得 SF3——design-partner 的外部律師/
+> 稽核師/E&O 承保人**書面確認**簽章 WORM bundle 是「偏好且可採納」（資產而非可被 discovery 的負債）。
+> beachhead motion：c3 Tenant-Sealed Fleet → c6 Agent Escrow。權威定位見 [`AGENTS.md`](../AGENTS.md) north star。
+
+---
+
 ## 0. 治理本路線圖的規則（NON-NEGOTIABLE — 每個 phase / slice 都適用）
 
 > 這些規則不是背景說明，而是**每個 checkbox 的隱含驗收條件**。任何 phase 的任何 slice，

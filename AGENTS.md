@@ -6,10 +6,15 @@ only adds tool-specific mechanics — **AGENTS.md wins on any conflict.**
 
 ## What Agent OS is (north star)
 
-**Agent OS is an operating system for untrusted, autonomous AI agents.** It is the runtime/platform
-that lets agents do real work — run processes, read/write files, reach the network, use credentials,
-call inference — while every capability is deny-by-default, every privileged action is auditable and
-approvable, and credentials never leak. It makes "letting an agent act" safe by construction.
+**Agent OS is an operating system for untrusted, autonomous AI agents — a domain-agnostic,
+framework-agnostic trust/governance control plane that makes letting an agent act safe by
+construction.** It governs from OUTSIDE the agent's trust boundary and IN its action path: every
+capability is deny-by-default, every privileged action is auditable and approvable, credentials never
+leak, and effects are gated commit-before-effect. Its core, least-commoditizable moat is
+**"attester ≠ attested actor"** — it emits a separately-signed, hash-chained, **independently
+verifiable WORM system-of-record** that neither the agent nor the operator can forge, bypass, or
+rewrite. (It is NOT a faster sandbox / agent-runtime; that market is a commodity price war that
+re-binds the attester to the operator and destroys the moat.)
 
 Scope and stance (confirmed product decisions):
 - **We do NOT build an agent.** Agent OS *hosts* existing third-party agents (Claude Code, OpenClaw,
@@ -23,11 +28,33 @@ The OS analogy is literal: Policy engine ≈ syscalls/permissions, Sandbox ≈ p
 Approval workflow ≈ sudo, AuditEvent ≈ syslog, Task/AgentSession ≈ process/scheduler, Credential
 provider + Inference routing ≈ device/credential management.
 
-Two deployment modes of the same OS:
-- **Personal Agent Workstation** — local-first, single user, per-task sandboxes, approval inbox,
-  logs/timeline/artifacts.
-- **Enterprise Agent Runtime Platform** — multi-tenant, gateway/control-plane, tenant isolation,
-  credential providers, inference routing, audit, compliance.
+**One governance core, three surfaces of the same OS** (founder decision 2026-06-20 — we build all
+three; they share one core, they are not three separate products). The shared core = the evidence
+kernel (WORM + standalone verifier + per-source sequence/gap + outbox + commit-before-effect +
+append-only ingest) + the governance plane (deny-by-default policy, credential-blind redaction,
+AgentContext, tenant isolation) + the `ExecutionSubstrate` abstraction (OpenShell is substrate #1,
+not the product) + the SDK. The three surfaces over it:
+- **Personal Agent Workstation surface** — single user, local-first; integrates the user's machine /
+  browser / email / calendar / files / terminal; agents run through the same policy gate + audit
+  kernel. (Also serves as the internal dogfooding forge; never monetized as a consumer SKU.)
+- **Enterprise Agent Governance Plane surface** — multi-tenant (gateway-per-tenant), fleet governance,
+  the signed WORM bundle a customer's CISO/TPRM/auditor/insurer can independently verify.
+- **Developer surface** — SDK + ExecutionSubstrate + observability + deploy, to build and run agents
+  on the platform. (Exposed honestly as a developer top-of-funnel, never sold as a commodity runtime.)
+
+**Guarantee Ladder (honest scoping — never let a weaker surface imply a stronger one's guarantee):**
+- **Tier-Hosted** — agent runs in an Agent-OS-managed ExecutionSubstrate (e.g. OpenShell): the full
+  set holds *by construction*, including attest-the-negative (over OS-enforced channels).
+- **Tier-Brokered** — agent runs elsewhere but all credentials/egress/effects route through the Agent
+  OS in-path proxy: credential-blindness + maker-checker + commit-before-effect hold; attest-the-negative
+  is bounded to brokered channels.
+- **Tier-SDK** — foreign-runtime self-report: a tamper-evident ledger of *what was reported*, explicitly
+  NOT proof-of-negative and forgeable upstream of the SDK. Sell it as exactly that.
+
+> Business gate (non-engineering, does NOT block the build): before scaling GTM on the c1/c2/c4
+> evidence-grade value, secure SF3 — a design-partner's outside counsel / auditor / E&O underwriter
+> confirming **in writing** that a signed, independently-verifiable WORM bundle is preferred-and-admissible
+> (an asset, not a discoverable liability). Beachhead motion: c3 Tenant-Sealed Fleet, then c6 Agent Escrow.
 
 Built as a **layer ABOVE NVIDIA OpenShell** (integration **strategy B**; we do **not** fork it):
 OpenShell is the kernel + security primitives (sandbox isolation, policy proxy, credential injection,
