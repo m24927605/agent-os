@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package agentos.kernel.ingest.v1;
+
+option go_package = "github.com/agent-os/kernel/internal/ingestpb;ingestpb";
+
+// AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: there is
+// intentionally exactly one RPC (Append) and no Update/Delete/Rewrite/Truncate — the control plane
+// can only append, never rewrite history (HARD CONSTRAINT; gating c1/c4).
+service AppendService {
+  rpc Append(AppendRequest) returns (AppendReceipt);
+}
+
+message AppendRequest {
+  string source_id = 1;       // ingest-completeness namespace (non-secret)
+  uint64 source_seq = 2;      // per-source monotonic sequence
+  string content_hash = 3;    // sha256: content address of canonical_event
+  bytes canonical_event = 4;  // already-redacted S0.2 canonical bytes
+}
+
+message AppendReceipt {
+  uint64 sequence = 1;        // chain position assigned by the kernel
+  string prev_hash = 2;       // "sha256:"-prefixed
+  string entry_hash = 3;      // "sha256:"-prefixed
+  bool durable = 4;           // true once fsync'd
+}
