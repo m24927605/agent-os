@@ -6,53 +6,52 @@ only adds tool-specific mechanics — **AGENTS.md wins on any conflict.**
 
 ## What Agent OS is (north star)
 
-**Agent OS is an operating system for untrusted, autonomous AI agents — a domain-agnostic,
-framework-agnostic trust/governance control plane that makes letting an agent act safe by
-construction.** It governs from OUTSIDE the agent's trust boundary and IN its action path: every
-capability is deny-by-default, every privileged action is auditable and approvable, credentials never
-leak, and effects are gated commit-before-effect. Its core, least-commoditizable moat is
-**"attester ≠ attested actor"** — it emits a separately-signed, hash-chained, **independently
-verifiable WORM system-of-record** that neither the agent nor the operator can forge, bypass, or
-rewrite. (It is NOT a faster sandbox / agent-runtime; that market is a commodity price war that
-re-binds the attester to the operator and destroys the moat.)
+**Agent OS is a complete product — a computer that operates itself by intent.** You SAY or TYPE what
+you want; the whole computer — browser, files, email, calendar, terminal, network, every app — does it.
+The skill of "using a computer" is abolished. **Capability × experience is the headline.** It is built
+as an OS for UNTRUSTED, AUTONOMOUS agents: a self-evolving **brain** (default **Hermes**, swappable via
+the Brain Port) does the work; **OpenShell** is the **body** that operates a real computer; `agent-os`
+is the **spine** (orchestration + contracts); and a **supporting safety subsystem** — deny-by-default
+policy, credential-blind brokering, commit-before-effect, an independently-verifiable WORM record
+("attester ≠ attested actor") — is the **seatbelt** that makes it safe to let an autonomous thing run
+your computer/company. The seatbelt is support, NOT the product identity, and never a gate that shrinks
+ambition. (Earlier drafts wrongly centered governance as the moat — that is correct engineering, wrong
+product center; corrected 2026-06-20.)
 
 Scope and stance (confirmed product decisions):
-- **We do NOT build an agent.** Agent OS *hosts* existing third-party agents (Claude Code, OpenClaw,
-  Codex, …) as untrusted "applications" and governs them. The agent is the app; Agent OS is the OS.
-- **Any autonomous agent, not only coding agents.** Keep the domain model (Task, AgentSession,
-  ToolManifest, …) agent-type-agnostic — do not bake in coding-specific assumptions.
-- **API/SDK-first.** The primary surface is a programmatic API/SDK that other systems integrate to
-  run agents safely; CLI and UI are secondary consumers of that same API.
+- **We do NOT build the brain.** Agent OS *hosts* an existing third-party agent as the untrusted brain
+  (default Hermes; Claude Code / OpenClaw / Codex swappable behind the same credential-blind Brain Port).
+  The brain is the app; Agent OS is the OS that makes its output dependable, complete, and safe.
+- **Any autonomous agent, any domain.** Keep the domain model (Task, AgentSession, ToolManifest, …)
+  agent-type-agnostic — do not bake in coding-specific assumptions.
+- **Experience-first for Personal/Enterprise; SDK/API is the contract spine + the Developer surface.**
+  Personal is voice/text intent (easier than a phone, zero learning cost); the SDK/API is how developers
+  extend the computer and how components compose, not the end-user surface.
 
-The OS analogy is literal: Policy engine ≈ syscalls/permissions, Sandbox ≈ process isolation,
-Approval workflow ≈ sudo, AuditEvent ≈ syslog, Task/AgentSession ≈ process/scheduler, Credential
-provider + Inference routing ≈ device/credential management.
+The OS analogy is literal: Brain ≈ the program/userland (does the work), OpenShell ExecutionSubstrate ≈
+drivers + process isolation, Policy engine ≈ syscalls/permissions, Approval workflow ≈ sudo, AuditEvent
++ WORM kernel ≈ syslog (tamper-evident), Task/AgentSession ≈ process/scheduler, Credential provider +
+Inference routing ≈ device/credential management, the per-surface shell ≈ the desktop you actually touch.
 
-**One governance core, three co-equal PRIMARY products of the same OS** (founder decision 2026-06-20 —
-all three are primary, monetized products on ONE shared core; not one product + two funnels. The ban
-is on the PRICING AXIS, not on monetization: **no surface is ever sold on a price / compute /
-convenience axis — every surface leads with trust / governance / accountability** and monetizes the
-SAME moat for a different third-party-bearing buyer). The shared core = the evidence kernel (WORM +
-standalone verifier + per-source sequence/gap + outbox + commit-before-effect + append-only ingest) +
-the governance plane (deny-by-default policy, credential-blind redaction, AgentContext, tenant
-isolation) + the `ExecutionSubstrate` abstraction (OpenShell is substrate #1, not the product) + SDK.
-The three surfaces over it (each: buyer / pricing axis — never price/compute/convenience):
-- **Personal — Fiduciary-Grade Personal Agent** — local-first; integrates the practitioner's machine /
-  browser / email / calendar / files / terminal. Buyer = regulated/fiduciary solo or small-firm
-  professionals (lawyer / CPA / RIA / clinician) whose independent relying party (client / bar / court
-  / regulator / malpractice insurer) is mandated by law. Pricing axis = adversarial admissibility:
-  per-fiduciary-seat + per-matter WORM Evidence Pack + per-independent-verification event + carrier-
-  endorsed premium share. Honestly Tier-Brokered (Tier-SDK parts must be labelled forgeable-upstream).
-- **Enterprise — Agent Governance Plane** — multi-tenant (gateway-per-tenant) governance of fleets of
-  UNTRUSTED third-party agents. Buyer = the accountability/liability owner (CLO/CRO/CCO/Model-Risk/
-  Internal-Audit) co-funded by the customer CISO/TPRM. Pricing axis = compliance/liability/risk-transfer:
-  per-governed-third-party-agent + admissibility/assurance tier + per-evidence-pack issuance. The ACV
-  flagship; beachhead c3 Tenant-Sealed Fleet → c6 Agent Escrow.
-- **Developer — Governance-native runtime** — SDK + ExecutionSubstrate + observability + deploy:
-  "deploy your agent here; the evidence is signed by something you don't control." Buyer = platform-eng/
-  app-sec shipping agents into production, blocked by security review (relying party = their CISO /
-  customer TPRM / external auditor — NOT the developer). Pricing axis = per-attested-action + governance
-  seat; compute passed through at cost / BYOC, margin in the governance layer — NEVER $/vCPU-hr.
+**One core, three surfaces of the same computer — capability × experience first** (founder intent;
+governance is included as support, and NONE of the capability/experience ambition is removed). The
+shared core = the **capability engine** (Brain Port → intent→plan→tool-call stream, OpenShell execution,
+tool/skill ecosystem, workflow/memory) + the **experience layer** + the **supporting safety subsystem**
+(evidence kernel + PDP + credential-blind + the `ExecutionSubstrate` abstraction; OpenShell = substrate #1).
+The three surfaces differ only in shell:
+- **Personal — a computer that operates itself.** A non-technical person speaks/types intent and the
+  whole computer operates itself for them — no Windows/Mac/Office/networking skills, easier than a phone,
+  minimal learning cost. The computer disappears behind intent.
+- **Enterprise — one person runs the whole company.** A fleet of governed brains runs the org's
+  workflows: knows internal processes, rigorous workflows, disaster recovery, compliance, self-optimizes,
+  evolves, finds and fixes problems, cuts cost, reasons up opportunities, runs experiments.
+- **Developer — build and extend on it.** SDK + ToolManifest authoring + a signed skill/agent ecosystem
+  on OpenShell, so the computer keeps gaining abilities; everything routes through the same governed path.
+
+> Full product architecture, approach, phased plan, and the immediate P2 slices:
+> [`docs/design/three-surface-architecture.md`](./design/three-surface-architecture.md). Hard capabilities
+> (reliable arbitrary-app operation, long-horizon autonomy, learning an org, self-optimization) are an
+> engineering ROADMAP the architecture grows into — never a reason to narrow the product.
 
 **Guarantee Ladder (honest scoping — never let a weaker surface imply a stronger one's guarantee):**
 - **Tier-Hosted** — agent runs in an Agent-OS-managed ExecutionSubstrate (e.g. OpenShell): the full
@@ -61,30 +60,19 @@ The three surfaces over it (each: buyer / pricing axis — never price/compute/c
   OS in-path proxy: credential-blindness + maker-checker + commit-before-effect hold; attest-the-negative
   is bounded to brokered channels.
 - **Tier-SDK** — foreign-runtime self-report: a tamper-evident ledger of *what was reported*, explicitly
-  NOT proof-of-negative and forgeable upstream of the SDK. Sell it as exactly that.
+  NOT proof-of-negative and forgeable upstream of the SDK. Label it as exactly that (honest scoping).
 
-**Pricing discipline (binding):** per-attested-action / admissibility-tier pricing is honest ONLY on a
-tier with (a) an **externalized signing root** (customer-held KMS/HSM, or an external transparency log /
-eIDAS QTSP) AND (b) enforced isolation in force. Until the signing root is externalized, cap external
-claims + pricing at **"tamper-evident (post-hoc), separate-process — NOT separate-org"**; do not charge a
-"every action notarized by an independent third party" premium we cannot yet back.
+**Supporting-subsystem integrity invariant (NON-NEGOTIABLE — release-blocking, same tier as deny-by-default):**
+when the safety subsystem makes a trust claim, the standalone verifier MUST verify signature + chain + gap
+**offline, without the Agent OS backend, and without trusting the operator** (release-blocking conformance
+suite); any design that re-binds the attester to the operator (operator can rewrite the chain; verifier must
+trust our backend) is a ship-blocking failure. This keeps the seatbelt honest — it does NOT make governance
+the product, and it never gates the capability/experience work.
 
-**THE cross-surface moat guardrail (NON-NEGOTIABLE — release-blocking, same tier as deny-by-default):**
-The standalone verifier MUST verify signature + chain + gap **offline, without the Agent OS backend, and
-without trusting the operator**; this is a release-blocking conformance suite. **Any design that re-binds
-the attester to the operator** (operator admin can rewrite the chain; the signing root is held by us/the
-operator yet claimed independent; the verifier must trust our backend to verify) **is a critical,
-ship-blocking failure** — forbidden to ship, forbidden to price. It is the single common root of
-Personal's admissibility, Developer's per-attested-action pricing, and Enterprise's "independent third
-party"; violate it and all three collapse into a commodity audit-log / seat price war.
-
-> Business gates (non-engineering, do NOT block the build): **SF3** — before scaling evidence-grade GTM,
-> a design-partner's outside counsel / auditor / E&O underwriter confirms **in writing** that a signed,
-> independently-verifiable WORM bundle is preferred-and-admissible (a binary go/no-go, not advisory).
-> **SF6** — externalize the signing root (customer KMS/HSM or external transparency log / QTSP) before
-> charging per-attested-action / admissibility premiums. Beachhead motion: c3 Tenant-Sealed Fleet → c6.
-> Monetization sequencing: ship/sell **Enterprise c3 first** (its third party is mandated by law, why-now
-> is real); Personal + Developer ship as shared-core extensions, monetized after c3 scales.
+> Commercial / admissibility framing (business, NON-engineering, does NOT block the build and is NOT the
+> product identity) is tracked in [`docs/roadmap.md`](./roadmap.md) (Guarantee-Ladder pricing discipline,
+> SF3 admissibility, SF6 externalized signing root). The founder does not optimize for business; do not
+> let it re-center the product.
 
 Built as a **layer ABOVE NVIDIA OpenShell** (integration **strategy B**; we do **not** fork it):
 OpenShell is the kernel + security primitives (sandbox isolation, policy proxy, credential injection,
