@@ -173,26 +173,37 @@ Non-negotiable for every module, slice, and component:
   `pnpm run verify` (a dependency-boundary check), and coupling/cohesion is an explicit, blocking
   dimension of the adversarial code review every slice must pass.
 
-### Pluggable brain + execution substrate (HARD CONSTRAINT — founder, 2026-06-20)
+### Pluggable components — NO forced vendor combination (HARD CONSTRAINT — founder, 2026-06-20)
 
-**Both the brain (default Hermes) and the execution substrate (default OpenShell) MUST be pluggable —
-swappable for another tool. Neither may ever be hard-coupled into the core.** Non-negotiable:
+**EVERY external component is swappable; NONE may be hard-coupled into the core.** Agent OS is a
+high-flexibility, low-coupling/high-cohesion Agent OS. The combination
+`{ OpenShell (substrate) + Hermes (brain) + AGT-derived (policy/governance adapter) + SpendGuard (cost
+gate) }` is the **DEFAULT REFERENCE combination — NOT a mandated one.** Hermes is one brain among many,
+not the only agent framework. **Agent OS's identity = the OS + its ports + its contracts — never any
+vendor.** Each pluggable slot is a vendor-neutral port behind which a vendor lives as ONE adapter:
 
-- **Vendor-neutral ports.** The brain is reached ONLY through the **Brain Port** (typed
-  intent→plan→tool-call stream + memory/skill-mutation events); the substrate ONLY through the
-  **ExecutionSubstrate / SandboxAdapter** port. Core types, contracts, and module paths MUST NOT name
-  a vendor (no `hermes`/`openshell` in core or port names) — rename `src/runtime/openshell/` to a
-  vendor-neutral `src/runtime/substrate/` with `openshell/` as ONE adapter under it.
-- **Vendor importable only from its own adapter module.** Nothing outside `…/substrate/openshell/**`
-  may import the OpenShell client; nothing outside the Hermes brain-adapter/shim may import Hermes.
-  Enforced by `deps:check` (TS dependency-cruiser) + `import-linter` (Python shim) + depguard (Go) —
-  a vendor import from the core MUST fail `pnpm run verify`.
+| Slot | Port | Default adapter | Swappable for |
+|---|---|---|---|
+| Brain (agent framework) | Brain Port | Hermes | Claude Code / OpenClaw / Codex / custom |
+| Execution substrate | ExecutionSubstrate / SandboxAdapter | OpenShell | LocalProcess / other sandbox |
+| Policy / governance adapter | Policy Port | AGT-derived | our PDP / other policy engine |
+| Cost gate | CostGate Port | SpendGuard | other budget enforcer / none |
+
+Non-negotiable for EVERY slot above (and any future third-party tool):
+
+- **Vendor-neutral ports.** Core types, contracts, and module paths MUST NOT name a vendor (no
+  `hermes`/`openshell`/`agt`/`spendguard` in core or port names) — vendors live only under their adapter
+  module (e.g. `src/runtime/substrate/openshell/`, the brain adapter/shim, `src/policy/adapters/…`,
+  `src/cost/adapters/spendguard/`). The audit root (Go WORM kernel + offline verifier) is NOT a pluggable
+  slot — it is the OS itself and stays ours.
+- **Vendor importable only from its own adapter module.** A vendor import from the core MUST fail
+  `pnpm run verify` (TS dependency-cruiser `deps:check` + Python `import-linter` + Go depguard).
 - **Proven by a second implementation (not asserted).** Each port ships a vendor-neutral **contract
-  test** plus **≥2 implementations** (a real one + at least a fake/second adapter) that both pass it —
-  e.g. ExecutionSubstrate: `OpenShellSubstrate` + a `LocalProcess`/`Fake` substrate; Brain Port:
-  `HermesBrain` + a `Fake`/second brain. Flexibility is real only when a second impl exists.
-- **Swapping is a config/adapter change, never a core rewrite.** Selecting the brain or substrate is
-  configuration; the core, PDP, audit spine, and contracts are unchanged by the swap.
+  test** + **≥2 implementations** (real + a fake/second adapter) that both pass it — e.g.
+  `OpenShellSubstrate` + `Fake/LocalProcess`; `HermesBrain` + `FakeBrain`. Flexibility is real only when
+  a second impl exists.
+- **Swapping is a config/adapter change, never a core rewrite.** The core, PDP, audit spine, and
+  contracts are unchanged by swapping any brain / substrate / policy adapter / cost gate.
 - **Enforced + blocking** — a vendor leak into the core, a missing contract test, or a port with only
   one implementation is a blocking dimension of the per-slice adversarial review and must fail `verify`.
 
