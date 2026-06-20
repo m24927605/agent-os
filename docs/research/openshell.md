@@ -2,6 +2,31 @@
 
 > 本文件為 Staff+ 等級的研究與採用決策文件。所有結論以對 `/tmp/openshell`（OpenShell 原始碼）與 `/tmp/nemoclaw`（NemoClaw 參考棧）的實際檔案勘查為依據，並標注真實檔案路徑與行號。凡是經驗證為「refuted（推翻）」或「uncertain（不確定）」的發現，皆明確標示，不作粉飾。文中保留英文技術術語與程式識別符號。
 
+## ⚠️ 2026-06-20 Ground-truth 覆驗修正（以此區為準）
+
+> 後續 session 對真 clone（`github.com/NVIDIA/OpenShell.git`、`github.com/NVIDIA/NemoClaw.git`，已確認真實）做了一次對抗式覆驗。**裁決：本文 OpenShell 部分可信（12 條核心宣稱 10 條在真實行號 confirmed，連被要求懷疑的行號都對得上）；NemoClaw 部分曾有捏造，下列為修正。** 內文舊敘述若與本區衝突，以本區為準。
+
+**捏造／錯誤（已推翻）：**
+- ❌ 舊敘述把「Alpha software — single-player mode」當成 NemoClaw README 的話 → **錯**。該句只在 **OpenShell `README.md:7`**；NemoClaw `README.md:12` 是「reference stack for running always-on AI agents」。NemoClaw 的範圍限制在 `docs/reference/enterprise-readiness.mdx:19,100,102,131`。
+- ❌ 舊敘述引用的 `src/security/secret-scanner.ts`（NemoClaw）**不存在** → 真檔 `src/lib/security/secret-patterns.ts` + boundary tests `src/lib/agent/runtime-hermes-secret-boundary-*.test.ts`。
+- ❌ C11「非 CAS 寫入只在 `#[cfg(test)]`」→ **錯**。`WriteCondition::Unconditional` 是正式公開變體（`crates/openshell-server/src/persistence/mod.rs:96-102`）；CAS 為真且 type-enforced，但 production 業務邏輯允許 unconditional 寫入。
+
+**精確化（用語修正）：**
+- OpenShell 生命週期 RPC 是 **`CreateSandbox` / `DeleteSandbox` / `WatchSandbox`**（**無** Start/Stop RPC）；檔案存取走 **`ExecSandbox` + `ForwardTcp`/`ExposeService`**（**無**專用 file-sync RPC）。舊文「create/start/stop/destroy + file sync」作廢。
+- C5 auto-approve 閘 = 字串裁決 `validation_result == "prover: no new findings"`（`policy.rs:437,476,2409`）**且** `proposal_approval_mode == "auto"`（runtime 設定、gateway>sandbox scope、預設 manual，`policy.rs:861`）——不是「delta 為空 + create-spec 欄位」。
+- prover 進入點 `prove(policy, credential_set, binary_registry)`（`crates/openshell-prover/src/lib.rs:37`）；z3 是 workspace dep（`bundled-z3` feature）。
+
+**真實 ExecutionSubstrate port 契約（adapter 要驅動的——已逐一覆驗）：**
+- service `OpenShell`（`proto/openshell.proto:20`，tonic client over TLS）。
+- 生命週期：`CreateSandbox:25` / `GetSandbox:28` / `ListSandboxes:31` / `DeleteSandbox:46` / `WatchSandbox(stream):190`。
+- exec：`ExecSandbox(stream):67` / `ExecSandboxInteractive(bidi PTY):75`；轉發：`ForwardTcp:70` / `ExposeService:52-61`。
+- 反向控制：`ConnectSupervisor(stream):169`（supervisor 主動撥 gateway，永不回撥 sandbox）/ `RelayStream:182`；config pull：`GetSandboxConfig:129`/`UpdateConfig:137`。
+- **憑證非落地**：`GetSandboxProviderEnvironment:153` 發 placeholder `openshell:resolve:env:v<rev>_<KEY>`（`secrets.rs:9`、`placeholder_for_env_key_for_revision:487`）；真值只在 supervisor `SecretResolver`（`secrets.rs:87`），egress `rewrite_http_header_block:884` 注入 + fail-closed scan `:933` + CWE-113 `:501` + CWE-22 `:619`。
+- inference：service `Inference`，`GetInferenceBundle`→`ResolvedRoute{base_url,api_key,model_id}`（`proto/inference.proto:11-13,103-115`）。
+- policy draft/approval：`SubmitPolicyAnalysis:197`/`GetDraftPolicy:201`/`ApproveDraftChunk:204`/…（`openshell.proto:197-226`）。
+
+**NemoClaw 怎麼 host agent（餵 Brain Port，已覆驗）：** NemoClaw 是 **TypeScript 編排層/CLI**（非 runtime），驅動 OpenShell。它把 agent（預設 OpenClaw、可選 Hermes）**以長駐背景進程**起在 OpenShell sandbox 內（`nohup <gatewayCmd> >> $_GATEWAY_LOG 2>&1 &` + gosu 降權，`src/lib/agent/runtime.ts:143-147`）；「always-on」是長駐進程 + recovery script，非 runtime 機制。**它自己不實作憑證非落地**——完全委派給 OpenShell SecretResolver，只多加一層 secret regex 內容掃描。它**明確不做**：多租隔離、operator RBAC、fleet 管理、enterprise SSO（`enterprise-readiness.mdx:19,100,102,131`）——**這正是 Agent OS strategy B 要自建的縫隙**。Brain Port 沿用「TS 編排層 over gRPC 驅動 OpenShell + 長駐供 agent 進程」此架構先例，但**自建監督/重啟**取代 nohup+shell hack，並在 OpenShell SecretResolver 之上**自建 credential-blind 的多租 lease 層**。
+
 ---
 
 ## 1. 摘要 / TL;DR
