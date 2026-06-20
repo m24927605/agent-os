@@ -188,11 +188,22 @@ vendor.** Each pluggable slot is a vendor-neutral port behind which a vendor liv
 | Execution substrate | ExecutionSubstrate / SandboxAdapter | OpenShell | LocalProcess / other sandbox |
 | Policy / governance adapter | Policy Port | AGT-derived | our PDP / other policy engine |
 | Cost gate | CostGate Port | SpendGuard | other budget enforcer / none |
+| Agent hosting / bootstrap (Brain↔Substrate) | AgentHosting Port | NemoClaw-derived | our own spine / other launcher |
+
+> ⚠️ **NemoClaw is a DIFFERENT KIND of slot.** The four above are peripherals; NemoClaw is the
+> integration/hosting layer that launches the brain inside the substrate — which is partly what
+> `agent-os`'s own SPINE does. NemoClaw is NVIDIA's reference TS-orchestration-over-OpenShell stack
+> (drives OpenShell over gRPC, no fork; hosts OpenClaw/Hermes as a long-lived sandbox process;
+> delegates credential non-landing to OpenShell SecretResolver). We adopt it as the DEFAULT hosting
+> adapter + the wiring reference, BUT it **explicitly excludes multi-tenant isolation, operator RBAC,
+> fleet management, SSO** (assumes a single trusted operator) — so for ENTERPRISE we extend it / build
+> our own spine where its single-operator assumption fails; its missing governance IS our
+> differentiation. NemoClaw must not become a hard dependency the core cannot run without.
 
 **PRODUCT BUILD COMMITMENT (founder mandate, 2026-06-20):** the v1 product is built and shipped on
-EXACTLY this combination — Hermes + OpenShell + AGT + SpendGuard — and **ALL THREE surfaces (Personal /
-Enterprise / Developer) must be FULLY supported.** This is the committed concrete stack: these four are
-the implemented, wired, shipped DEFAULT ADAPTERS. It does NOT contradict pluggability: they live behind
+EXACTLY this combination — Hermes + OpenShell + NemoClaw + AGT + SpendGuard — and **ALL THREE surfaces
+(Personal / Enterprise / Developer) must be FULLY supported.** This is the committed concrete stack:
+these are the implemented, wired, shipped DEFAULT ADAPTERS. It does NOT contradict pluggability: they live behind
 the vendor-neutral ports above, so the invariant still holds (a future swap is a config/adapter change,
 the ports/contracts/audit-root are unchanged) — "must use this combination" means *this is what we
 build*, NOT *hard-wire and drop the ports*. (If a slot's vendor is ever dropped, the port + a fake impl
