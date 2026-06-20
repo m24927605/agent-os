@@ -55,6 +55,8 @@
 >
 > **時光旅行 Snapshot/Restore/Replay（2026-06-20，feasible-but-reframed）見** [`docs/design/time-travel-snapshot-replay.md`](./design/time-travel-snapshot-replay.md)。落點：**Forensic Replay（唯讀真相重建，零 kernel 改動）＝ P1.5（先做）**；Internal Live Rollback（forward-append RestoreEvent，**絕不截斷 log**；外部 effect 走 prevent/compensate/accept；brain memory 版本化；kernel snapshot-safe checkpoint RPC）＝ **P2**；跨系統一致性 ＝ P3；tamper-proof restore（customer KMS）＝ P4。
 >
+> **五件套整合架構（2026-06-21）見** [`docs/design/five-piece-integration.md`](./design/five-piece-integration.md)：承諾 v1 棧（Hermes+OpenShell+NemoClaw+AGT+SpendGuard）over agent-os CORE 的元件圖、5 個 vendor-neutral port、3 個重疊消解（PDP 唯一 deny／SecretResolver 唯一 credential／WORM 唯一證據根）、端到端 intent→effect 流、三 surface 覆蓋（Enterprise 多租＝最大缺口、100% 自建）、build sequence、6 個 RED-first slice（A 契約 harness→B dependency-cruiser 鎖可插拔→C commit-before-effect 接線→D Brain Port→E dedup policy→F tenant-scoped）。**兩個 BLOCKING：dedup#1 無測試、commit-before-effect 尚未接進 TS adapter 路徑。**
+>
 > **誠實殘餘風險（founder 親自承擔）**：Microsoft 開源 Agent Governance Toolkit（2026-04，含 Merkle audit + 合規
 > mapping）已把「治理證據即 artifact」做成免費勾選項——唯一倖存差異是「外部化簽章 root + operator-independent
 > 離線 verifier」，時間差約 6–18 個月（非結構性永久護城河）。**SF6（root 外部化）是存活前提**：Tier-Hosted 下若簽章
