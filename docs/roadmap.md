@@ -53,6 +53,8 @@
 >
 > **外部工具決策（2026-06-20，對真 clone 對抗式評估）**：SpendGuard（founder repo）＝成本閘元件的具體實作（adapt-integrate，PDP 先跑、坐 inference.local 內側、audit 餵 WORM kernel、補 fail-closed estimation gate）；Microsoft AGT ＝ vendor-neutral policy port 的一個 adapter 來源 + framework adapters（adopt-partial，**audit 不用它**——過不了離線 verifier 鐵律）。詳見架構文件「外部工具決策」區。
 >
+> **時光旅行 Snapshot/Restore/Replay（2026-06-20，feasible-but-reframed）見** [`docs/design/time-travel-snapshot-replay.md`](./design/time-travel-snapshot-replay.md)。落點：**Forensic Replay（唯讀真相重建，零 kernel 改動）＝ P1.5（先做）**；Internal Live Rollback（forward-append RestoreEvent，**絕不截斷 log**；外部 effect 走 prevent/compensate/accept；brain memory 版本化；kernel snapshot-safe checkpoint RPC）＝ **P2**；跨系統一致性 ＝ P3；tamper-proof restore（customer KMS）＝ P4。
+>
 > **誠實殘餘風險（founder 親自承擔）**：Microsoft 開源 Agent Governance Toolkit（2026-04，含 Merkle audit + 合規
 > mapping）已把「治理證據即 artifact」做成免費勾選項——唯一倖存差異是「外部化簽章 root + operator-independent
 > 離線 verifier」，時間差約 6–18 個月（非結構性永久護城河）。**SF6（root 外部化）是存活前提**：Tier-Hosted 下若簽章
