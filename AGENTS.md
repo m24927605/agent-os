@@ -189,6 +189,21 @@ vendor.** Each pluggable slot is a vendor-neutral port behind which a vendor liv
 | Policy / governance adapter | Policy Port | AGT-derived | our PDP / other policy engine |
 | Cost gate | CostGate Port | SpendGuard | other budget enforcer / none |
 
+**PRODUCT BUILD COMMITMENT (founder mandate, 2026-06-20):** the v1 product is built and shipped on
+EXACTLY this combination — Hermes + OpenShell + AGT + SpendGuard — and **ALL THREE surfaces (Personal /
+Enterprise / Developer) must be FULLY supported.** This is the committed concrete stack: these four are
+the implemented, wired, shipped DEFAULT ADAPTERS. It does NOT contradict pluggability: they live behind
+the vendor-neutral ports above, so the invariant still holds (a future swap is a config/adapter change,
+the ports/contracts/audit-root are unchanged) — "must use this combination" means *this is what we
+build*, NOT *hard-wire and drop the ports*. (If a slot's vendor is ever dropped, the port + a fake impl
+remain so the constraint above is still command-verifiable.) Honest scope note: fixing the stack fixes
+the INPUTS; it does NOT by itself deliver full three-surface support — the defining top-layer of each
+surface is still NEW Agent OS build (Personal zero-skill shell; Enterprise multi-tenant + the durable
+operator-independent WORM audit root; Developer governance-native SDK), the four overlapping
+policy/credential/audit models must be deduped into one path (PDP-only deny authority, OpenShell
+SecretResolver-only credential model, WORM-kernel-only evidence root), and the hardest capabilities stay
+a capability roadmap the architecture grows into — never silently descoped.
+
 Non-negotiable for EVERY slot above (and any future third-party tool):
 
 - **Vendor-neutral ports.** Core types, contracts, and module paths MUST NOT name a vendor (no
