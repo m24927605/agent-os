@@ -173,6 +173,29 @@ Non-negotiable for every module, slice, and component:
   `pnpm run verify` (a dependency-boundary check), and coupling/cohesion is an explicit, blocking
   dimension of the adversarial code review every slice must pass.
 
+### Pluggable brain + execution substrate (HARD CONSTRAINT — founder, 2026-06-20)
+
+**Both the brain (default Hermes) and the execution substrate (default OpenShell) MUST be pluggable —
+swappable for another tool. Neither may ever be hard-coupled into the core.** Non-negotiable:
+
+- **Vendor-neutral ports.** The brain is reached ONLY through the **Brain Port** (typed
+  intent→plan→tool-call stream + memory/skill-mutation events); the substrate ONLY through the
+  **ExecutionSubstrate / SandboxAdapter** port. Core types, contracts, and module paths MUST NOT name
+  a vendor (no `hermes`/`openshell` in core or port names) — rename `src/runtime/openshell/` to a
+  vendor-neutral `src/runtime/substrate/` with `openshell/` as ONE adapter under it.
+- **Vendor importable only from its own adapter module.** Nothing outside `…/substrate/openshell/**`
+  may import the OpenShell client; nothing outside the Hermes brain-adapter/shim may import Hermes.
+  Enforced by `deps:check` (TS dependency-cruiser) + `import-linter` (Python shim) + depguard (Go) —
+  a vendor import from the core MUST fail `pnpm run verify`.
+- **Proven by a second implementation (not asserted).** Each port ships a vendor-neutral **contract
+  test** plus **≥2 implementations** (a real one + at least a fake/second adapter) that both pass it —
+  e.g. ExecutionSubstrate: `OpenShellSubstrate` + a `LocalProcess`/`Fake` substrate; Brain Port:
+  `HermesBrain` + a `Fake`/second brain. Flexibility is real only when a second impl exists.
+- **Swapping is a config/adapter change, never a core rewrite.** Selecting the brain or substrate is
+  configuration; the core, PDP, audit spine, and contracts are unchanged by the swap.
+- **Enforced + blocking** — a vendor leak into the core, a missing contract test, or a port with only
+  one implementation is a blocking dimension of the per-slice adversarial review and must fail `verify`.
+
 ## Definition of Done (apply to every task)
 
 - [ ] **Test-first**: a failing test existed before the implementation.
@@ -182,6 +205,9 @@ Non-negotiable for every module, slice, and component:
 - [ ] Docs updated if behavior/commands/policies changed.
 - [ ] **Low coupling / high cohesion**: no new cross-module or cyclic dependency; the touched module
   is reached only via its public surface (dependency-boundary check green).
+- [ ] **Pluggable brain + substrate**: any code touching the brain or execution substrate goes through
+  the vendor-neutral port; no vendor (`hermes`/`openshell`) imported outside its adapter module; if a
+  port is touched, its contract test + ≥2 implementations stay green (swap = config, not rewrite).
 - [ ] **Adversarial code review = PASS** for the slice (a fresh-context reviewer tried to break it;
   findings resolved) — required before merge.
 - [ ] Stage review gate run where applicable. **Never claim done without command proof.**

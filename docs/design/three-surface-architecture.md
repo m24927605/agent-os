@@ -39,6 +39,16 @@
 
 **誠實分工**：腦負責**推理品質/意圖理解/規劃/技能內容**（吃模型）；Agent OS 負責讓那輸出**可靠且完整**的底座——orchestration/resume、tool registry、credential leasing、sandbox 生命週期、體驗殼、以及證據/undo 子系統。Hermes 弱的地方（崩潰冪等的多小時執行、任意 GUI 可靠度）＝**底座要解的工程問題**，不是縮腦的理由。
 
+## 可插拔是硬性約束（腦與身體都必須能換，AGENTS.md 已鎖）
+**Hermes（腦）與 OpenShell（身體）都只是「預設值」，兩者都必須能抽換成其他工具。** 強制方式：
+- **vendor-neutral port**：腦只經 **Brain Port**、身體只經 **ExecutionSubstrate port**；核心型別/契約/路徑**不得出現廠商名**——`src/runtime/openshell/` 改名 `src/runtime/substrate/`，`openshell/` 只是其下**一個 adapter**；Hermes 同理只活在它的 brain-adapter/shim。
+- **廠商只能從自己的 adapter import**：核心以外任何地方 import OpenShell client 或 Hermes ＝ `pnpm run verify` 失敗（TS dependency-cruiser + Python import-linter + Go depguard）。
+- **用第二個實作證明、不靠宣稱**：每個 port 附 vendor-neutral **contract test** + **≥2 個實作**（真實 + fake/第二 adapter）都要通過——ExecutionSubstrate：`OpenShellSubstrate` + `LocalProcess/Fake`；Brain Port：`HermesBrain` + `Fake/第二腦`。**彈性只有第二個實作存在才算數。**
+- **換 = 改 config，不是重架構**：核心/PDP/audit spine/契約不因換腦或換身體而變。
+- 違反（核心洩廠商名、缺 contract test、port 只有一個實作）＝對抗式 review 的阻斷維度、且 `verify` 紅。
+
+> 目前狀態（誠實）：Brain Port **尚未建**（P2）；ExecutionSubstrate port **已存在但只有 NullSandboxAdapter、且路徑帶 openshell 廠商名**——P2 要 (a) 改名 substrate/、(b) 補 contract test、(c) 加第二實作（OpenShell + Fake/LocalProcess、Hermes + Fake）才算滿足此硬性約束。
+
 ## 各面作法
 - **個人（一台自己操作的電腦）**：host Hermes 當預設腦、套零技能殼。**先建順序校正**（現 repo 把 UI 排最後是錯的）：**IntentGateway → ApprovalInbox → TaskTimeline 是前門、不是裝飾**——沒有它們就沒有閉環。P2 MVP 跑**模板化 + tool-based** workflow（email/檔案/行事曆/搜尋/文件/瀏覽器，腦在已知模式內帶參數），未知 workflow → fail-closed 白話「我還不會做這個」。任何裝置入口重用 Hermes gateway。能力靠**改進腦 + 擴模板/技能 + 對低風險動作降低審批摩擦**成長——不是靠藏難處。任意 GUI 自動化在 roadmap（Hermes computer_use 已在，可靠度是工程目標），非永久排除。
 - **企業（一個人開公司）**：同一引擎、多 agent + 多租。一群腦（Hermes 實例 + 第三方）跑已知 org workflow，orchestration 在 approval/budget 邊界**序列化跨 agent 副作用**。gateway-per-tenant（進程/namespace 邊界、per-tenant Postgres、per-tenant-keyed kernel partition）使跨租存取**結構性不可能**（release-blocking conformance）。operator console＝一個畫面開公司（fleet、live timeline、per-agent 成本/預算、policy 決策、evidence 匯出）。自我優化（找/修問題、降本、跑實驗）由 Hermes curator/insights + 排程 + budget ledger 提供，**每個提議的 policy/workflow 變更人工把關到模型成熟降低門檻**。「取代所有員工」是架構**沿 workflow-library 覆蓋 + 已知形狀的確定性執行**長進去的軌跡——誠實分段、志向不縮。
