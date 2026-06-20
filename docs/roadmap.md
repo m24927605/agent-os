@@ -48,6 +48,9 @@
 > log / eIDAS QTSP）；未外部化前對外措辭與定價封頂在「tamper-evident(post-hoc)、separate-process 非 separate-org」。
 > beachhead motion：c3 Tenant-Sealed Fleet → c6 Agent Escrow。權威定位見 [`AGENTS.md`](../AGENTS.md) north star。
 >
+> **三 surface 完整產品的端到端架構 / 作法 / 分階段規劃 / 下一步 slice（P2 c24 為 NEXT）見**
+> [`docs/design/three-surface-architecture.md`](./design/three-surface-architecture.md)（2026-06-20，Staff+ 團隊讀真實 repo 產出）。
+>
 > **誠實殘餘風險（founder 親自承擔）**：Microsoft 開源 Agent Governance Toolkit（2026-04，含 Merkle audit + 合規
 > mapping）已把「治理證據即 artifact」做成免費勾選項——唯一倖存差異是「外部化簽章 root + operator-independent
 > 離線 verifier」，時間差約 6–18 個月（非結構性永久護城河）。**SF6（root 外部化）是存活前提**：Tier-Hosted 下若簽章
