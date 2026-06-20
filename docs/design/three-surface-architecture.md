@@ -49,6 +49,19 @@
 
 > 目前狀態（誠實）：Brain Port **尚未建**（P2）；ExecutionSubstrate port **已存在但只有 NullSandboxAdapter、且路徑帶 openshell 廠商名**——P2 要 (a) 改名 substrate/、(b) 補 contract test、(c) 加第二實作（OpenShell + Fake/LocalProcess、Hermes + Fake）才算滿足此硬性約束。
 
+## 外部工具決策：SpendGuard（成本閘實作）與 AGT（policy adapter 來源）
+> 2026-06-20 對真 clone 做對抗式評估後定案。**共通結論:兩者的 audit 都過不了 attester≠actor／離線 verifier 鐵律 → 借它們成熟的功能層,但 audit root 永遠留在我們的 Go WORM kernel;兩者都藏在 vendor-neutral port 後(符合可插拔硬性約束)。** 這反證:我們已建的 WORM kernel + 離線 verifier,正是連 Microsoft AGT 與一個成熟 cost-firewall 都沒有的那塊。
+
+**SpendGuard（你的 repo）＝ 能力引擎「budget/blast-radius ledger + inference gate」的具體實作（adapt-integrate，非 adopt-as-is）。**
+- 重用:Rust ledger + reserve/capture(Stripe auth/capture)、**fail-closed hard cap**(`migrations/0063` `RAISE BUDGET_EXHAUSTED` under FOR UPDATE 鎖)、credential-blind(`RedactedAuth`,單一 `forward.rs:692` expose_secret)。
+- 被 adapter 降為受控 enforcer:① **PDP 先跑**(唯一 deny 權威)→ allow 才呼叫 SpendGuard;any-deny-wins 合併成單一 AuditEvent。② 坐在 OpenShell `inference.local` **內側**,只看注入後 header——**不用它 client-holds-key(L0-L2)模型**。③ cost decision 餵進 WORM kernel 當 untrusted transport,kernel 用獨立 root 重新 hash-chain + 重簽;SpendGuard 自己的 audit_outbox 留作 billing/operational。
+- **必補 gap**:audit 無 hash-chaining(prev_hash/merkle/tessera 全空)→ 不可當證據脊椎;KMS 簽章(已是真 AWS KMS、非 stub)root 仍 operator 控制;**estimation predictor-down 時 fail-OPEN**(`decision.rs:560-568`)→ 加 predictor-down/低信心 → deny/require-approval 二級 gate;commit-before-effect 順序 ledger 不強制 → 需不可繞過 egress chokepoint;tenant 由 header 帶(process-trusted)→ admission 邊界 immutable 綁定;fencing lease ↔ task/session 映射。
+
+**AGT（Microsoft）＝ vendor-neutral policy port 的「一個」adapter 來源 + framework adapters（adopt-partial）。**
+- 重用:policy 層 deny-by-default/fail-closed/commit-before-effect(`govern.py:239-298`)、24+ framework adapters(LangChain/CrewAI/AutoGen/OpenAI/MCP)、compliance mapping(SOC2/HIPAA/GDPR/EU AI Act)。
+- **不用它的 audit**:baseline 是 plain SHA-256 無簽(`audit.py:190`,`ADR-0017:41` 自承無法防 chain replacement);TRACE v0.1 default-off、per-session digest、金鑰由 operator env 載入、無 standalone verifier → attester==operator。audit 一律回我們 kernel。
+- ⚠️ **陷阱**:AGT 載入 0 policy 預設 **allow(ungoverned)**→ 初始化必須強制 deny-all fallback。若日後 TRACE Phase 2(TEE-bound key + 強制簽 + standalone verifier)落地,再重評 audit 那關。
+
 ## 各面作法
 - **個人（一台自己操作的電腦）**：host Hermes 當預設腦、套零技能殼。**先建順序校正**（現 repo 把 UI 排最後是錯的）：**IntentGateway → ApprovalInbox → TaskTimeline 是前門、不是裝飾**——沒有它們就沒有閉環。P2 MVP 跑**模板化 + tool-based** workflow（email/檔案/行事曆/搜尋/文件/瀏覽器，腦在已知模式內帶參數），未知 workflow → fail-closed 白話「我還不會做這個」。任何裝置入口重用 Hermes gateway。能力靠**改進腦 + 擴模板/技能 + 對低風險動作降低審批摩擦**成長——不是靠藏難處。任意 GUI 自動化在 roadmap（Hermes computer_use 已在，可靠度是工程目標），非永久排除。
 - **企業（一個人開公司）**：同一引擎、多 agent + 多租。一群腦（Hermes 實例 + 第三方）跑已知 org workflow，orchestration 在 approval/budget 邊界**序列化跨 agent 副作用**。gateway-per-tenant（進程/namespace 邊界、per-tenant Postgres、per-tenant-keyed kernel partition）使跨租存取**結構性不可能**（release-blocking conformance）。operator console＝一個畫面開公司（fleet、live timeline、per-agent 成本/預算、policy 決策、evidence 匯出）。自我優化（找/修問題、降本、跑實驗）由 Hermes curator/insights + 排程 + budget ledger 提供，**每個提議的 policy/workflow 變更人工把關到模型成熟降低門檻**。「取代所有員工」是架構**沿 workflow-library 覆蓋 + 已知形狀的確定性執行**長進去的軌跡——誠實分段、志向不縮。
