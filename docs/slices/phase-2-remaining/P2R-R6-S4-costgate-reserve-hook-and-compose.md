@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r6-s4-costgate-hook-and-compose
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~200、files <~4（`src/inference/cost-map.ts` + `src/inference/gate.ts` + `src/inference/gate.test.ts` + `src/inference/index.ts` barrel）、modules ≤ 2（消費 cost + 自身）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R6-S4 — 新增 `cost-map`（`model → estimatedTokens`，未知 model→無估算=deny）+ `InferenceRoutingGate.authorize()`，把四道關卡（model allowlist → egress allowlist → PDP → CostGate `reserve`）組合成**單一 chokepoint**，**any-deny-wins**；只有全 allow 才呼叫 CostGate `reserve` 並回 `{ decision:"allow", reservationId }`。
@@ -57,26 +57,39 @@ SLICE-P2R-R6-S4 — 新增 `cost-map`（`model → estimatedTokens`，未知 mod
   - [ ] **fail-closed**：malformed `InferenceRequest` → deny，永不 allow、永不呼叫 reserve；任一步 throw → deny。
   - [ ] **credential-blind**：`InferenceDecision` 與 gate 介面不接收/不回傳 api_key/secret；`gate.ts` source 不含 credential 欄位名。
   - [ ] reason 不洩值：deny reason 標明被哪一關擋（關卡名）+ 靜態文字，不回顯整個請求/不含 secret。
-- 首次紅燈證據（待實作時貼 exit≠0）:
+- 首次紅燈證據（實作前 import 失敗）:
   ```
   $ pnpm test src/inference/gate.test.ts
-  ... FAIL（Cannot find module './gate.js'）...
-  exit code: <填入>
+  FAIL  src/inference/gate.test.ts [ Cannot find module './gate.js' / './cost-map.js' ]
+  exit code: 1
   ```
+  （實作後同檔轉綠，見 §6 證據：`vitest run src/inference/gate.test.ts` → 17 passed, exit 0）
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；實作後同檔 17 tests 全綠）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填入>
+  # typecheck && lint && build && test && deps:check && proto:check && openshell:proto:check && verify:go && verify:py && secret-scan
+  ... secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`inference → {policy,cost}` 皆經 barrel、inward、無 cycle、無 deep import；`inference` 在 core from-list）
-- [ ] low coupling / high cohesion 遵守（CostGate / evaluate 皆注入；無 vendor；無新跨 module 之外的依賴）
-- [ ] secret-scan 乾淨（含 credential-blind 結構斷言）
-- [ ] Docs 更新（連結回 design §2.2/§4.2/§4.4；INDEX.md R6 標 READY-TO-BUILD）
-- [ ] Adversarial code review = PASS（fresh-context；any-deny-wins 在四關任一位置、never-reserve-on-deny（reserve spy）、PDP 唯一權威、hard-cap、malformed/throw fail-closed、credential-blind 皆對抗探測；≥3 種 mutation（移除某關 / reserve 在 deny 後仍呼叫 / allow 路徑漏 reserve 失敗）皆被測試抓）— 連結/摘要: <填入>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（four-gate any-deny-wins、no-orphan-hold、reserve-before-effect、fail-closed、credential-blind）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`inference → {policy,cost}` 皆經 barrel、inward、無 cycle、無 deep import；`inference` 在 core from-list）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (76 modules, 170 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（CostGate / evaluate 皆注入；無 vendor；無新跨 module 之外的依賴；新增依賴 = 0，package.json 未變）
+- [x] secret-scan 乾淨（含 credential-blind 結構斷言）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（連結回 design §2.2/§4.2/§4.4；INDEX.md R6 標 S4 DONE）
+- [x] Adversarial code review = PASS（fresh-context、非作者、Opus 4.8；any-deny-wins 在四關任一位置、never-reserve-on-deny（reserve spy 0 次）、PDP 唯一權威、hard-cap、malformed/throw fail-closed、credential-blind 皆對抗探測；mutation 皆被測試抓）— 摘要: 獨立審查 PASS，slice R6-S4 通過後交付 INTEGRATOR 合併。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（four-gate any-deny-wins、no-orphan-hold、reserve-before-effect、fail-closed、credential-blind）— 由獨立審查 confirm（`pnpm run verify` exit 0 重跑 PASS）。
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `cost-map.ts` + `gate.ts` + barrel 兩行）。
