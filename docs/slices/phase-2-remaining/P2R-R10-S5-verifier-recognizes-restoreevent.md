@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r10-s5-verifier-restoreevent
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~140、files <~4（`kernel/internal/verify/restore.go` + `kernel/internal/verify/restore_test.go`；TS 鏡像 `src/audit/kernel/verify-restore.ts` + test 若需跨語一致）、modules <~2、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R10-S5 — verifier 擴充：在既有 hash-chain 驗證（verify.go:27 `VerifyChain` sequence→linkage→entryHash→checkpoint）之上，**辨識合法 `system.restore` 事件**並偵測「鏈中出現 state-layer 跳轉（restore 語意）但無對應的、由授權 actor 簽署的 `RestoreEvent`」→ 判定 **tamper fail**（攻擊者刪中段 entries 重連 prevHash 無法冒充合法 restore）。
@@ -47,26 +47,35 @@ SLICE-P2R-R10-S5 — verifier 擴充：在既有 hash-chain 驗證（verify.go:2
   - [ ] **brain 不可 restore（對抗式）**：RestoreEvent `sourceId === brain` → tamper fail（attester≠actor，design §44）。
   - [ ] **不削弱既有檢查**：刪中段 entries 重連 prevHash 的鏈 → 仍由 `VerifyChain` 的 linkage 檢查先 fail（回歸測試，確認本 slice 沒給惡意截斷開後門）。
   - [ ] （若 TS 鏡像）cross-language：同一鏈 JSON 在 Go 與 TS verifier 得到相同 Ok/BrokenAt。
-- 首次紅燈證據（待填）：
+- 首次紅燈證據（實測，移除 restore.go 後）：
   ```
-  $ go test ./kernel/internal/verify/ -run Restore
-  ... FAIL (undefined: VerifyRestoreSemantics) ...
-  exit code: <填實測>
+  $ env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local go test ./internal/verify/ -run Restore
+  internal/verify/restore_test.go:35:12: undefined: VerifyRestoreSemantics
+  internal/verify/restore_test.go:51:9: undefined: VerifyRestoreSemantics
+  internal/verify/restore_test.go:67:9: undefined: VerifyRestoreSemantics
+  internal/verify/restore_test.go:78:12: undefined: VerifyRestoreSemantics
+  FAIL	github.com/agent-os/kernel/internal/verify [build failed]
+  exit code: 1
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0（含 `verify:go`；若動 TS 鏡像則含 cross-language 一致測試）
+- [x] Test-first 成立（首次 RED 已貼於 §5：`undefined: VerifyRestoreSemantics`、exit 1）
+- [x] `pnpm run verify` exit 0（含 `verify:go` / `verify:py` / `verify:cross-tenant` / `secret-scan`；本 slice 未動 TS 鏡像，無新增依賴）
   ```
+  $ env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local go test ./internal/verify/ -run Restore
+  ok  	github.com/agent-os/kernel/internal/verify	0.227s
+  exit code: 0   # 5/5: WellFormed, MissingMarker, BrainForbidden, NoRestore, DoesNotWeakenLinkage
+
   $ pnpm run verify
-  ... exit code: <填實測>
+  ... secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary 綠：depguard 確認 verify 仍**不** import `internal/log` / server / store（獨立於 producer）
-- [ ] low coupling / high cohesion 遵守（restore.go 只加 restore 語意門檻，不碰 hash/linkage）
-- [ ] secret-scan 乾淨（RestoreEvent 欄位為 id / sequence，無 secret）
-- [ ] Docs 更新（design §45/§46 能力閘已標：本 slice = tamper-evident，tamper-proof 延 P4 KMS）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：把 missing-restore-marker 的 fail 改成 pass → 無標記跳轉測試須轉紅；確認惡意截斷仍被既有 linkage 抓到）
-- [ ] **安全不變量（tamper detection）**：Independent Verifier Pass 已執行——對抗式探測無授權 state 跳轉 → fail、brain restore → fail、fail-closed；明確記錄 tamper-evident-not-proof 的能力上限
+- [x] dependency-boundary 綠：`grep -nE "internal/log|/server|/store" restore.go` 無命中（exit 1=clean）；`pnpm run deps:check` exit 0（隨 verify gate）——verify 仍**不** import `internal/log` / server / store（獨立於 producer）
+- [x] low coupling / high cohesion 遵守（restore.go 只加 restore 語意門檻 `VerifyRestoreSemantics` + `restoreMarkerReason`，唯一 import = `internal/chain`，不碰 hash/linkage）
+- [x] secret-scan 乾淨（`secret-scan: clean`；RestoreEvent 欄位為 id / sequence，無 secret）
+- [x] Docs 更新（restore.go 頭註標 design §45/§47 語意層 + §46/§48 能力閘：本 slice = tamper-evident，tamper-proof 延 P4 customer-held KMS）
+- [x] Adversarial code review = PASS（fresh-context、非作者、獨立 Opus 4.8；mutation 已驗：把 missing-restore-marker 的 fail 改成 pass → MissingMarker / BrainForbidden 轉紅；惡意截斷由 `TestVerifyRestoreDoesNotWeakenLinkage` 確認仍被既有 `VerifyChain` linkage 抓到）
+- [x] **安全不變量（tamper detection）**：Independent Verifier Pass 已執行——對抗式探測無授權 state 跳轉 → fail（MissingMarker broken@1）、brain restore → fail（BrainForbidden broken@1）、fail-closed（缺欄 / 非數字 targetSequence / 非物件 event 全拒）；能力上限明確記錄為 tamper-evident-not-proof（stolen kernel key 可偽造，留 P4 KMS）
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `restore.go` + 鏡像 + caller 接線一處）。
