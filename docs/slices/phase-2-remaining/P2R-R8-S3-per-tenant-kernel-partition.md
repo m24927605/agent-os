@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r8-s3-per-tenant-kernel-partition
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；net LOC <~240、files <~3（`kernel/internal/partition/partition.go` + `partition_test.go` + 既有 conformance/test 引用）、主模組 = 1（`internal/partition`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R8-S3 — Go kernel 的 `PartitionedIngest`：**每租一條 `SignedChain`（獨立 `head`）+ 每租一把 Ed25519 key**，使跨租 entry 不互纏、別租 key 驗不過——把租戶隔離下沉為**密碼學分區**，而非 `SourceID` row 分租。
@@ -61,15 +61,35 @@ SLICE-P2R-R8-S3 — Go kernel 的 `PartitionedIngest`：**每租一條 `SignedCh
   exit status 1
   ```
 
-## (6) Definition of Done（每條附指令證據；待實作覆蓋）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0（含 `verify:go`；kernel 測試全綠）
-- [ ] `cd kernel && golangci-lint run`（含 depguard）綠：`internal/partition` 無反向 import、無新外部依賴
-- [ ] low coupling / high cohesion：partition 只包裝既有原語，未改 canonical/chain/verify 演算法
-- [ ] secret-scan 乾淨：per-tenant private key **絕不**落 source/log/fixture/testdata（測試 key 為 runtime `GenerateKey` 組裝，沿用 `conformance` 既有做法）
-- [ ] Docs 更新（design §2.4；本 slice）
-- [ ] Adversarial code review = PASS（fresh-context；嘗試用一把 key 為任一租簽章 / 跨租改鏈頭皆失敗）
-- [ ] **Independent Verifier Pass**（跨租密碼學隔離 + fail-closed + commit-before-effect + audit 完整性；mutation：共用 head / 共用 key 必被抓）
+## (6) Definition of Done（每條附指令證據）
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0（含 `verify:go`；kernel 測試全綠）
+  ```
+  $ pnpm run verify
+  verify:go: ok   (internal/partition ok)   secret-scan: clean
+  VERIFY_EXIT=0
+  ```
+- [x] `cd kernel && golangci-lint run`（含 depguard）綠：`internal/partition` 無反向 import、無新外部依賴
+  ```
+  $ cd kernel && golangci-lint run
+  LINT_EXIT=0
+  ```
+- [x] low coupling / high cohesion：partition 只包裝既有原語，未改 canonical/chain/verify 演算法（diff 僅新增 `internal/partition/{partition.go,partition_test.go}`，未碰 server/proto/cmd/kernel）
+- [x] secret-scan 乾淨：per-tenant private key **絕不**落 source/log/fixture/testdata（測試 key 為 runtime `GenerateKey` 組裝，沿用 `conformance` 既有做法）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean   (exit 0)
+  ```
+- [x] Docs 更新（design §2.4；本 slice）
+- [x] Adversarial code review = PASS（fresh-context；嘗試用一把 key 為任一租簽章 / 跨租改鏈頭皆失敗）
+- [x] **Independent Verifier Pass**（跨租密碼學隔離 + fail-closed + commit-before-effect + audit 完整性；mutation：共用 head / 共用 key 必被抓）
+
+### Partition Go test 證據（待實作填 → 已填）
+```
+$ (cd kernel && go test ./internal/partition/)
+ok  	github.com/agent-os/kernel/internal/partition
+PTEST_EXIT=0
+```
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `internal/partition`；因本 slice 未碰 `internal/server`/`cmd/kernel`，回退**零影響**於 live ingest 路徑）。
