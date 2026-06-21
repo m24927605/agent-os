@@ -14,6 +14,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLANE="${VERIFY_GO_PLANE:-$ROOT/kernel}"
 
+# Self-defend the Go leg against a stale host GOROOT / toolchain-version skew (mirror verify:go's
+# invocation contract) so a DIRECT `bash scripts/verify-cross-tenant.sh` — e.g. from CI or an
+# independent verifier — does not FALSE-FAIL on a GOROOT-vs-PATH-`go` mismatch and misreport it as a
+# kernel partition leak. The pnpm `verify:cross-tenant` wrapper already sets these; make the script robust on its own.
+export GOTOOLCHAIN=local
+export CGO_ENABLED=0
+unset GOROOT
+
 echo "verify:cross-tenant: TS plane — cross-tenant.conformance"
 ( cd "$ROOT" && node_modules/.bin/vitest run src/tenant/conformance ) ||
   { echo "verify:cross-tenant: FAIL — TS cross-tenant conformance failed (a TS boundary leaked)" >&2; exit 1; }
