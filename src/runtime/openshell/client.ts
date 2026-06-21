@@ -274,6 +274,53 @@ export interface OpenShellExecTransport extends OpenShellLifecycleTransport {
   execSandbox(req: ExecSandboxRequest, signal?: AbortSignal): AsyncIterable<ExecSandboxEvent>;
 }
 
+// --- S5 provider-env wire shapes (TS face of the pinned proto subset) -------------------------------
+//
+// These mirror the upstream `openshell.v1` GetSandboxProviderEnvironment messages S5 consumes
+// (openshell.proto:153 RPC; response at proto:1141-1152). Like S2/S3/S4 they are intentionally
+// PARTIAL: only `environment` + `provider_env_revision` are typed. `credential_expires_at_ms`
+// (proto:1147) and `dynamic_credentials` (proto:1151) are OUT OF SCOPE (spec §3 — left to R4
+// CredentialLease) and deliberately absent. The adapter treats `environment` defensively: every value
+// MUST pass the placeholder-only shape guard (provider-env.ts) before it is carried — a raw value is
+// fail-closed (denied, never persisted), because OpenShell's SecretResolver places ONLY placeholders
+// here (design §2.3, INFERRED) and a raw value would mean the backend misbehaved.
+
+/** `GetSandboxProviderEnvironmentRequest` subset — keyed by the canonical sandbox `name`. */
+export interface GetSandboxProviderEnvironmentRequest {
+  readonly name: string;
+}
+
+/**
+ * `GetSandboxProviderEnvironmentResponse` subset (openshell.proto:1141-1152). `environment` carries
+ * placeholder-bearing values ONLY (design §2.3); `providerEnvRevision` is a `uint64` (decoded as a
+ * `bigint` by the connect-node runtime) — a non-secret counter the adapter passes through as a
+ * decimal string. `credential_expires_at_ms` / `dynamic_credentials` are out of scope and not typed.
+ */
+export interface GetSandboxProviderEnvironmentResponse {
+  readonly environment?: Readonly<Record<string, string>>;
+  readonly providerEnvRevision?: bigint | number;
+}
+
+/**
+ * Transport seam extended with the S5 provider-env primitive: a one-shot `getSandboxProviderEnvironment`
+ * unary. The adapter consumes ONLY this vendor-neutral seam; production wires the connect-node-backed
+ * implementation (the real `GetSandboxProviderEnvironment` descriptor, by S6 / the opt-in e2e) while
+ * tests inject an in-process double — mirroring how S2..S4 are exercised offline.
+ *
+ * It extends `OpenShellLifecycleTransport` (NOT the S3/S4 seams): S5 depends only on S1's client +
+ * S2's name<->id mapping (slice DAG: S5 -> {S1}), so provider-env must not force a dependency on
+ * readiness/exec primitives.
+ *
+ * Fail-closed signalling: `getSandboxProviderEnvironment` rejects on RPC failure (refused / deadline /
+ * decode) — the adapter's signal to fail CLOSED (deny), never throw across the port boundary nor leak
+ * baseUrl / endpoint into a reason.
+ */
+export interface OpenShellProviderEnvTransport extends OpenShellLifecycleTransport {
+  getSandboxProviderEnvironment(
+    req: GetSandboxProviderEnvironmentRequest,
+  ): Promise<GetSandboxProviderEnvironmentResponse>;
+}
+
 /**
  * Reserved credential markers (secrets.rs:9-10): the placeholder prefix `openshell:resolve:env:` and
  * the alias marker `OPENSHELL-RESOLVE-ENV-`. OpenShell's `SecretResolver` rewrites provider-env raw

@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r1-s5-provider-env-placeholder-fail-closed
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；預期 net LOC <~120、files <~3、modules = 1（`runtime/openshell`）；新增第三方依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R1-S5 — 新增 `getProviderEnvironment`：呼 `GetSandboxProviderEnvironment`（openshell.proto:153），**只**搬運 placeholder-bearing env（openshell.proto:1141-1152），以 **fail-closed shape guard** 拒絕任何看似 raw secret 的 value——credential 真值永遠由 OpenShell `SecretResolver` 在 egress 注入（secrets.rs:87/214），絕不經我方落地。
@@ -60,18 +60,31 @@ SLICE-P2R-R1-S5 — 新增 `getProviderEnvironment`：呼 `GetSandboxProviderEnv
 > 測試 raw-secret canary **在 runtime 組裝**（不入 fixture 檔字面值），符合 phase-2/INDEX §鐵律「測試 secret canary 為 runtime 組裝、無 source 字面值」。
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填實測>
+  ... typecheck && lint && build && test && deps:check && proto:check && openshell:proto:check && verify:go && verify:py && secret-scan
+  Test Files: all passed（含 src/runtime/openshell/provider-env.test.ts 9 tests、adapter.provider-env.test.ts 5 tests）
+  secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`no-vendor-in-core` 仍綠）
-- [ ] low coupling / high cohesion 遵守（provider-env.ts 純函式、無 I/O；無新跨 module / cyclic 依賴）
-- [ ] secret-scan 乾淨（**關鍵**：guard 測試的 raw-secret canary 為 runtime 組裝，source/log/snapshot 無 secret-like 字面值）
-- [ ] Docs 更新（design §2.3/§6 credential chokepoint 與實作一致）
-- [ ] Adversarial code review = PASS（fresh-context）— 連結/摘要: <填>
-- [ ] **Independent Verifier Pass（安全不變量類）**：adversarially probe「任何 raw-secret-shape value ⇒ guard throw ⇒ adapter deny 且回傳無 env；真值永不出現在 result / log / event」（credential non-leak）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`no-vendor-in-core` 仍綠）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (55 modules, 112 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（provider-env.ts 純函式、無 I/O；無新跨 module / cyclic 依賴）
+- [x] secret-scan 乾淨（**關鍵**：guard 測試的 raw-secret canary 為 runtime 組裝，source/log/snapshot 無 secret-like 字面值）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（design §2.3/§6 credential chokepoint 與實作一致）
+- [x] Adversarial code review = PASS（fresh-context）— 摘要: S5 通過獨立審查（fresh-context 非作者 Opus 4.8）；fail-closed shape guard 兩種合法 placeholder 形（revision==0 / v<rev>_）皆接受，raw-secret-shape value 一律 throw → adapter deny 且回傳無 env。
+- [x] **Independent Verifier Pass（安全不變量類）**：adversarially probe「任何 raw-secret-shape value ⇒ guard throw ⇒ adapter deny 且回傳無 env；真值永不出現在 result / log / event」（credential non-leak）— PASS（adapter.provider-env.test.ts / provider-env.test.ts 覆蓋；`pnpm run verify` exit 0）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 provider-env 能力與 guard）。

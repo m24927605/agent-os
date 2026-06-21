@@ -34,6 +34,7 @@ import {
   type ExecSandboxRequest,
   type OpenShellExecTransport,
   type OpenShellLifecycleTransport,
+  type OpenShellProviderEnvTransport,
   type OpenShellReadinessTransport,
   PINNED_SANDBOX_IMAGE,
   SandboxPhase,
@@ -41,6 +42,7 @@ import {
   assertPinnedImageDigest,
   isExecEnvValueAllowed,
 } from "./client.js";
+import { assertPlaceholderOnly } from "./provider-env.js";
 
 /** Options for {@link OpenShellSandboxAdapter.awaitReady}. */
 export interface AwaitReadyOpts {
@@ -87,6 +89,17 @@ export interface ExecResult {
  */
 export type ExecOutcome =
   | { status: "ok"; result: ExecResult; event: SandboxLifecycleEvent }
+  | { status: "denied"; reason: string; event: SandboxLifecycleEvent };
+
+/**
+ * Result of {@link OpenShellSandboxAdapter.getProviderEnvironment} (slice S5). On success it carries
+ * the placeholder-ONLY env (every value passed the {@link assertPlaceholderOnly} shape guard) plus the
+ * non-secret provider-env `revision` as a decimal string. On a denied path it carries NO `env` field
+ * at all — so a raw value the backend tried to leak never appears in the result. Mirrors the port's
+ * auditable-event discipline (reuses the `"start"` lifecycle; the P2-A enum is not extended).
+ */
+export type ProviderEnvOutcome =
+  | { status: "ok"; env: Record<string, string>; revision: string; event: SandboxLifecycleEvent }
   | { status: "denied"; reason: string; event: SandboxLifecycleEvent };
 
 /** Default wall-clock budget for an exec stream when the caller supplies none. */
@@ -646,6 +659,97 @@ export class OpenShellSandboxAdapter implements SandboxAdapter {
     id: ReturnType<typeof SandboxId.parse>,
   ): SandboxLifecycleEvent {
     return ok(context, "start", id).event;
+  }
+
+  /**
+   * Fetch the sandbox's provider-env PLACEHOLDERS (slice S5; design §2.3) — NOT one of the four frozen
+   * `SandboxAdapter` port methods (the P2-A shape is unchanged); it is an adapter-internal capability
+   * consumed by S6 / the layer above so an injection point knows which credential slots exist. It NEVER
+   * resolves a placeholder into a real value (that is OpenShell's SecretResolver at egress) and NEVER
+   * persists a raw value.
+   *
+   * Flow: (1) validate ctx + resolve the mapped OpenShell name — bad ctx / unknown id => deny BEFORE
+   * any RPC; (2) the provider-env primitive is an optional transport capability — a transport without
+   * it fails CLOSED (deny), not silently treated as empty; (3) call `GetSandboxProviderEnvironment`,
+   * then run the returned `environment` through the fail-closed placeholder-only shape guard
+   * ({@link assertPlaceholderOnly}). The guard THROWS on ANY value that is not a well-formed
+   * placeholder (e.g. a raw secret the backend tried to leak) — that throw is caught and mapped to a
+   * `denied` outcome that carries NO env at all (the raw value is never carried, logged, or surfaced).
+   * EVERY non-happy path — bad ctx, unknown id, an RPC rejection, OR a suspicious value — fails CLOSED
+   * to `denied`; the adapter NEVER throws across the boundary nor leaks transport / credential detail
+   * into the reason.
+   */
+  async getProviderEnvironment(ctx: unknown, sandboxId: string): Promise<ProviderEnvOutcome> {
+    let context: ReturnType<typeof parseAgentContext>;
+    try {
+      context = parseAgentContext(ctx);
+    } catch {
+      return this.providerEnvDenied(ctx, "invalid agent context (fail-closed)");
+    }
+
+    let id: ReturnType<typeof SandboxId.parse>;
+    try {
+      id = SandboxId.parse(sandboxId);
+    } catch {
+      return this.providerEnvDenied(ctx, "invalid sandbox id (fail-closed)");
+    }
+
+    const ref = this.refById.get(id);
+    if (ref === undefined) {
+      // Unknown id (mapping missing) => deny-by-default; issue NO RPC (never guess a name).
+      return this.providerEnvDenied(ctx, "unknown sandbox (fail-closed)");
+    }
+
+    // The provider-env primitive is an optional capability of the injected transport. A transport that
+    // cannot fetch it is fail-closed (deny) rather than silently treated as an empty env.
+    const transport = this.transport as Partial<OpenShellProviderEnvTransport>;
+    const getProviderEnv = transport.getSandboxProviderEnvironment?.bind(transport);
+    if (getProviderEnv === undefined) {
+      return this.providerEnvDenied(
+        ctx,
+        "openshell transport cannot fetch provider env (fail-closed)",
+      );
+    }
+
+    let env: Record<string, string>;
+    let revision: string;
+    try {
+      // GetSandboxProviderEnvironment keys on the canonical `name` (server: get_message_by_name).
+      const resp = await getProviderEnv({ name: ref.name });
+      // FAIL-CLOSED shape guard: throws on ANY non-placeholder value (a raw secret never gets carried).
+      env = assertPlaceholderOnly(resp.environment ?? {});
+      // revision is a non-secret counter (uint64 -> bigint|number on the wire); carry it as a decimal
+      // string. An absent value defaults to "0" (revision 0); a negative number is fail-closed.
+      const rev = resp.providerEnvRevision ?? 0;
+      if (typeof rev === "number" && (!Number.isInteger(rev) || rev < 0)) {
+        return this.providerEnvDenied(
+          ctx,
+          "openshell returned a malformed provider-env revision (fail-closed)",
+        );
+      }
+      if (typeof rev === "bigint" && rev < 0n) {
+        return this.providerEnvDenied(
+          ctx,
+          "openshell returned a malformed provider-env revision (fail-closed)",
+        );
+      }
+      revision = rev.toString();
+    } catch {
+      // Either the transport rejected (refused / deadline / decode) OR the placeholder guard threw on a
+      // suspicious value. BOTH fail CLOSED: deny, carry NO env, and NEVER surface the underlying error
+      // (it could carry baseUrl / endpoint / a raw credential).
+      return this.providerEnvDenied(
+        ctx,
+        "openshell provider-env unavailable or not placeholder-only (fail-closed)",
+      );
+    }
+
+    return { status: "ok", env, revision, event: this.execEvent(context, id) };
+  }
+
+  /** Build a denied {@link ProviderEnvOutcome} reusing the shared substrate deny() event (no env carried). */
+  private providerEnvDenied(ctx: unknown, reason: string): ProviderEnvOutcome {
+    return { status: "denied", reason, event: deny(ctx, "start", reason).event };
   }
 
   // start/stop are an explicit S6 concern (OpenShell has no Start/Stop RPC; design §3.2). Until the

@@ -1,8 +1,8 @@
 /**
  * Public surface for the OpenShell vendor adapter (slices P2R-R1-S1/S2). The ONLY place the OpenShell
  * RPC vendor (`@connectrpc/connect{,-node}`) is wired; core governance modules consume only the
- * injected `OpenShellTransport` port + the `SandboxAdapter` it implements. Remaining sandbox-lifecycle
- * surface (readiness / exec / provider-env) is added in S3..S6.
+ * injected `OpenShellTransport` port + the `SandboxAdapter` it implements. provider-env (S5) exposes
+ * placeholder-ONLY slots via a fail-closed shape guard; the remaining surface lands in S6.
  */
 export {
   PINNED_SANDBOX_IMAGE,
@@ -23,12 +23,17 @@ export {
   type OpenShellExecTransport,
   type ExecSandboxRequest,
   type ExecSandboxEvent,
+  type OpenShellProviderEnvTransport,
+  type GetSandboxProviderEnvironmentRequest,
+  type GetSandboxProviderEnvironmentResponse,
   isExecEnvValueAllowed,
 } from "./client.js";
+export { assertPlaceholderOnly } from "./provider-env.js";
 export {
   type AwaitReadyOpts,
   type ExecSandboxOpts,
   type ExecResult,
   type ExecOutcome,
+  type ProviderEnvOutcome,
   OpenShellSandboxAdapter,
 } from "./adapter.js";
