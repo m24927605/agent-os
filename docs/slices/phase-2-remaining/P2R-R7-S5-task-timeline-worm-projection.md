@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r7-s5-task-timeline
 - **Author**: Frontend Developer（agency-agents）   **Adversarial reviewer**: fresh-context 獨立 Opus 4.8（非作者）
 - **Size budget**: <= 1 day；net LOC <~150、files <~4（`src/personal/timeline/{timeline.ts,index.ts}` + `timeline.test.ts` + barrel 一行）、modules = 1（`personal/timeline`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R7-S5 — 新增 `buildTaskTimeline(entries)`：把 audit kernel 的 `LogEntry[]`（append-only chain）fold 成**零技能可讀的白話時間軸**，**唯讀投影**、出口過 redaction、依 sequence 嚴格遞增、不可改寫歷史。
@@ -60,15 +60,14 @@ SLICE-P2R-R7-S5 — 新增 `buildTaskTimeline(entries)`：把 audit kernel 的 `
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（§5 首次 RED）。
-- [ ] `pnpm run verify` exit 0（待填）。
-- [ ] `pnpm run deps:check` exit 0（`personal/timeline` 只 import `src/audit` **barrel**（B0 後）、無 cycle、
-      無 vendor、inward；**不** import 頂層 `src/index.ts`、**不** deep-import `audit/event.ts|kernel/log.ts|redact.ts`）。
-- [ ] low coupling / high cohesion 遵守。
-- [ ] secret-scan 乾淨（canary runtime 組裝）。
-- [ ] Docs 更新（`src/index.ts` barrel 加 `./personal/timeline/index.js`）。
-- [ ] Adversarial code review = PASS（fresh-context；mutation：投影丟筆/重排/改 sequence 須被測試抓到）— 摘要：<待填>。
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（audit 完整性：唯讀、不改寫歷史；credential non-leak）。
+- [x] Test-first 成立（§5 首次 RED）— 作者已記錄；綠燈：`pnpm test src/personal/timeline/timeline.test.ts` → `Test Files 1 passed (1) / Tests 7 passed (7)`，exit 0。
+- [x] `pnpm run verify` exit 0 — `secret-scan: clean` / `verify:go: ok` … `VERIFY_EXIT=0`。
+- [x] `pnpm run deps:check` exit 0 — `✔ no dependency violations found (86 modules, 203 dependencies cruised)`，exit 0。生產碼 `src/personal/timeline/timeline.ts` 僅經 `../../audit/index.js` barrel 取 `LogEntry`/`AuditEvent`/`redactSecrets`；不 import 頂層 `src/index.ts`、不 deep-import `audit/event.ts|kernel/log.ts|redact.ts`。
+- [x] low coupling / high cohesion 遵守 — 純函式投影，單一責任，零新增依賴。
+- [x] secret-scan 乾淨（canary runtime 組裝）— `pnpm run secret-scan` → `secret-scan: clean`，exit 0。
+- [x] Docs 更新（`src/index.ts` barrel 加 `./personal/timeline/index.js`）— 已加 `export * from "./personal/timeline/index.js";`。
+- [x] Adversarial code review = PASS（fresh-context；mutation：投影丟筆/重排/改 sequence 須被測試抓到）— 摘要：獨立 fresh-context Opus 4.8 review 通過（slice R7-S5 passed independent review）。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（audit 完整性：唯讀、不改寫歷史；credential non-leak）— 唯讀/凍結 entries、sequence 集合相等、canary 不洩漏三項對抗式測試綠燈。
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `personal/timeline` 模組 + barrel 一行）。
