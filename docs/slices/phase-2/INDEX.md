@@ -1,7 +1,7 @@
-# Phase 2 Slices — INDEX（DRAFT / 規劃中）
+# Phase 2 Slices — INDEX
 
-> **狀態（2026-06-21）：DRAFT。** 本目錄的 slice spec **先於實作撰寫**（doc-first，無 doc 不開工）。
-> 下列 slice 尚未實作；每個都將走 branch → **DRAFT spec 先行（本目錄）** → **RED test-first（親眼見紅）** →
+> **狀態（2026-06-21）：P2-B/A/C/D 已 doc-first 實作並 merge（每個皆 RED→GREEN→fresh IV PASS→--no-ff merge）。**
+> 本目錄的 slice spec **先於實作撰寫**（doc-first，無 doc 不開工）；每個都將走 branch → **DRAFT spec 先行（本目錄）** → **RED test-first（親眼見紅）** →
 > 實作到 GREEN → `pnpm run verify` exit 0 → **fresh-context Independent Verifier = PASS** → `--no-ff` merge，
 > 完成後把該 slice spec 的 §RED/§DoD 以**真實 exit code** 覆蓋並標 DONE。
 > 權威設計見 [docs/design/five-piece-integration.md](../../design/five-piece-integration.md)；定位見 [AGENTS.md](../../../AGENTS.md)。
@@ -25,7 +25,7 @@
 | **P2-B** | [P2-B-…](./P2-B-no-vendor-in-core-pluggability-rule.md) | `no-vendor-in-core` dependency 規則 — 可插拔變 `verify` 可驗 | build/boundary gate | ~120 | （承接 P0/P1 dependency-cruiser gate） | **DONE** |
 | **P2-A** | [P2-A-…](./P2-A-vendor-neutral-substrate-port-contract.md) | vendor-neutral ExecutionSubstrate port + Fake 第二實作 + contract harness（`runtime/openshell`→`runtime/substrate` 正名） | runtime/substrate | ~300 | P2-B | **DONE** |
 | **P2-C** | [P2-C-…](./P2-C-ts-commit-before-effect-guard.md) | TS commit-before-effect guard — 關閉 BLOCKING「護城河空心」 | commitgate | ~190 | （獨立；承接 P1 commitgate 概念） | **DONE** |
-| **P2-D** | [P2-D-…](./P2-D-brain-port-credential-blind-guard.md) | vendor-neutral Brain port + credential-blind guard + 2 impls | runtime/brain | ~300 | P2-A | DRAFT |
+| **P2-D** | [P2-D-…](./P2-D-brain-port-credential-blind-guard.md) | vendor-neutral Brain port + credential-blind guard + 2 impls | runtime/brain | ~300 | P2-A | **DONE** |
 
 ### Slice DAG（鄰接表，無 cycle）
 ```

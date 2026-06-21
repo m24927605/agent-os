@@ -16,4 +16,5 @@ export * from "./audit/canonical.js";
 export * from "./audit/kernel/log.js";
 export * from "./audit/kernel/verify.js";
 export * from "./commitgate/index.js";
+export * from "./runtime/brain/index.js";
 export * from "./runtime/substrate/index.js";
