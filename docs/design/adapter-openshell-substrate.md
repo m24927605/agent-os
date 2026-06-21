@@ -151,6 +151,17 @@ reserved credential marker 卻無法當 placeholder 看待（見 secrets.rs:30 `
 對未知 id 回 `deny`（fail-closed），且 event 註記 `reason:"start/stop is a noop shim (OpenShell has no Start/Stop RPC)"`。
 `createSandbox` 實際做 `CreateSandbox`；`destroySandbox` 做 `DeleteSandbox`。
 
+> **S6 實作對齊（DONE）：** `src/runtime/openshell/adapter.ts` `OpenShellSandboxAdapter.startSandbox/stopSandbox`
+> 共用 `private noopShim(ctx, lifecycle, sandboxId)`：① 壞 ctx → deny；② 非法 id → deny；③ 對映遺失（未知 id）
+> → deny（fail-closed，不臆造成功）；④ 已知 id → `ok`，event `reason` 帶
+> `"<start|stop> is a noop shim (OpenShell has no Start/Stop RPC)"`，且**完全不觸碰 transport**（noop 就是 noop）。
+> 共享 contract harness `src/test-contracts/sandbox-adapter.test.ts` 把本 adapter（注入 happy-path lifecycle
+> transport double）加進 `describe.each` factory list，使 ExecutionSubstrate port 現有 **3 impl（Null/Fake/
+> OpenShell）過同一 contract**——可插拔 HARD CONSTRAINT 機械化證明。真實 gateway smoke 為 opt-in、預設 skip
+> 的 `src/runtime/openshell/e2e.test.ts`（`OPENSHELL_E2E_BASE_URL` 未設則 `describe.skip`），不進預設 verify
+> 紅綠判定。OpenShell adapter 經 connect-node 確有 egress，故**不**納入 substrate 的「零 egress」正向 allowlist
+> （該 allowlist 仍只約束 `port.ts`/`null.ts`/`fake.ts`）。
+
 ### 3.3 name ↔ SandboxId 對映
 
 我方 `SandboxId`（`iam/ids`）與 OpenShell 的 sandbox `name`/`id` 是兩個命名空間。adapter 在 `createSandbox`
@@ -275,7 +286,7 @@ Get/Exec/Delete 用對映回來的 OpenShell name/id 呼叫。**對映遺失 = f
 | **P2R-R1-S3** | `GetSandbox` / `WatchSandbox` readiness（phase→ok/deny） | runtime/openshell | ~140 | S2 |
 | **P2R-R1-S4** | `ExecSandbox` server-stream（stdout/stderr/exit→result） | runtime/openshell | ~150 | S2 |
 | **P2R-R1-S5** | `GetSandboxProviderEnvironment` placeholder-only（fail-closed shape guard） | runtime/openshell | ~120 | S1 |
-| **P2R-R1-S6** | 過 P2-A SandboxAdapter contract（加進 factory + start/stop shim + e2e opt-in skip） | runtime/openshell + test-contracts | ~120 | S2,S3,S4,S5 |
+| **P2R-R1-S6** ✅ DONE | 過 P2-A SandboxAdapter contract（加進 factory + start/stop shim + e2e opt-in skip） | runtime/openshell + test-contracts | ~120 | S2,S3,S4,S5 |
 
 ### Slice DAG（鄰接表，無 cycle）
 ```
