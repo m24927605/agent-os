@@ -78,9 +78,11 @@ Agent OS 的三 surface 中，**Developer surface 目前是「假的」**：[`do
 - **S4 — ToolManifest authoring** — **DONE（slice/p2r-r9-s4-tool-manifest-authoring）**
   - 新建 [`docs/sdk/tool-manifest-authoring.md`](../sdk/tool-manifest-authoring.md) + [`src/sdk/templates/tool-manifest.example.json`](../../src/sdk/templates/tool-manifest.example.json)（範本）+ `src/sdk/templates/index.ts`（程式化匯出 `exampleToolManifest` + `loadExampleToolManifest()`，經 SDK barrel 消費 R3 `parseToolManifest`）+ 把 `manifest lint` 的「一致性護欄」說明文件化。**不新增 schema 邏輯**（schema 是 R3 的 S1）。`src/sdk/templates/templates.test.ts` 證明：範本經 R3 parse 合法、on-disk JSON 與匯出 byte-equivalent、刻意違規 fixture（destructive+免審批）被護欄擋下、無 secret-shaped 值。
   - **唯一責任**：作者體驗——一個可複製的 9 欄範本 + 文件化的 lint 流程；驗收靠 S3 的 `manifest lint` 對範本 exit 0、對刻意違規 fixture exit 1。
-- **S5 — standalone + WASM verifier release artifact**
-  - 新建 `scripts/build-verifier-release.sh`（GOOS/GOARCH matrix 跨平台 build + `GOOS=js GOARCH=wasm` build + SHA-256SUMS + 版本嵌入），與一個 `kernel/cmd/verifier` 的 WASM entrypoint wrapper（若需要；verifier 邏輯**不改**，只加 build 流程與最小 wasm glue）。
-  - **唯一責任**：把既有 `cmd/verifier`（[`kernel/cmd/verifier/main.go`](../../kernel/cmd/verifier/main.go)）變成**版本化、可重現、跨平台 + WASM** 的 release 產物。**不改信任語意**（pubkey 仍由稽核者提供）。
+- **S5 — standalone + WASM verifier release artifact** — **DONE（slice/p2r-r9-s5-verifier-release-artifact-wasm）**
+  - 新建 [`scripts/build-verifier-release.sh`](../../scripts/build-verifier-release.sh)（`{linux,darwin,windows}` × `{amd64,arm64}` matrix 跨平台 build + `GOOS=js GOARCH=wasm` build → `dist/verifier/` + `SHA-256SUMS` + ldflags 版本嵌入；可重現靠 `-trimpath`/`CGO_ENABLED=0`/`-buildid=`/`GOTOOLCHAIN=local`/決定性 git 版本標籤），與 `kernel/cmd/verifier` 的 WASM entrypoint wrapper [`wasm_main.go`](../../kernel/cmd/verifier/wasm_main.go)（build-tag `//go:build js && wasm`）。
+  - **零邏輯複製**：抽出純函式 [`verifyChainBytes`](../../kernel/cmd/verifier/verify_bytes.go)（無 build-tag、native + wasm 共用），native `main.go`（新加 `//go:build !(js && wasm)` 避免與 wasm `main()` 衝突）與 wasm wrapper 皆委派它；驗鏈邏輯仍只在 `internal/verify`。版本標籤用新增的 ldflags-settable `var buildVersion`（在 `verify_bytes.go`），**不**動 `KernelContractVersion()`。
+  - `package.json` 加 `verifier:release` script；新增 [`docs/sdk/verifier-release.md`](../sdk/verifier-release.md)（產物清單、SHA 校驗、WASM 用法、**信任語意未升級 / pinning=P4** 誠實聲明）。
+  - **唯一責任**：把既有 `cmd/verifier`（[`kernel/cmd/verifier/main.go`](../../kernel/cmd/verifier/main.go)）變成**版本化、可重現、跨平台 + WASM** 的 release 產物。**不改信任語意**（pubkey 仍由稽核者提供；native exit-code 契約 0/1/2 不變）。
 
 ### 2.3 與既有 core 的關係（不破壞已建不變量）
 - **SDK 是 core 的下游消費者，不是新權威**：S2 SDK barrel 只 **re-export** 既有 public surface（經 `src/index.ts` pattern），不新增任何 deny/allow/append 能力。PDP 仍是唯一 deny 權威（[`five-piece-integration.md:7`](./five-piece-integration.md)），SDK 不能繞過。

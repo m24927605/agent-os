@@ -25,6 +25,7 @@
     "openshell:proto:check": "bash scripts/openshell-proto-check.sh",
     "verify:p1-exit": "bash scripts/verify-p1-exit.sh",
     "verify:go": "env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local bash scripts/verify-go.sh",
+    "verifier:release": "env -u GOROOT GOTOOLCHAIN=local bash scripts/build-verifier-release.sh",
     "verify:py": "bash scripts/verify-py.sh",
     "verify:cross-tenant": "env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local bash scripts/verify-cross-tenant.sh",
     "secret-scan": "bash scripts/scan_secrets.sh",

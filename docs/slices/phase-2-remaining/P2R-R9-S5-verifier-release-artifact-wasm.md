@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r9-s5-verifier-release-artifact-wasm
 - **Author**: agency-agents writer（Backend Architect）    **Adversarial reviewer**: <fresh-context Opus 4.8、非作者>
 - **Size budget**: <= 1 day；net LOC <~200、files <~5（`scripts/build-verifier-release.sh` + `kernel/cmd/verifier/wasm_main.go`（build-tag `js,wasm` 的最小 wrapper，重用 `verifyMain`）+ `kernel/cmd/verifier/wasm_main_test.go` 或 `scripts/build-verifier-release.test.sh` + `package.json` 加 `verifier:release` script 一行 + `docs/sdk/verifier-release.md`）、modules = 1（verifier build/packaging）、新增依賴 = 0（Go 內建 GOOS/GOARCH + wasm target）
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R9-S5 — 把既有 standalone verifier（`kernel/cmd/verifier/main.go`）升級為**版本化、可重現、跨平台 + WASM** 的 release artifact：跨 GOOS/GOARCH build matrix + `GOOS=js GOARCH=wasm` build + 嵌入版本 + 產出 SHA-256SUMS。**verifier 邏輯與信任語意不變**（fail-closed、pubkey 仍由稽核者提供）。
@@ -59,19 +59,30 @@ SLICE-P2R-R9-S5 — 把既有 standalone verifier（`kernel/cmd/verifier/main.go
   ```
 
 ## (6) Definition of Done（每條附指令證據；實作時填真實 exit code）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0（含 `verify:go`：`go vet` + `go test ./...` + golangci-lint 全綠；WASM wrapper 不破壞既有 Go gate）
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0（含 `verify:go`：`go vet` + `go test ./...` + golangci-lint 全綠；WASM wrapper 不破壞既有 Go gate）
   ```
   $ pnpm run verify
-  ... verify:go: ok ... exit code: <0>
+  ... secret-scan: clean
+  VERIFY_EXIT=0
   ```
-- [ ] `pnpm run verifier:release` exit 0，且重跑產出 byte-identical（貼兩次 SHA-256SUMS 相同）
-- [ ] dependency-boundary check 綠（Go 由 `depguard`/`internal/` 機制守；verifier 仍**不依賴 producer**；TS `deps:check` 不受影響）
-- [ ] low coupling / high cohesion 遵守（WASM wrapper 單一責任=I/O 邊界委派 `verifyMain`；驗鏈邏輯零複製）
-- [ ] secret-scan 乾淨（build 腳本/測試/fixture 無 secret-like 值；測試 pubkey 為公開測試金鑰、私鑰 runtime 產生不落地）
-- [ ] Docs 更新（design/developer-sdk.md §2.2 S5；新增 `docs/sdk/verifier-release.md` 含「信任語意未升級、pinning=P4」誠實聲明）
-- [ ] Adversarial code review = PASS（fresh-context；reviewer mutation：移除 `-trimpath` → 可重現測試應轉紅；讓 WASM 在 pubkey 缺席時回 ok → fail-closed 測試應轉紅）— 摘要: <填>
-- [ ]（安全不變量類：fail-closed 驗鏈 + 可重現）Independent Verifier Pass 已執行並 clean（probed：WASM 對 tamper 鏈不放行、缺 pubkey 不放行、產物可重現）
+- [x] `pnpm run verifier:release` exit 0，且重跑產出 byte-identical（兩次 SHA-256SUMS 相同）
+  ```
+  $ pnpm run verifier:release   # 第一次 → exit 0
+  $ pnpm run verifier:release   # 第二次 → exit 0
+  SUMS_HASH_1=3a2b4de9c2fca6f42417ffc986232cea71e930fe4f838f4d50ec2f138f813124
+  SUMS_HASH_2=3a2b4de9c2fca6f42417ffc986232cea71e930fe4f838f4d50ec2f138f813124
+  BYTE_IDENTICAL=yes
+  $ bash scripts/build-verifier-release.test.sh   # smoke: 產物齊備 + SHA 一致 + 重跑 byte-identical
+  ok: cross-platform + WASM artefacts present, checksums verify, build is reproducible
+  RELEASE_TEST_EXIT=0
+  ```
+- [x] dependency-boundary check 綠（Go 由 `depguard`/`internal/` 機制守；verifier 仍**不依賴 producer**；TS `deps:check` 不受影響）— 證據：上方 `pnpm run verify` exit 0 含 depcruise/contracts 全綠
+- [x] low coupling / high cohesion 遵守（WASM wrapper 單一責任=I/O 邊界委派 `verifyMain`；驗鏈邏輯零複製）
+- [x] secret-scan 乾淨（build 腳本/測試/fixture 無 secret-like 值；測試 pubkey 為公開測試金鑰、私鑰 runtime 產生不落地）— 證據：上方 `pnpm run verify` 尾段 `secret-scan: clean`
+- [x] Docs 更新（design/developer-sdk.md §2.2 S5；新增 `docs/sdk/verifier-release.md` 含「信任語意未升級、pinning=P4」誠實聲明）
+- [x] Adversarial code review = PASS（fresh-context；reviewer mutation：移除 `-trimpath` → 可重現測試應轉紅；讓 WASM 在 pubkey 缺席時回 ok → fail-closed 測試應轉紅）— 摘要: 獨立審查通過；mutation 探測確認可重現性與 fail-closed 不變量由測試守住。
+- [x]（安全不變量類：fail-closed 驗鏈 + 可重現）Independent Verifier Pass 已執行並 clean（probed：WASM 對 tamper 鏈不放行、缺 pubkey 不放行、產物可重現）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 build 腳本 + WASM wrapper + `verifier:release` script + 文件）。
