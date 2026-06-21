@@ -26,7 +26,7 @@
 | **P2-A** | [P2-A-…](./P2-A-vendor-neutral-substrate-port-contract.md) | vendor-neutral ExecutionSubstrate port + Fake 第二實作 + contract harness（`runtime/openshell`→`runtime/substrate` 正名） | runtime/substrate | ~300 | P2-B | **DONE** |
 | **P2-C** | [P2-C-…](./P2-C-ts-commit-before-effect-guard.md) | TS commit-before-effect guard — 關閉 BLOCKING「護城河空心」 | commitgate | ~190 | （獨立；承接 P1 commitgate 概念） | **DONE** |
 | **P2-D** | [P2-D-…](./P2-D-brain-port-credential-blind-guard.md) | vendor-neutral Brain port + credential-blind guard + 2 impls | runtime/brain | ~300 | P2-A | **DONE** |
-| **P2-E** | [P2-E-…](./P2-E-pdp-sole-deny-authority-dedup.md) | PDP 唯一 deny 權威 — secondary policy 去重（PDP-deny 勝 secondary-allow） | policy | ~200 | （獨立；用既有 PDP） | DRAFT |
+| **P2-E** | [P2-E-…](./P2-E-pdp-sole-deny-authority-dedup.md) | PDP 唯一 deny 權威 — secondary policy 去重（PDP-deny 勝 secondary-allow） | policy | ~200 | （獨立；用既有 PDP） | **DONE** |
 
 ### Slice DAG（鄰接表，無 cycle）
 ```
