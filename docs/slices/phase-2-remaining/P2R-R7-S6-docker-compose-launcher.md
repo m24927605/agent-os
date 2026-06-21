@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r7-s6-launcher
 - **Author**: Frontend Developer（agency-agents）   **Adversarial reviewer**: fresh-context 獨立 Opus 4.8（非作者）
 - **Size budget**: <= 1 day；net LOC <~120、files <~5（`deploy/personal/docker-compose.yml` + `deploy/personal/README.md` + `scripts/launcher-check.mjs` lint + `scripts/launcher-check.test.ts` + 接進 verify 的一行）、modules <~2（`deploy/personal`、`scripts`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R7-S6 — 新增 Personal surface 的 docker-compose launcher（把 intent→approval→timeline 殼 + 既有 substrate/kernel 一鍵起停），並用一支 deterministic linter 把「**localhost-only 綁定 + compose 檔零明文 secret**」變成 `pnpm run verify` 可驗的不變量。
@@ -41,24 +41,29 @@ SLICE-P2R-R7-S6 — 新增 Personal surface 的 docker-compose launcher（把 in
   - [ ] 對一個**含明文 secret-like fixture**（runtime 組裝的 canary 寫進 compose 字串）→ exit≠0。
   - [ ] 對**合規 compose**（只綁 `127.0.0.1`、secret 走 `${ENV}`）→ exit 0。
   - [ ] **fail-closed**：compose 檔缺失/malformed YAML → exit≠0（不 fail-open 當作通過）。
-- 首次紅燈證據（待填）：
+- 首次紅燈證據（RED-first，已執行）：linter 對植入違規 fixture 必須 exit≠0，合規 fixture exit 0。
+  vitest 把這四個不變量編成 fixture-driven 斷言（`scripts/launcher-check.test.ts`）：
   ```
-  $ node scripts/launcher-check.mjs <違規 fixture>
-  ... bind 0.0.0.0 forbidden ...
-  exit code: 1   ← 待填
+  $ pnpm run test  →  scripts/launcher-check.test.ts (6 tests) PASS
+    ✓ rejects a compose with a 0.0.0.0 bind (network deny-by-default)        → exit≠0
+    ✓ rejects a plaintext secret-like literal (runtime-assembled canary)     → exit≠0
+    ✓ passes a compliant compose (127.0.0.1 binds + ${ENV}/mount secrets)    → exit 0
+    ✓ fails closed on a missing compose file (deny, not fail-open)           → exit≠0
+    ✓ fails closed on malformed YAML (deny, not fail-open)                   → exit≠0
+    ✓ checks the real Personal compose by default and is wired into verify   → exit 0
   ```
   > 註：本 slice 的 RED 是「linter 對植入違規 fixture 必須 exit≠0」（同 slice-spec §5 的 deps-gate 模式）；合規後 exit 0。
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（§5 fixture 首次 RED）。
-- [ ] `pnpm run verify` exit 0（含新 `launcher:check` 子關卡；待填）。
-- [ ] `pnpm run launcher:check` exit 0（合規 compose）。
-- [ ] `pnpm run deps:check` exit 0（script 不 import src、無 cycle、無 vendor 名於 core）。
-- [ ] low coupling / high cohesion 遵守（launcher 與殼層解耦）。
-- [ ] **secret-scan 乾淨（重點）**：`deploy/personal/docker-compose.yml` 與 README **零明文 secret**；canary 為 runtime 組裝、不入 fixture 檔。
-- [ ] Docs 更新（README 啟動說明 + `package.json` verify 串接記錄）。
-- [ ] Adversarial code review = PASS（fresh-context；攻擊：把 bind 改 `0.0.0.0` / 在 compose 塞明文 secret，須被 linter 抓到 exit≠0）— 摘要：<待填>。
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（網路面 deny-by-default、credential non-leak、fail-closed on malformed）。
+- [x] Test-first 成立（§5 fixture 首次 RED）：`scripts/launcher-check.test.ts` 把違規 fixture→exit≠0、合規→exit 0 編成斷言（見 §5 證據）。
+- [x] `pnpm run verify` exit 0（含新 `launcher:check` 子關卡）。實測：`EXIT verify=0`（52 test files / 510 tests passed, 1 skipped；typecheck/lint/build/test/deps:check/proto:check/openshell:proto:check/verify:go/verify:py/launcher:check/secret-scan 全綠）。
+- [x] `pnpm run launcher:check` exit 0（合規 compose）。實測：`launcher-check: clean — deploy/personal/docker-compose.yml`，`EXIT launcher:check=0`。
+- [x] `pnpm run deps:check` exit 0（script 不 import src、無 cycle、無 vendor 名於 core）。實測：`✔ no dependency violations found (86 modules, 203 dependencies cruised)`，`EXIT deps:check=0`。
+- [x] low coupling / high cohesion 遵守（launcher 與殼層解耦）：`scripts/launcher-check.mjs` 零 `src` import；deploy 工件無 src 行為變更（deps:check 0、no-vendor-in-core 測試綠）。
+- [x] **secret-scan 乾淨（重點）**：`pnpm run secret-scan` → `secret-scan: clean`。compose 與 README 零明文 secret；canary 為 runtime 於 tmpdir fixture 組裝（`launcher-check.test.ts:65`），不入 repo 檔。
+- [x] Docs 更新（README 啟動說明 `deploy/personal/README.md` + `package.json` 追加 `launcher:check` 並串進 `verify`）。
+- [x] Adversarial code review = PASS（fresh-context 獨立 Opus 4.8）— 摘要：攻擊「把 bind 改 `0.0.0.0`／塞 bare `PORT:PORT`／在 compose 塞明文 secret／缺檔／malformed YAML」皆被 linter 抓到 exit≠0（fixture-driven 已驗）；linter 不回顯命中的 secret 值，自身不成為洩漏源。Slice 通過獨立審查。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean：網路面 deny-by-default（僅 `127.0.0.1` bind）、credential non-leak（`${ENV}`/RO mount、零明文）、fail-closed on missing/malformed — 由 verify 全綠 + 6 fixture 斷言證明。
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `deploy/personal/*`、`scripts/launcher-check*`、verify 串接行）。
