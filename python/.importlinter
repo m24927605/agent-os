@@ -1,0 +1,23 @@
+# import-linter: credential-blind as an import-time structural invariant (P2R-R9-S1).
+#
+# Forbidden contract — `agentos_shim` MUST NOT import any secret-bearing module. This is the
+# import/lint-period complement to the runtime `screenBrainEvent` guard
+# (src/runtime/brain/credential-guard.ts): one blocks the runtime payload, this blocks the
+# compile-time edge. Aligned with TS `no-vendor-in-core` and Go `depguard` (blacklist-style).
+[importlinter]
+root_packages =
+    agentos_shim
+    _credential_blind_fixtures
+
+[importlinter:contract:credential-blind]
+name = agentos_shim is credential-blind (forbidden: never import a secret-bearing module)
+type = forbidden
+source_modules =
+    agentos_shim
+# Secret-bearing module set: anything that reads credentials from the environment, writes a
+# `~/.hermes`-style credential file, or directly dials a model provider client. The shim must
+# stay STRUCTURALLY unable to reach any of these.
+forbidden_modules =
+    _credential_blind_fixtures.env_secret_reader
+    _credential_blind_fixtures.hermes_credential_writer
+    _credential_blind_fixtures.provider_client

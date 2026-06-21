@@ -1,0 +1,41 @@
+[project]
+# Agent OS — Developer surface, Python plane (P2R-R9-S1).
+# The credential-blind shim package. Authors wrap agent proposals here; the package is
+# STRUCTURALLY incapable of holding a plaintext secret at import time (enforced by the
+# import-linter forbidden contract in this file + the verify:py gate).
+name = "agentos-shim"
+version = "0.0.0"
+description = "Agent OS credential-blind shim — bundleRef-only agent proposals (import-linter enforced)."
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+# Dev-only, confined to the Python plane. The TS plane gains NO new dependency.
+# ruff = lint; pyright = types; pytest = tests; import-linter = import-time credential-blind gate.
+dev = [
+  "ruff>=0.6",
+  "pyright>=1.1.400",
+  "pytest>=8",
+  "import-linter>=2.0",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["agentos_shim", "tests"]
+typeCheckingMode = "standard"
+pythonVersion = "3.11"
+
+[tool.pytest.ini_options]
+# The package is not installed into the venv (it has no build backend); resolve it from the
+# plane root so `import agentos_shim` works under the verify:py gate.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+# The import-linter forbidden contract lives in `python/.importlinter` (INI), invoked by the
+# verify:py gate as `lint-imports`.
