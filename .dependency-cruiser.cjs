@@ -45,6 +45,29 @@ module.exports = {
         ],
       },
     },
+    {
+      name: "no-vendor-in-core",
+      severity: "error",
+      comment:
+        "Pluggability HARD CONSTRAINT (AGENTS.md 'Pluggable components — NO forced vendor combination'): " +
+        "core governance modules must NEVER name or import a vendor. A vendor (hermes / nemoclaw / " +
+        "openshell / agt / spendguard) lives ONLY under its own adapter module (…/adapters/<vendor>/ or " +
+        "src/runtime/<vendor>/). The OS = ports + contracts, never a vendor. Swapping is config, not a core " +
+        "rewrite — so the core must not name one. Path-matched so unanchored fixtures exercise the same rule.",
+      from: {
+        // The pure governance core. `runtime` (where substrate/hosting adapters live) is intentionally
+        // NOT listed; adapter sub-trees inside a core module are carved out below.
+        path: "(^|/)src/(iam|policy|audit|commitgate|orchestration|credential|approval|tools|cost|hosting|build)/",
+        pathNot: "(^|/)src/[^/]+/adapters/",
+      },
+      to: {
+        // A vendor token as a bounded segment. Boundaries accept `/`, `@` (npm scopes), `.`, `-`
+        // (SDK suffixes like `openshell-sdk`, `hermes-agent`) and string ends — so scoped/suffixed
+        // package names cannot evade it — while still rejecting incidental substrings (e.g. "magtools",
+        // "fragment"). See no-vendor-in-core.test.ts for the matched/rejected lock-table.
+        path: "(^|[/@])(hermes|nemoclaw|openshell|agt|spendguard)([/@.-]|$)",
+      },
+    },
   ],
   options: {
     tsConfig: { fileName: "tsconfig.json" },

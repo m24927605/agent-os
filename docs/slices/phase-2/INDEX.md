@@ -22,7 +22,7 @@
 
 | Slice | 檔案 | Title | 模組 | Net LOC（估） | Depends-on | 狀態 |
 |---|---|---|---|---|---|---|
-| **P2-B** | [P2-B-…](./P2-B-no-vendor-in-core-pluggability-rule.md) | `no-vendor-in-core` dependency 規則 — 可插拔變 `verify` 可驗 | build/boundary gate | ~120 | （承接 P0/P1 dependency-cruiser gate） | DRAFT |
+| **P2-B** | [P2-B-…](./P2-B-no-vendor-in-core-pluggability-rule.md) | `no-vendor-in-core` dependency 規則 — 可插拔變 `verify` 可驗 | build/boundary gate | ~120 | （承接 P0/P1 dependency-cruiser gate） | **DONE** |
 | **P2-A** | [P2-A-…](./P2-A-vendor-neutral-substrate-port-contract.md) | vendor-neutral ExecutionSubstrate port + Fake 第二實作 + contract harness（`runtime/openshell`→`runtime/substrate` 正名） | runtime/substrate | ~300 | P2-B | DRAFT |
 | **P2-C** | [P2-C-…](./P2-C-ts-commit-before-effect-guard.md) | TS commit-before-effect guard — 關閉 BLOCKING「護城河空心」 | commitgate | ~190 | （獨立；承接 P1 commitgate 概念） | DRAFT |
 | **P2-D** | [P2-D-…](./P2-D-brain-port-credential-blind-guard.md) | vendor-neutral Brain port + credential-blind guard + 2 impls | runtime/brain | ~300 | P2-A | DRAFT |
