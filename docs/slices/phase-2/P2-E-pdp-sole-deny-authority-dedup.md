@@ -4,7 +4,7 @@
 - **Branch**: slice/p2-e-pdp-sole-deny-authority
 - **Author**: <id>    **Adversarial reviewer**: <fresh-context、非作者>
 - **Size budget**: <= 0.5 day；net LOC <~200、files <~4（`src/policy/dedup.ts` + `src/policy/dedup.test.ts` + `src/test-contracts/secondary-policy-adapter.test.ts` + `src/index.ts` barrel）、新增依賴 = 0
-- **狀態**: DRAFT（實作後以真實 exit code 覆蓋 §5/§6 並標 DONE）
+- **狀態**: **DONE**（merge；fresh-context IV = PASS）
 
 ## (1) ID + Title
 SLICE-P2-E — 新增 `SecondaryPolicyAdapter`（vendor-neutral、advisory policy 輸入的可插拔槽位；預設來源 AGT-derived，P2 後續）+ `combineDecisions()` 去重函式，使我們的 PDP（`src/policy/evaluate.ts`）成為**唯一 deny 權威**：secondary 的 allow **永遠不能**翻轉 PDP 的 deny；任何 deny（PDP 或 secondary）即 deny（**any-deny-wins，fail-closed**）；secondary 拋例外 → 視為 deny（deny-by-default）。
@@ -21,6 +21,7 @@ SLICE-P2-E — 新增 `SecondaryPolicyAdapter`（vendor-neutral、advisory polic
   - 任一方 `deny` → 結果 `deny`（deny-precedence / any-deny-wins）。
   - 結果 `allow` **僅當** PDP `allow` **且**所有 secondary `allow`。
   - secondary 的 `allow` 不能覆蓋 PDP 的 `deny`（PDP 唯一權威）。
+  - **fail-closed 收緊（IV 採納）**：判定「貢獻 deny」用 `effect !== "allow"`——任何**非 allow**（包含 untrusted 來源回傳的 malformed/garbage effect）都當 deny；allow 僅當所有 input 的 effect **恰為** `"allow"`。
   - `reason` 記錄決定來源 + 各 secondary 的意見（audit 可見「AGT 說 allow，但 PDP deny」）。`matchedRule` 取自 deny 來源。`auditRequired = true`。
   - secondary adapter 執行拋例外 → `evaluateSecondaries` 產生一筆合成 `deny`（reason 標 detector/adapter 錯誤）→ 仍 any-deny-wins（fail-closed）。
 - **PUBLIC interface（src/policy/dedup.ts）**：`interface SecondaryPolicyAdapter { evaluate(req: PolicyRequest): PolicyDecision }`；`combineDecisions(primary, secondary[]): PolicyDecision`；`evaluateSecondaries(adapters, req): PolicyDecision[]`；fakes `AllowAllSecondaryPolicy`/`DenyAllSecondaryPolicy`。
@@ -32,15 +33,15 @@ SLICE-P2-E — 新增 `SecondaryPolicyAdapter`（vendor-neutral、advisory polic
 - truth table：`(allow,[deny])→deny`、`(allow,[allow])→allow`、`(deny,[deny])→deny`、`(allow,[allow,deny])→deny`。
 - fail-closed：`evaluateSecondaries([throwingAdapter], req)` → 一筆 deny；經 combine → deny。
 - `auditRequired` 永真。
-`src/test-contracts/secondary-policy-adapter.test.ts`：factory over [AllowAll, DenyAll]，斷言每個 impl 回 schema-valid PolicyDecision（effect ∈ {allow,deny}、reason 非空、auditRequired），證可插拔（≥2 impl）。
-> 預期首次 RED：import `../policy/dedup.js` / `./dedup.js` 失敗。
+**≥2-impl 可插拔 contract** 的斷言**併入 `dedup.test.ts` 最後一個 describe**（factory over [AllowAll, DenyAll]，斷言每個 impl 回 schema-valid PolicyDecision），不另開 `src/test-contracts/secondary-policy-adapter.test.ts`（slice 範圍內的合理收斂）。
+> 預期首次 RED：import `./dedup.js` 失敗。
 
-## (6) Definition of Done（待填）
-- [ ] first RED exit code 已貼。
-- [ ] `pnpm run verify` exit 0。
-- [ ] `deps:check` 綠（dedup.ts 只 import policy types、無 vendor token、no-vendor-in-core 綠）。
-- [ ] secret-scan clean。
-- [ ] Adversarial review = PASS（含 mutation：讓 secondary-allow 能翻 PDP-deny / 移除 any-deny-wins / secondary-throw 不 fail-closed → 測試紅）。
+## (6) Definition of Done（實測）
+- [x] **first RED**（dedup.js 不存在）：`vitest run dedup.test.ts` → import 失敗、no tests（exit≠0）。
+- [x] `pnpm run verify` **exit 0**（96 tests、deps 23 modules 0 violations、secret-scan clean）。
+- [x] `deps:check` 綠（IV 確認 dedup.ts 只 import `./types.js`、無 vendor、不 import evaluate.ts；no-vendor-in-core 綠）。
+- [x] secret-scan clean。
+- [x] **Adversarial review = PASS**（fresh-context IV；secondary-allow 在 1/2/50 個 + zero + garbage 情形下皆**無法**翻 PDP-deny；any-deny-wins 任意位置成立；secondary-throw（Error/非Error/null）→ deny；mutation 3 種（allow 覆蓋 deny / 移 any-deny-wins / throw 不 fail-closed）皆被測試抓。IV 發現的 LOW（malformed secondary 在 allow 路徑 fail-open）**已當場修為 fail-closed**：`effect !== "allow"` 即 deny，並加 malformed 測試）。
 
 ## (7) Rollback
 revert commit（移除 dedup 模組 + barrel 一行）。

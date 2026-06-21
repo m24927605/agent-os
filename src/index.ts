@@ -9,6 +9,7 @@
 export * from "./iam/ids.js";
 export * from "./policy/types.js";
 export * from "./policy/evaluate.js";
+export * from "./policy/dedup.js";
 export * from "./audit/event.js";
 export * from "./audit/redact.js";
 export * from "./audit/serialize.js";
