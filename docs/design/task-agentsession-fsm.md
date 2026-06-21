@@ -101,6 +101,12 @@ ledger 與 clock 由 composition root 注入。
   若該 `stepKey` 已存在於 ledger（status=executed）→ **跳過、不再呼叫 `runGovernedToolCall`、不再跑 effect**，
   直接用 ledger 裡的既有 outcome 推進 cursor。**deny-by-default**：ledger 讀取失敗 / 記錄損毀 / hash 不一致
   → fail-closed（Task→failed），**絕不**「不確定就重跑」（重跑會重複 effect）。
+  **（S4 已落地）** `resumeTask(deps, task)`（`src/orchestration/task/runner.ts`）即此入口：fold-before-run
+  先用 `ledger.has(stepKey)` + `ledger.list(taskId)` 對每個 step 判定是否已 `executed`，是→跳過並回報於
+  `skipped`、用既有 record 推進 FSM；遇第一個未完成 step 即交回**與 S3 完全相同**的 `driveRunningTask` 續跑。
+  fail-closed 三條皆已測（`resume.test.ts`）：①`has`/`list` throw、②記錄 `stepKey` 與重算 key 不一致（損毀/竄改）、
+  ③ ledger 有此 step 但 outcome=`denied`（denied 不當 done、不續跑）→ 一律 Task→failed 且 effect spy 不增加。
+  double-resume 對已完成 ledger 重入仍 0 次新 effect。
 - **為何不會重複 effect**：唯一會觸發 effect 的路徑是 `runGovernedToolCall`，而 runner 只在「ledger 裡沒有此
   stepKey 的 executed 記錄」時才呼叫它。crash 發生在 effect 之後、append StepRecord 之前的**窄窗**，由 P2-I 的
   AuditEvent（已在 WORM、key=taskId）作為**權威真相**回填——resume 先 reconcile WORM 再 fold ledger（見 §4 風險）。

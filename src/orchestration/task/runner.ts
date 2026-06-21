@@ -1,5 +1,6 @@
 /**
- * Task runner (SLICE-P2R-R5-S3) — the driver that runs a multi-step `Task` by COMPOSING OVER P2-I's
+ * Task runner (SLICE-P2R-R5-S3 + S4 crash-resume) — the driver that runs a multi-step `Task` by
+ * COMPOSING OVER P2-I's
  * `runGovernedToolCall`, NOT by rewriting the pipeline. For each step from the Task's cursor it:
  *
  *   1. builds the step's `toolCall` (injected `buildToolCall`),
@@ -45,6 +46,13 @@ export interface RunTaskResult {
   readonly records: readonly StepRecord[];
 }
 
+export interface ResumeTaskResult {
+  readonly task: Task;
+  readonly records: readonly StepRecord[];
+  /** stepKeys of steps that the ledger already recorded as `executed` and were SKIPPED (not re-run). */
+  readonly skipped: readonly string[];
+}
+
 /**
  * Drive a Task to a terminal state. Returns the final Task plus the StepRecords appended THIS run.
  * Never throws on a governed denial or an FSM rejection — those fail the Task closed. A ledger append
@@ -54,17 +62,120 @@ export async function runTask<TC, R>(
   deps: RunTaskDeps<TC, R>,
   inputTask: Task,
 ): Promise<RunTaskResult> {
-  const records: StepRecord[] = [];
-
-  // Move out of `pending` first. Deny-by-default: if the FSM refuses to start, fail closed.
-  let task = inputTask;
-  if (task.status === "pending") {
-    const started = transition(task, { kind: "start" });
-    if (!started.ok) {
-      return { task: { ...task, status: "failed" }, records };
-    }
-    task = started.task;
+  const task = startOrFail(inputTask);
+  if (task.status === "failed") {
+    return { task, records: [] };
   }
+  const { task: final, records } = await driveRunningTask(deps, task);
+  return { task: final, records };
+}
+
+/**
+ * Crash-resume entry (SLICE-P2R-R5-S4). Before running ANY step, FOLD the Task's ledger:
+ *
+ *   - For each step from the cursor, recompute its deterministic `stepKey` (S2) and ask the ledger.
+ *   - A step whose `stepKey` the ledger already has an `executed` record for is SKIPPED — the runner
+ *     never calls `runGovernedToolCall`, the external effect never re-runs, and the FSM advances on
+ *     the EXISTING record. This is the "no DUPLICATED external effect" invariant (design §2.3).
+ *   - Once a step is NOT found done in the ledger, resume hands off to the SAME S3 run path for the
+ *     remaining steps — identical governance, append-before-advance, and short-circuit semantics.
+ *
+ * FAIL-CLOSED (deny-by-default), NEVER "uncertain => re-run":
+ *   - any ledger read that throws (`has`/`list`),
+ *   - a ledger record whose stored `stepKey` does not match the deterministic recomputed key
+ *     (corrupt/tampered record),
+ *   - a step the ledger has but recorded as `denied` (a denial already failed the Task; resume does
+ *     not treat it as done and does not run past it)
+ *   => the Task fails closed and NO further step's effect runs.
+ */
+export async function resumeTask<TC, R>(
+  deps: RunTaskDeps<TC, R>,
+  inputTask: Task,
+): Promise<ResumeTaskResult> {
+  const skipped: string[] = [];
+
+  // Authoritative fold source: the append-ordered ledger rows, indexed by stepKey. A read failure is
+  // fail-closed (we cannot know what is done => we must NOT re-run).
+  let rows: readonly StepRecord[];
+  try {
+    rows = await deps.ledger.list(inputTask.taskId);
+  } catch {
+    return { task: { ...inputTask, status: "failed" }, records: [], skipped };
+  }
+  const byKey = new Map<string, StepRecord>();
+  for (const row of rows) {
+    byKey.set(row.stepKey, row);
+  }
+
+  let task = startOrFail(inputTask);
+  if (task.status === "failed") {
+    return { task, records: [], skipped };
+  }
+
+  // Fold-before-run: advance the cursor over already-`executed` steps WITHOUT touching P2-I.
+  while (task.status === "running" && task.cursor < task.steps.length) {
+    const stepIndex = task.cursor;
+    const stepKey = computeStepKey({
+      taskId: task.taskId,
+      stepIndex,
+      intent: task.steps[stepIndex],
+    });
+
+    let present: boolean;
+    try {
+      present = await deps.ledger.has(stepKey);
+    } catch {
+      // Ledger membership query failed => fail closed; do NOT re-run.
+      return { task: { ...task, status: "failed" }, records: [], skipped };
+    }
+    if (!present) {
+      break; // first not-yet-done step — hand off to the live run path below.
+    }
+
+    const recorded = byKey.get(stepKey);
+    // Corrupt/tampered: `has` says present but no matching row, or the row's key drifted. Fail closed.
+    if (recorded === undefined || recorded.stepKey !== stepKey) {
+      return { task: { ...task, status: "failed" }, records: [], skipped };
+    }
+    // A denied step is NOT done: it already failed the Task. Resume must not skip past it / re-run.
+    if (recorded.outcome.status !== "executed") {
+      return { task: { ...task, status: "failed" }, records: [], skipped };
+    }
+
+    // Skip: advance the FSM on the EXISTING record — no governance, no effect, no new append.
+    const advanced = transition(task, { kind: "step-executed", record: recorded });
+    if (!advanced.ok) {
+      return { task: { ...task, status: "failed" }, records: [], skipped };
+    }
+    task = advanced.task;
+    skipped.push(stepKey);
+  }
+
+  // Remaining steps (if any) run through the identical S3 path. completed/failed already terminal.
+  const { task: final, records } = await driveRunningTask(deps, task);
+  return { task: final, records, skipped };
+}
+
+/** Move a `pending` Task to `running`; deny-by-default => any non-start failure yields `failed`. */
+function startOrFail(inputTask: Task): Task {
+  if (inputTask.status !== "pending") {
+    return inputTask;
+  }
+  const started = transition(inputTask, { kind: "start" });
+  return started.ok ? started.task : { ...inputTask, status: "failed" };
+}
+
+/**
+ * The S3 per-step run loop, shared by `runTask` and `resumeTask`. Drives a `running` Task from its
+ * cursor through P2-I (governance -> ledger append-before-advance -> FSM), failing closed on a denial,
+ * a lost append, or an FSM rejection. A non-`running` Task is returned untouched.
+ */
+async function driveRunningTask<TC, R>(
+  deps: RunTaskDeps<TC, R>,
+  inputTask: Task,
+): Promise<RunTaskResult> {
+  const records: StepRecord[] = [];
+  let task = inputTask;
 
   while (task.status === "running" && task.cursor < task.steps.length) {
     const stepIndex = task.cursor;
