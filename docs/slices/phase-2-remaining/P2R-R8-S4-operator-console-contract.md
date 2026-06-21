@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r8-s4-operator-console-contract
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；net LOC <~200、files <~3（`src/tenant/console/projection.ts` + `projection.test.ts` + barrel 追加）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R8-S4 — operator console 的**唯讀投影資料契約**：給定 `TenantBinding`，產出該租 fleet（agent 清單）+ timeline（從該租 repo 重建）投影；**結構上只看得到該租**，不含任何特權寫入。
@@ -56,15 +56,33 @@ SLICE-P2R-R8-S4 — operator console 的**唯讀投影資料契約**：給定 `T
   exit code: 1
   ```
 
-## (6) Definition of Done（每條附指令證據；待實作覆蓋）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
-- [ ] `pnpm run deps:check` exit 0（`src/tenant/console` 為 `src/tenant` 同模組內部目錄，intra-module 引用合法；no-vendor-in-core 綠）
-- [ ] low coupling / high cohesion：純唯讀投影、無跨 module deep import、無 cyclic
-- [ ] secret-scan 乾淨（projection/test 無 secret-like 值；view 不含 secret 欄位）
-- [ ] Docs 更新（design §2.5；本 slice）
-- [ ] Adversarial code review = PASS（fresh-context；嘗試用 A binding 看 B 租 fleet、嘗試經投影 mutate 皆失敗）
-- [ ] **Independent Verifier Pass**（跨租隔離 + 唯讀性 + fail-closed；mutation：投影忽略 binding/混租必被抓）
+## (6) Definition of Done（每條附指令證據；實證已覆蓋）
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0
+  ```
+  $ pnpm run verify
+  > tsc --noEmit && biome check src (Checked 139 files, No fixes) && tsc -p tsconfig.build.json
+  > vitest run → Test Files 56 passed | 1 skipped (57); Tests 542 passed | 1 skipped (543)
+    ✓ src/tenant/console/projection.test.ts (8 tests)
+  > deps:check ✔ no dependency violations found (93 modules, 221 dependencies cruised)
+  > proto:check ok; openshell:proto:check ok; verify:go ok; verify:py skip; launcher:check clean; secret-scan clean
+  VERIFY_EXIT=0
+  ```
+- [x] `pnpm run deps:check` exit 0（`src/tenant/console` 為 `src/tenant` 同模組內部目錄，intra-module 引用合法；no-vendor-in-core 綠）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (93 modules, 221 dependencies cruised)
+  deps:check exit=0
+  ```
+- [x] low coupling / high cohesion：純唯讀投影、無跨 module deep import、無 cyclic（depcruise 0 violations；僅 intra-module 引用 persistence port + router binding 型別）
+- [x] secret-scan 乾淨（projection/test 無 secret-like 值；view 不含 secret 欄位）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  ```
+- [x] Docs 更新（design §2.5；本 slice）
+- [x] Adversarial code review = PASS（fresh-context；嘗試用 A binding 看 B 租 fleet、嘗試經投影 mutate 皆失敗）
+- [x] **Independent Verifier Pass**（跨租隔離 + 唯讀性 + fail-closed；mutation：投影忽略 binding/混租必被抓）
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `src/tenant/console`；純唯讀、無副作用）。
