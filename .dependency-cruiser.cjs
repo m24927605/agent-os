@@ -40,7 +40,11 @@ module.exports = {
         path: "^src/[^/]+/.+",
         pathNot: [
           "^src/$1/", // same module — intra-module imports are fine (cohesion)
-          "^src/[^/]+/index\\.ts$", // a module's public barrel
+          "/index\\.ts$", // a module's public barrel, at ANY depth (e.g. src/cost/index.ts or the
+          // nested src/runtime/brain/index.ts). A barrel is the legal cross-module entry regardless
+          // of nesting; deep imports of NON-barrel files (e.g. .../fakes.ts) are still forbidden.
+          // Widened in SLICE-P2R-R9-S2: sdk is the first true cross-module consumer of a depth-2
+          // barrel, exposing that the prior "^src/[^/]+/index\\.ts$" only recognised depth-1 barrels.
           "^src/iam/ids\\.ts$", // interim pre-barrel entry; remove in barrel-migration slice
         ],
       },
