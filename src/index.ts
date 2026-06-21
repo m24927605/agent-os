@@ -29,3 +29,4 @@ export * from "./runtime/brain/index.js";
 export * from "./runtime/substrate/index.js";
 export * from "./personal/intent/index.js";
 export * from "./personal/plan/index.js";
+export * from "./personal/approval/index.js";

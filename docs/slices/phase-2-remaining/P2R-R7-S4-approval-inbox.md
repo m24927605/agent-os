@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r7-s4-approval-inbox
 - **Author**: Frontend Developer（agency-agents）   **Adversarial reviewer**: fresh-context 獨立 Opus 4.8（非作者）
 - **Size budget**: <= 1 day；net LOC <~180、files <~4（`src/personal/approval/{inbox.ts,index.ts}` + `inbox.test.ts` + barrel 一行）、modules = 1（`personal/approval`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R7-S4 — 新增 `ApprovalInbox`：把待核准計畫排進 pending（**capped**，借鏡 Hermes pairing「max 3 pending」），`approve` 是 `runGovernedToolCall`（P2-I）的**唯一**呼叫點、`reject`/未決 ⇒ **不執行**（deny-by-default）。
@@ -57,14 +57,32 @@ SLICE-P2R-R7-S4 — 新增 `ApprovalInbox`：把待核准計畫排進 pending（
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（§5 首次 RED）。
-- [ ] `pnpm run verify` exit 0（待填）。
-- [ ] `pnpm run deps:check` exit 0（`personal/approval` 只 import orchestration + personal/plan barrel、無 cycle、無 vendor、inward；runner 為注入函式非 deep-import）。
-- [ ] low coupling / high cohesion 遵守。
-- [ ] secret-scan 乾淨。
-- [ ] Docs 更新（`src/index.ts` barrel 加 `./personal/approval/index.js`）。
-- [ ] Adversarial code review = PASS（fresh-context；mutation：把 approve 改成可重放 / 把 reject 也呼叫 runner，皆須被測試抓到）— 摘要：<待填>。
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（deny-by-default：唯有 approve 觸發 effect、一次性、cap 不可繞過）。
+- [x] Test-first 成立（§5 首次 RED）。
+- [x] `pnpm run verify` exit 0。證據：
+  ```
+  $ pnpm run verify   # typecheck && lint && build && test && deps:check && proto:check && openshell:proto:check && verify:go && verify:py && secret-scan
+  ... typecheck ok / lint ok / build ok / Test Files passed / no dependency violations (84 modules) ...
+  verify:go: ok   |   verify:py: skip (no Python plane)   |   secret-scan: clean
+  VERIFY_EXIT=0
+  ```
+- [x] `pnpm run deps:check` exit 0（`personal/approval` 只 import orchestration + personal/plan barrel、無 cycle、無 vendor、inward；runner 為注入函式非 deep-import）。證據：
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (84 modules, 196 dependencies cruised)
+  DEPS_EXIT=0
+  ```
+- [x] low coupling / high cohesion 遵守（runner 注入；只 type-only import 兩個 barrel；no-vendor-in-core 測試於 verify 內綠）。
+- [x] secret-scan 乾淨（`secret-scan: clean`，含於上方 verify）。
+- [x] Docs 更新（`src/index.ts` barrel 加 `./personal/approval/index.js`）。
+- [x] Adversarial code review = PASS（fresh-context；mutation：把 approve 改成可重放 / 把 reject 也呼叫 runner，皆須被測試抓到）— 摘要：獨立審查通過；一次性（entry 於 await 前 delete）、reject 不呼叫 runner、cap 不可繞過皆有 spy-count 測試釘住。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（deny-by-default：唯有 approve 觸發 effect、一次性、cap 不可繞過）。
+
+  逐項目試（slice 測試 8 passed / exit 0）：
+  ```
+  $ pnpm test src/personal/approval/inbox.test.ts
+  ✓ src/personal/approval/inbox.test.ts (8 tests)
+  Test Files  1 passed (1)   Tests  8 passed (8)
+  ```
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `personal/approval` 模組 + barrel 一行）。
