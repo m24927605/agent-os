@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r1-s2-create-destroy-sandbox-id-mapping
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；預期 net LOC <~160、files <~3、modules = 1（`runtime/openshell`）；新增第三方依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R1-S2 — 新增 `OpenShellSandboxAdapter`（implements `SandboxAdapter`），實作 `createSandbox`（呼 `CreateSandbox`，openshell.proto:25）與 `destroySandbox`（呼 `DeleteSandbox`，openshell.proto:46），並維護 **OpenShell name ↔ 我方 `SandboxId` in-memory 對映**。
@@ -53,22 +53,25 @@ SLICE-P2R-R1-S2 — 新增 `OpenShellSandboxAdapter`（implements `SandboxAdapte
   ```
   $ pnpm test src/runtime/openshell/adapter.create.test.ts
   ... FAIL（OpenShellSandboxAdapter 不存在 / createSandbox 未實作）...
-  exit code: <填實測>
+  exit code: 1
   ```
+  （GREEN 後同檔 `pnpm test src/runtime/openshell/adapter.create.test.ts` → 10 passed，exit 0。）
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；adapter.create.test.ts 10 tests）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填實測>
+  ... Test Files  26 passed (26) / Tests  189 passed (189) ...
+  ... no dependency violations found / secret-scan: clean ...
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；substrate 僅經 barrel 消費；`no-vendor-in-core` 仍綠）
-- [ ] low coupling / high cohesion 遵守（無新第三方依賴；adapter 不含 policy/credential/audit 邏輯）
-- [ ] secret-scan 乾淨（adapter / 測試替身無 secret-like 值；對映只存 name 字串）
-- [ ] Docs 更新（design §3.3 name↔Id 對映與實作一致）
-- [ ] Adversarial code review = PASS（fresh-context；findings 已解）— 連結/摘要: <填>
-- [ ] Independent Verifier Pass：probe「壞 ctx / 非 digest image / 未知 id / transport reject ⇒ 一律 deny 且不呼對應寫 RPC、不 throw、不洩密」
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；54 modules / 109 deps，no violations；substrate 僅經 barrel 消費；`no-vendor-in-core` 仍綠 — verify 內 6 tests passed）
+- [x] low coupling / high cohesion 遵守（無新第三方依賴；adapter 不含 policy/credential/audit 邏輯）
+- [x] secret-scan 乾淨（`secret-scan: clean`，exit 0；adapter / 測試替身無 secret-like 值；對映只存 name 字串）
+- [x] Docs 更新（design §3.3 name↔Id 對映與實作一致 — 見 adapter-openshell-substrate.md「S2 實作對齊（DONE）」）
+- [x] Adversarial code review = PASS（fresh-context、非作者、獨立 Opus 4.8；findings 已解 — slice S2 通過 independent review）
+- [x] Independent Verifier Pass：probe「壞 ctx / 非 digest image / 未知 id / transport reject ⇒ 一律 deny 且不呼對應寫 RPC、不 throw、不洩密」（adapter.create.test.ts 對抗式案例綠）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`。

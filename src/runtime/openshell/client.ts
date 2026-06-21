@@ -56,6 +56,69 @@ export interface OpenShellTransport {
   health(): Promise<{ ok: boolean }>;
 }
 
+// --- S2 sandbox-lifecycle wire shapes (TS face of the pinned proto subset) --------------------------
+//
+// These mirror the upstream `openshell.v1` messages we consume in S2 (CreateSandbox / DeleteSandbox).
+// They are intentionally PARTIAL: only the fields S2 reads/writes are typed (no policy, no env, no
+// status). The adapter treats every field defensively (an absent `metadata.name` is fail-closed),
+// so a backend that sends more (or less) cannot break the deny-by-default contract.
+
+/** `SandboxTemplate` subset — the pinned boot image lives here (openshell.proto:333-335). */
+export interface OpenShellSandboxTemplate {
+  /** Fully-qualified OCI image reference — MUST be a pinned `sha256:` digest (design §5). */
+  readonly image: string;
+}
+
+/** `SandboxSpec` subset — only `template.image` and `labels` are set by S2. */
+export interface OpenShellSandboxSpec {
+  readonly template: OpenShellSandboxTemplate;
+}
+
+/** `CreateSandboxRequest` subset (openshell.proto:427-433). */
+export interface CreateSandboxRequest {
+  readonly spec: OpenShellSandboxSpec;
+  /** Optional caller-supplied name; empty => the gateway generates one. */
+  readonly name?: string;
+  readonly labels?: Readonly<Record<string, string>>;
+}
+
+/** `ObjectMeta` subset — the gateway-assigned `name` is the canonical lookup key (datamodel.proto:12). */
+export interface OpenShellObjectMeta {
+  readonly name?: string;
+  readonly id?: string;
+}
+
+/** `Sandbox` subset (openshell.proto:296-306). */
+export interface OpenShellSandbox {
+  readonly metadata?: OpenShellObjectMeta;
+}
+
+/** `SandboxResponse` (openshell.proto:488-490). */
+export interface SandboxResponse {
+  readonly sandbox?: OpenShellSandbox;
+}
+
+/** `DeleteSandboxRequest` (openshell.proto:482-485) — keyed by the canonical sandbox `name`. */
+export interface DeleteSandboxRequest {
+  readonly name: string;
+}
+
+/** `DeleteSandboxResponse` (openshell.proto:517-519). */
+export interface DeleteSandboxResponse {
+  readonly deleted?: boolean;
+}
+
+/**
+ * Transport seam extended with the S2 unary sandbox-lifecycle primitives. The adapter consumes ONLY
+ * this interface (vendor-neutral seam); the production wiring builds the connect-node-backed
+ * implementation, while tests inject an in-process double. Every primitive carries the client
+ * deadline internally; a rejected promise is the adapter's signal to fail CLOSED (deny), never throw.
+ */
+export interface OpenShellLifecycleTransport extends OpenShellTransport {
+  createSandbox(req: CreateSandboxRequest): Promise<SandboxResponse>;
+  deleteSandbox(req: DeleteSandboxRequest): Promise<DeleteSandboxResponse>;
+}
+
 export interface OpenShellClientOpts {
   /** OpenShell gateway endpoint (e.g. `https://gateway:443`). Treated as sensitive: never logged. */
   readonly baseUrl: string;
