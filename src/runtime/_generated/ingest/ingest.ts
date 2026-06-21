@@ -51,6 +51,28 @@ export interface AppendResponse {
 }
 
 /**
+ * CheckpointRequest carries no fields: the anchor is the kernel's single global chain head; there is
+ * no per-task / per-tenant scoping at the kernel (the WORM log is shared, monotonic, single-writer).
+ */
+export interface CheckpointRequest {
+}
+
+/** CheckpointResponse — the snapshot-safe anchor captured atomically under the append mutex. */
+export interface CheckpointResponse {
+  /** current chain head entryHash ("sha256:"-prefixed); genesis if empty log */
+  headEntryHash: string;
+  /** sequence of the head record (0 for an empty log; check per_source_next_seq for emptiness) */
+  headSequence: number;
+  /** expected next sequence per source (empty map => no appends yet) */
+  perSourceNextSeq: { [key: string]: number };
+}
+
+export interface CheckpointResponse_PerSourceNextSeqEntry {
+  key: string;
+  value: number;
+}
+
+/**
  * AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: exactly one RPC
  * (Append) and no Update/Delete/Rewrite/Upsert/Overwrite — the control plane can only append, never
  * rewrite history (HARD CONSTRAINT; gating c1/c4). The server additionally enforces monotonic
@@ -58,4 +80,11 @@ export interface AppendResponse {
  */
 export interface AppendService {
   Append(request: AppendRequest): Promise<AppendResponse>;
+  /**
+   * Checkpoint is READ-ONLY: under the same append mutex it atomically captures a consistent snapshot
+   * anchor {head_entry_hash, head_sequence, per_source_next_seq}. It NEVER appends, rewrites, or
+   * truncates — it is a consistent read of the chain head + per-source next sequence so a snapshot
+   * cannot observe a torn (half-written) tail. It does NOT widen the append-only surface.
+   */
+  Checkpoint(request: CheckpointRequest): Promise<CheckpointResponse>;
 }

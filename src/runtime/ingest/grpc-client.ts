@@ -17,6 +17,8 @@ import type {
   AppendRequest,
   AppendResponse,
   AppendService,
+  CheckpointRequest,
+  CheckpointResponse,
   Receipt,
 } from "../_generated/ingest/ingest.js";
 
@@ -46,6 +48,14 @@ export function grpcAppendService(endpoint: string): AppendService {
           },
         );
       });
+    },
+    // Checkpoint is part of the AppendService contract (R10-S4: snapshot-safe checkpoint RPC). Its
+    // wire codecs + composition-root wiring are consumed by R10-S3 (out of scope here). Until that
+    // slice wires it, fail CLOSED: never return a faked/empty anchor that a caller might trust.
+    Checkpoint(_request: CheckpointRequest): Promise<CheckpointResponse> {
+      return Promise.reject(
+        new Error("Checkpoint RPC client not wired yet (R10-S3 composition root; fail-closed)"),
+      );
     },
   };
 }

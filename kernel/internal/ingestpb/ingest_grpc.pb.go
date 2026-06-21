@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AppendService_Append_FullMethodName = "/agentos.kernel.ingest.v1.AppendService/Append"
+	AppendService_Append_FullMethodName     = "/agentos.kernel.ingest.v1.AppendService/Append"
+	AppendService_Checkpoint_FullMethodName = "/agentos.kernel.ingest.v1.AppendService/Checkpoint"
 )
 
 // AppendServiceClient is the client API for AppendService service.
@@ -32,6 +33,11 @@ const (
 // per-source sequence and fails closed (typed AppendError + audit) on replay/gap/malformed.
 type AppendServiceClient interface {
 	Append(ctx context.Context, in *AppendRequest, opts ...grpc.CallOption) (*AppendResponse, error)
+	// Checkpoint is READ-ONLY: under the same append mutex it atomically captures a consistent snapshot
+	// anchor {head_entry_hash, head_sequence, per_source_next_seq}. It NEVER appends, rewrites, or
+	// truncates — it is a consistent read of the chain head + per-source next sequence so a snapshot
+	// cannot observe a torn (half-written) tail. It does NOT widen the append-only surface.
+	Checkpoint(ctx context.Context, in *CheckpointRequest, opts ...grpc.CallOption) (*CheckpointResponse, error)
 }
 
 type appendServiceClient struct {
@@ -52,6 +58,16 @@ func (c *appendServiceClient) Append(ctx context.Context, in *AppendRequest, opt
 	return out, nil
 }
 
+func (c *appendServiceClient) Checkpoint(ctx context.Context, in *CheckpointRequest, opts ...grpc.CallOption) (*CheckpointResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckpointResponse)
+	err := c.cc.Invoke(ctx, AppendService_Checkpoint_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AppendServiceServer is the server API for AppendService service.
 // All implementations must embed UnimplementedAppendServiceServer
 // for forward compatibility.
@@ -62,6 +78,11 @@ func (c *appendServiceClient) Append(ctx context.Context, in *AppendRequest, opt
 // per-source sequence and fails closed (typed AppendError + audit) on replay/gap/malformed.
 type AppendServiceServer interface {
 	Append(context.Context, *AppendRequest) (*AppendResponse, error)
+	// Checkpoint is READ-ONLY: under the same append mutex it atomically captures a consistent snapshot
+	// anchor {head_entry_hash, head_sequence, per_source_next_seq}. It NEVER appends, rewrites, or
+	// truncates — it is a consistent read of the chain head + per-source next sequence so a snapshot
+	// cannot observe a torn (half-written) tail. It does NOT widen the append-only surface.
+	Checkpoint(context.Context, *CheckpointRequest) (*CheckpointResponse, error)
 	mustEmbedUnimplementedAppendServiceServer()
 }
 
@@ -74,6 +95,9 @@ type UnimplementedAppendServiceServer struct{}
 
 func (UnimplementedAppendServiceServer) Append(context.Context, *AppendRequest) (*AppendResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Append not implemented")
+}
+func (UnimplementedAppendServiceServer) Checkpoint(context.Context, *CheckpointRequest) (*CheckpointResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Checkpoint not implemented")
 }
 func (UnimplementedAppendServiceServer) mustEmbedUnimplementedAppendServiceServer() {}
 func (UnimplementedAppendServiceServer) testEmbeddedByValue()                       {}
@@ -114,6 +138,24 @@ func _AppendService_Append_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AppendService_Checkpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckpointRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppendServiceServer).Checkpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppendService_Checkpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppendServiceServer).Checkpoint(ctx, req.(*CheckpointRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AppendService_ServiceDesc is the grpc.ServiceDesc for AppendService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -124,6 +166,10 @@ var AppendService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Append",
 			Handler:    _AppendService_Append_Handler,
+		},
+		{
+			MethodName: "Checkpoint",
+			Handler:    _AppendService_Checkpoint_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -28,7 +28,12 @@ const REQ: AppendRequestShape = {
 
 /** An in-process `AppendService` whose Append is driven by an injected handler — zero network. */
 function stubClient(handler: (req: AppendRequest) => Promise<AppendResponse>): AppendService {
-  return { Append: handler };
+  // Checkpoint is part of the AppendService contract (R10-S4) but is not exercised by the S6
+  // transport tests; fail-closed so an accidental call surfaces rather than returning a faked anchor.
+  return {
+    Append: handler,
+    Checkpoint: () => Promise.reject(new Error("Checkpoint not exercised in this test")),
+  };
 }
 
 describe("createRpcAppendTransport (S6)", () => {
