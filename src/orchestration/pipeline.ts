@@ -1,0 +1,106 @@
+/**
+ * Governed intent->effect pipeline — the composition layer that ties the vendor-neutral ports into one
+ * ordered, fail-closed flow for a single brain-proposed ToolCall:
+ *
+ *   screen (credential-blind) -> authorize (PDP sole deny authority) -> cost.reserve (budget hard-cap)
+ *   -> commit-before-effect (append AuditEvent, await receipt) -> effect -> cost.commit
+ *
+ * Each gate SHORT-CIRCUITS to a denied outcome; the effect runs ONLY after every gate passes AND the
+ * audit receipt is in hand (so no un-recorded effect, no over-budget spend, no secret egress).
+ *
+ * Low coupling by DEPENDENCY INJECTION (same pattern as commitgate / the brain credential guard): this
+ * module imports only barrel'd port TYPES (ToolCall, CostGate, CommitAppender + commitBeforeEffect);
+ * the policy decision, the credential screen, and the effect are injected by the composition root, so
+ * orchestration never reaches into another module's internals and names no vendor.
+ */
+import { type CommitAppender, commitBeforeEffect } from "../commitgate/index.js";
+import type { CostGate } from "../cost/index.js";
+
+/**
+ * The minimal shape the pipeline needs from a brain-proposed tool call. Kept structural (NOT an import
+ * of the brain module's concrete `ToolCall`) so orchestration stays decoupled from any specific brain
+ * port — the composition root passes its real ToolCall, which structurally satisfies this.
+ */
+export interface GovernedCall {
+  readonly tool: string;
+  readonly context: unknown;
+}
+
+export type ScreenOutcome = { ok: true } | { ok: false; reason: string };
+export type AuthorizeDecision = { effect: "allow" | "deny"; reason: string };
+export type EffectResult = { ok: boolean; detail?: string; tokensUsed?: number };
+
+export interface GovernedToolCallDeps<TC extends GovernedCall, R> {
+  /** Credential-blind / structural screen of the brain's proposed call. */
+  readonly screen: (toolCall: TC) => ScreenOutcome;
+  /** The SOLE authorization decision (PDP + any secondary dedup folded in by the composition root). */
+  readonly authorize: (toolCall: TC) => AuthorizeDecision;
+  readonly cost: CostGate;
+  readonly estimateTokens: (toolCall: TC) => number;
+  /** Append-before-effect appender (commitgate). */
+  readonly appender: CommitAppender<unknown, R>;
+  /** The actual effect — invoked ONLY after every gate passes and the audit receipt is in hand. */
+  readonly effect: (toolCall: TC) => Promise<EffectResult>;
+}
+
+export type GovernedStage = "screen" | "policy" | "cost" | "commit";
+
+export type GovernedOutcome<R> =
+  | { status: "executed"; reservationId: string; receipt: R; detail?: string }
+  | { status: "denied"; stage: GovernedStage; reason: string };
+
+/** Run one brain-proposed tool call through the governed pipeline. Fail-closed at every gate. */
+export async function runGovernedToolCall<TC extends GovernedCall, R>(
+  deps: GovernedToolCallDeps<TC, R>,
+  toolCall: TC,
+): Promise<GovernedOutcome<R>> {
+  // 1) credential-blind screen
+  const screened = deps.screen(toolCall);
+  if (!screened.ok) {
+    return { status: "denied", stage: "screen", reason: screened.reason };
+  }
+
+  // 2) policy (PDP sole deny authority)
+  const decision = deps.authorize(toolCall);
+  if (decision.effect === "deny") {
+    return { status: "denied", stage: "policy", reason: decision.reason };
+  }
+
+  // 3) cost reserve (budget hard-cap) — before the audit/effect
+  const reservation = await deps.cost.reserve(toolCall.context, {
+    estimatedTokens: deps.estimateTokens(toolCall),
+    resource: toolCall.tool,
+  });
+  if (reservation.status === "denied") {
+    return { status: "denied", stage: "cost", reason: reservation.reason };
+  }
+
+  // 4) commit-before-effect: append the AuditEvent, await the receipt, and ONLY THEN run the effect.
+  const event = {
+    kind: "tool-invocation",
+    tool: toolCall.tool,
+    context: toolCall.context,
+    decisionReason: decision.reason,
+  };
+  const committed = await commitBeforeEffect({
+    appender: deps.appender,
+    event,
+    effect: () => deps.effect(toolCall),
+  });
+  if (committed.status === "aborted") {
+    // The audit was not durably recorded, so the effect never ran. NOTE: the reservation remains held
+    // (CostGate has no release op yet — tracked follow-up in the slice spec §8); we do NOT cost.commit.
+    return { status: "denied", stage: "commit", reason: committed.reason };
+  }
+
+  // 5) effect ran -> settle the real cost.
+  await deps.cost.commit(toolCall.context, reservation.reservationId, {
+    actualTokens: committed.result.tokensUsed ?? deps.estimateTokens(toolCall),
+  });
+  return {
+    status: "executed",
+    reservationId: reservation.reservationId,
+    receipt: committed.receipt,
+    detail: committed.result.detail,
+  };
+}
