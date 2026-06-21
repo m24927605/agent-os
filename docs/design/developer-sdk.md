@@ -75,8 +75,8 @@ Agent OS 的三 surface 中，**Developer surface 目前是「假的」**：[`do
 - **S3 — CLI（`agentos` 薄包裝）** — **DONE（slice/p2r-r9-s3-cli-manifest-lint-and-verify）**
   - 新建 `src/cli/`：一個薄的 commander-free（用 Node 內建 `process.argv` 解析，零新依賴）CLI，兩個子命令：`agentos manifest lint <file>`（讀 JSON → `parseToolManifest`，**經 `src/sdk/index.ts` barrel** → exit 0/1）、`agentos verify --chain <f> --pubkey <f>`（用 `node:child_process.spawnSync` spawn release verifier，路徑由 `AGENTOS_VERIFIER_BIN` 覆寫，relay exit code 0/1/2）。`package.json` 加一行 `bin: { agentos }` 指向 `dist/cli/main.js`；`runCli(argv, env?): Promise<number>` 為 testable entrypoint。
   - **唯一責任**：把 R3 parse + verifier 暴露成**命令列、exit-code 化**的作者/稽核者入口。fail-closed：未知子命令/缺參數/缺檔/缺 verifier binary → 非 0 退出，broken 永不被吞成 intact。
-- **S4 — ToolManifest authoring**
-  - 新建 `docs/sdk/tool-manifest-authoring.md` + `src/sdk/templates/tool-manifest.example.json`（範本）+ 把 `manifest lint` 的「一致性護欄」說明文件化。**不新增 schema 邏輯**（schema 是 R3 的 S1）。
+- **S4 — ToolManifest authoring** — **DONE（slice/p2r-r9-s4-tool-manifest-authoring）**
+  - 新建 [`docs/sdk/tool-manifest-authoring.md`](../sdk/tool-manifest-authoring.md) + [`src/sdk/templates/tool-manifest.example.json`](../../src/sdk/templates/tool-manifest.example.json)（範本）+ `src/sdk/templates/index.ts`（程式化匯出 `exampleToolManifest` + `loadExampleToolManifest()`，經 SDK barrel 消費 R3 `parseToolManifest`）+ 把 `manifest lint` 的「一致性護欄」說明文件化。**不新增 schema 邏輯**（schema 是 R3 的 S1）。`src/sdk/templates/templates.test.ts` 證明：範本經 R3 parse 合法、on-disk JSON 與匯出 byte-equivalent、刻意違規 fixture（destructive+免審批）被護欄擋下、無 secret-shaped 值。
   - **唯一責任**：作者體驗——一個可複製的 9 欄範本 + 文件化的 lint 流程；驗收靠 S3 的 `manifest lint` 對範本 exit 0、對刻意違規 fixture exit 1。
 - **S5 — standalone + WASM verifier release artifact**
   - 新建 `scripts/build-verifier-release.sh`（GOOS/GOARCH matrix 跨平台 build + `GOOS=js GOARCH=wasm` build + SHA-256SUMS + 版本嵌入），與一個 `kernel/cmd/verifier` 的 WASM entrypoint wrapper（若需要；verifier 邏輯**不改**，只加 build 流程與最小 wasm glue）。
