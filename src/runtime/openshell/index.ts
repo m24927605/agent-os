@@ -6,14 +6,19 @@
  */
 export {
   PINNED_SANDBOX_IMAGE,
+  SandboxPhase,
   assertPinnedImageDigest,
   createOpenShellClient,
   type OpenShellClientOpts,
   type OpenShellTransport,
   type OpenShellLifecycleTransport,
+  type OpenShellReadinessTransport,
   type CreateSandboxRequest,
   type DeleteSandboxRequest,
   type DeleteSandboxResponse,
   type SandboxResponse,
+  type GetSandboxRequest,
+  type WatchSandboxRequest,
+  type SandboxStreamEvent,
 } from "./client.js";
-export { OpenShellSandboxAdapter } from "./adapter.js";
+export { type AwaitReadyOpts, OpenShellSandboxAdapter } from "./adapter.js";
