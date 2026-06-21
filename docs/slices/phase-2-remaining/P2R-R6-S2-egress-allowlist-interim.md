@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r6-s2-egress-allowlist
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~120、files <~3（`src/inference/egress-allowlist.ts` + `src/inference/egress-allowlist.test.ts` + `src/inference/index.ts` barrel 增一行）、modules = 1、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R6-S2 — 新增 `isEgressAllowed()` 純函式做 **egress host deny-by-default（interim）**：`InferenceRequest.egressHost` 必須在明確 host allowlist 上，否則 deny。對齊 OpenShell 的 deny-by-default egress（`/tmp/openshell/docs/security/best-practices.mdx:40-51`），在真實 adapter（R1/R11）落地前作為 core 側第一道 fail-closed 防線。
@@ -46,26 +46,41 @@ SLICE-P2R-R6-S2 — 新增 `isEgressAllowed()` 純函式做 **egress host deny-b
   - [ ] **繞過防護（fail-closed）**：`evil-api.allowed.example` / `api.allowed.example.evil.com` 不得因部分相符而命中精確 entry `api.allowed.example`。
   - [ ] **case-insensitive**：`API.Allowed.Example` 命中 `api.allowed.example`（normalize 後精確比對）。
   - [ ] reason 不洩值：deny reason 靜態 / 含 host（非 secret）但不回顯整個請求。
-- 首次紅燈證據（待實作時貼 exit≠0）:
+- 首次紅燈證據（exit≠0、SEEN to fail）:
   ```
-  $ pnpm test src/inference/egress-allowlist.test.ts
-  ... FAIL（Cannot find module './egress-allowlist.js'）...
-  exit code: <填入>
+  $ node_modules/.bin/vitest run src/inference/egress-allowlist.test.ts
+   FAIL  src/inference/egress-allowlist.test.ts [ src/inference/egress-allowlist.test.ts ]
+  Error: Failed to load url ./egress-allowlist.js ... Does the file exist?
+   Test Files  1 failed (1)
+  exit code: 1（非 0；module 不存在 → RED）
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填入>
+  ... verify:go: ok / verify:py: skip / secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；無 vendor、無 cycle、無 deep import）
-- [ ] low coupling / high cohesion 遵守（只 intra-module `./types.js`；無新跨 module 依賴）
-- [ ] secret-scan 乾淨（source/test/fixture 無 secret-like 值；host fixture 用 `*.example` 保留域）
-- [ ] Docs 更新（連結回 design §2.1/§4.1）
-- [ ] Adversarial code review = PASS（fresh-context；deny-by-default + 子網域/前後綴繞過 + case 繞過皆對抗探測）— 連結/摘要: <填入>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（egress deny-by-default、繞過防護、空輸入 fail-closed 皆被抓）
+  並驗單一 slice 測試：
+  ```
+  $ node_modules/.bin/vitest run src/inference/egress-allowlist.test.ts
+   ✓ src/inference/egress-allowlist.test.ts (14 tests)
+   Test Files  1 passed (1)   Tests  14 passed (14)
+  exit code: 0
+  ```
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；無 vendor、無 cycle、無 deep import）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (73 modules, 156 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（只 intra-module `./types.js`；無新跨 module 依賴）
+- [x] secret-scan 乾淨（source/test/fixture 無 secret-like 值；host fixture 用 `*.example` 保留域）— `secret-scan: clean`（verify 內）
+- [x] Docs 更新（連結回 design §2.1/§4.1）
+- [x] Adversarial code review = PASS（fresh-context；deny-by-default + 子網域/前後綴繞過 + case 繞過皆對抗探測）— 摘要: 獨立 review 通過（slice R6-S2 passed independent review）。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（egress deny-by-default、繞過防護、空輸入 fail-closed 皆被抓）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `egress-allowlist.ts` + barrel 一行）。

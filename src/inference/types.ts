@@ -50,6 +50,14 @@ export type ModelAllowlist = readonly {
 }[];
 
 /**
+ * The explicit egress host allowlist: only a listed host may be routed to (exact match, compared
+ * case-insensitively after normalize). Empty list ⇒ everything denies (deny-by-default). No
+ * wildcard / suffix matching — `evil-example.com` must NOT slip past an `example.com` entry.
+ * `readonly` so a gate cannot mutate it mid-decision.
+ */
+export type EgressAllowlist = readonly string[];
+
+/**
  * The decision shape for a single gate. `allowed: true` carries the parsed (validated) request so
  * downstream gates consume a trusted value, not the raw `unknown`. `allowed: false` carries only a
  * static `reason` (gate name / category) — NEVER the request payload (reason-does-not-leak-value).
