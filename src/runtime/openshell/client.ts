@@ -195,6 +195,123 @@ export interface OpenShellReadinessTransport extends OpenShellLifecycleTransport
   watchSandbox(req: WatchSandboxRequest): AsyncIterable<SandboxStreamEvent>;
 }
 
+// --- S4 exec wire shapes (TS face of the pinned proto subset) ---------------------------------------
+//
+// These mirror the upstream `openshell.v1` ExecSandbox messages S4 consumes (openshell.proto:645-696).
+// Like the S2/S3 shapes they are intentionally PARTIAL: only the fields S4 writes/reads are typed. The
+// interactive/tty fields (tty/cols/rows; ExecSandboxInteractive) are OUT OF SCOPE (spec §3, design §6)
+// and deliberately absent. The adapter treats every field defensively — an exec stream that closes
+// before the terminal ExecSandboxExit is fail-closed (NEVER a fabricated exit 0).
+
+/**
+ * `ExecSandboxRequest` subset (openshell.proto:645-672). S4 writes `sandbox_id` (the gateway-assigned
+ * stable id, NOT the human-readable name), `command`, and the optional `workdir` / `environment` /
+ * `timeout_seconds` / `stdin`. The tty fields (proto:665-671) are out of scope and never set.
+ */
+export interface ExecSandboxRequest {
+  /** Gateway-assigned stable sandbox id (proto:647) — the exec lookup key. */
+  readonly sandboxId: string;
+  /** Command + arguments (proto:650). */
+  readonly command: readonly string[];
+  /** Optional working directory (proto:653). */
+  readonly workdir?: string;
+  /** Optional environment overrides (proto:656). Placeholder-only — raw credentials are denied. */
+  readonly environment?: Readonly<Record<string, string>>;
+  /** Optional timeout in seconds; 0 = no timeout (proto:659). */
+  readonly timeoutSeconds?: number;
+  /** Optional stdin payload (proto:662). */
+  readonly stdin?: Uint8Array;
+}
+
+/** `ExecSandboxStdout` (openshell.proto:675-677). */
+export interface ExecSandboxStdout {
+  readonly data?: Uint8Array;
+}
+
+/** `ExecSandboxStderr` (openshell.proto:680-682). */
+export interface ExecSandboxStderr {
+  readonly data?: Uint8Array;
+}
+
+/** `ExecSandboxExit` (openshell.proto:685-687) — the terminal event carrying the command exit code. */
+export interface ExecSandboxExit {
+  readonly exitCode?: number;
+}
+
+/**
+ * `ExecSandboxEvent` (openshell.proto:690-696) — one frame of the exec server-stream. Exactly one of
+ * the `oneof payload` variants is set on the wire; the adapter validates this at runtime and fails
+ * CLOSED (deny + abort) on any frame that violates it — none set, more than one set, a non-`Uint8Array`
+ * data field, or a non-integer exit code. A garbled frame is NEVER treated as a (possibly truncated)
+ * success.
+ */
+export interface ExecSandboxEvent {
+  readonly stdout?: ExecSandboxStdout;
+  readonly stderr?: ExecSandboxStderr;
+  readonly exit?: ExecSandboxExit;
+}
+
+/**
+ * Transport seam extended with the S4 exec primitive: `execSandbox` returns a server-stream of
+ * `ExecSandboxEvent`. The adapter consumes ONLY this vendor-neutral seam; the production connect-node
+ * client (the real `ExecSandbox` descriptor) is wired by S6 / the opt-in e2e, while tests inject an
+ * in-process double — mirroring how S2/S3's lifecycle/readiness primitives are exercised offline.
+ *
+ * It extends `OpenShellLifecycleTransport` (NOT the S3 readiness seam): S4 depends only on S2's
+ * create/destroy + name<->id mapping (slice DAG: S4 -> {S2}), so exec must not force a dependency on
+ * S3's get/watch primitives.
+ *
+ * Cancellation: an optional `AbortSignal` lets the adapter cancel the underlying stream when its
+ * deadline fires (design §3.4 `AbortController` budget); a transport that honours it tears the gRPC
+ * stream down rather than leaking it. The double ignores it (it has no real socket).
+ *
+ * Fail-closed signalling: `execSandbox` may throw synchronously (transport refused) OR its async
+ * iterator may throw mid-stream (RST_STREAM / deadline) OR the stream may close WITHOUT a terminal
+ * `ExecSandboxExit` — ALL are the adapter's signal to fail CLOSED (deny), never throw across the port
+ * boundary and never fabricate a success exit code.
+ */
+export interface OpenShellExecTransport extends OpenShellLifecycleTransport {
+  execSandbox(req: ExecSandboxRequest, signal?: AbortSignal): AsyncIterable<ExecSandboxEvent>;
+}
+
+/**
+ * Reserved credential markers (secrets.rs:9-10): the placeholder prefix `openshell:resolve:env:` and
+ * the alias marker `OPENSHELL-RESOLVE-ENV-`. OpenShell's `SecretResolver` rewrites provider-env raw
+ * values into `openshell:resolve:env:<KEY>` (rev 0) / `openshell:resolve:env:v<rev>_<KEY>` (rev != 0)
+ * placeholders BEFORE they reach a child env, and resolves them only at egress. R1 only ever carries
+ * placeholder-shaped values; it must NEVER smuggle a raw credential reference into exec env.
+ */
+const PLACEHOLDER_PREFIX = "openshell:resolve:env:";
+const PROVIDER_ALIAS_MARKER = "OPENSHELL-RESOLVE-ENV-";
+
+/**
+ * The EXACT placeholder grammar OpenShell's `SecretResolver` emits
+ * (`placeholder_for_env_key_for_revision`, secrets.rs:487-493):
+ *   - revision 0   => `openshell:resolve:env:<KEY>`        (no `v0_`)
+ *   - revision N>0 => `openshell:resolve:env:v<N>_<KEY>`
+ * where `<KEY>` is an env-var name `[A-Za-z0-9_]+` and `<N>` is a positive integer (no leading zero).
+ * Anchored `^…$` so a marker embedded mid-string (e.g. `prefix-openshell:resolve:env:...`) is NOT a
+ * placeholder and is rejected.
+ */
+const PLACEHOLDER_RE = /^openshell:resolve:env:(v[1-9][0-9]*_)?[A-Za-z0-9_]+$/;
+
+/**
+ * Fail-closed guard for a single exec env value (design §2.3, spec §3 / §5). An env value is REJECTED
+ * (returns `false`) iff it carries a reserved credential marker yet is NOT a well-formed placeholder.
+ * A value that matches the EXACT SecretResolver placeholder grammar ({@link PLACEHOLDER_RE}) is the
+ * ONLY accepted credential-bearing form (so a legitimate revision-0 `openshell:resolve:env:<KEY>` is
+ * not over-rejected). A plain literal carrying NO reserved marker at all is accepted. Anything else
+ * that contains a reserved marker — the alias form `OPENSHELL-RESOLVE-ENV-…`, an empty/garbled
+ * placeholder, or the prefix embedded mid-string — is denied. This keeps credentials from ever
+ * entering exec env in the clear while not breaking the happy path for legitimate placeholders.
+ */
+export function isExecEnvValueAllowed(value: string): boolean {
+  const hasMarker = value.includes(PLACEHOLDER_PREFIX) || value.includes(PROVIDER_ALIAS_MARKER);
+  if (!hasMarker) return true; // plain literal, no reserved marker.
+  // A reserved marker is present: accept ONLY a value that is itself a well-formed placeholder.
+  return PLACEHOLDER_RE.test(value);
+}
+
 export interface OpenShellClientOpts {
   /** OpenShell gateway endpoint (e.g. `https://gateway:443`). Treated as sensitive: never logged. */
   readonly baseUrl: string;

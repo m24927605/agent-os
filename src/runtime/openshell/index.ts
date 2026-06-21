@@ -20,5 +20,15 @@ export {
   type GetSandboxRequest,
   type WatchSandboxRequest,
   type SandboxStreamEvent,
+  type OpenShellExecTransport,
+  type ExecSandboxRequest,
+  type ExecSandboxEvent,
+  isExecEnvValueAllowed,
 } from "./client.js";
-export { type AwaitReadyOpts, OpenShellSandboxAdapter } from "./adapter.js";
+export {
+  type AwaitReadyOpts,
+  type ExecSandboxOpts,
+  type ExecResult,
+  type ExecOutcome,
+  OpenShellSandboxAdapter,
+} from "./adapter.js";
