@@ -33,3 +33,7 @@ export * from "./personal/approval/index.js";
 export * from "./personal/timeline/index.js";
 export * from "./personal/voice/index.js";
 export * from "./tenant/index.js";
+// SDK author-facing barrel (SLICE-P2R-R9-S2). Re-exports a NARROW author surface that is a strict
+// subset of the bindings already aggregated above (same original bindings, so no ambiguity). The
+// direction is one-way: root -> sdk -> module barrels; `src/sdk/index.ts` MUST NOT import this file.
+export * from "./sdk/index.js";
