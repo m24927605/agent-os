@@ -102,10 +102,14 @@ RPC transport 依賴**（package.json `dependencies` 僅 `zod`）。因此架構
 ### 誠實能力閘（capability gates — 哪些是 verified-from-code，哪些是 inferred）
 - **verified-from-code**：Go server 的 fsync-before-Receipt、typed AppendError、append-only/monotonic 語意
   （append.go、proto 已讀）；TS canonical/redact/receipt/commitgate 形狀（已讀）。
-- **inferred（待落地證實）**：具體 RPC transport 選型（connect-es 對 connect protocol vs grpc-js 對 grpc）尚未決定，
-  且 repo **目前無任何 RPC 依賴**——故本設計把 transport 設為**注入的 port**，使 core slice 可在**完全無網路、用
-  fake transport**下 RED→GREEN，不被選型阻塞。TS stub 生成（S5，契約）、選型 + adapter（S6，新依賴）、
-  composition-root 接線（S7，行為）是三個獨立後段 slice，core slice（S1-S4）不依賴它們即可驗收。
+- **verified-from-code（S6 已落地）**：具體 RPC transport 選型 = **`@grpc/grpc-js`**（對齊 Go 端
+  `google.golang.org/grpc` 的 `grpc.ClientConnInterface` 注入式 seam）。adapter 落在 `src/runtime/ingest/`
+  （`createRpcAppendTransport({endpoint, timeoutMs?, client?})` 實作 vendor-neutral `AppendTransport`；
+  `transport.ts` 做 fail-closed 映射，`grpc-client.ts` 是唯一 import `@grpc/grpc-js` 的 chokepoint，含
+  hand-written proto3 wire codec，因 S5 stub 為 `onlyTypes=true` 無 codec）。所有傳輸層失敗（RPC error /
+  連線拒絕 / `timeoutMs` 逾時 / 同步 throw）一律 **reject**；oneof 照實回 `AppendResponseShape`，由 S1
+  `parseAppendResponse` 作唯一 fail-closed 判定。注入式 `client` 讓測試用 in-process `AppendService` stub
+  零網路過測（7 RED→GREEN，`pnpm run verify` exit 0；`deps:check` 證實 vendor 僅在 runtime、core 零 vendor、無 cycle）。
 - **inferred**：Go kernel 是否已有可由 TS 連到的 listening server（[`kernel/cmd/`](../../kernel/cmd) 存在但本 ITEM 未逐行讀）——
   端到端（真連線）整合留給 adapter slice S6 / wiring slice S7，core slice 用 fake transport 不需要它。
 
