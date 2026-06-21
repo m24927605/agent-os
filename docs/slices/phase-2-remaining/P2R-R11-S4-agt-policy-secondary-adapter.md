@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r11-s4-agt-policy-secondary-adapter
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~160、files <~3（`src/policy/adapters/agt/{adapter.ts,index.ts}` + `src/policy/adapters/agt/adapter.test.ts`；並擴用既有 `src/policy/dedup.test.ts` 的 PDP-deny-prevails 斷言）、modules <~2、新增第三方依賴 = 0
-- **狀態**: **DRAFT**（RED 計畫 + DoD 佔位，待實作覆蓋）
+- **狀態**: **DONE**（RED→GREEN 完成；`pnpm run verify` exit 0；已合併入 main）
 
 ## (1) ID + Title
 SLICE-P2R-R11-S4 — 新增 `AgtSecondaryPolicy`：實作 P2-E `SecondaryPolicyAdapter`（advisory），把 AGT `GovernedCallable` 的 `PolicyDecision`（allowed/action/matched_rule/reason）對映成我們的 advisory `PolicyDecision`，**只有 AGT 的 `allow` 才映 allow，其餘（deny/warn/log/require_approval/malformed）一律 fail-closed deny**；AGT 永遠是 advisory，**絕不**翻轉 PDP-deny。經**注入式 AgtEvaluateFn** seam（live Python engine 留後續）。
@@ -51,26 +51,34 @@ SLICE-P2R-R11-S4 — 新增 `AgtSecondaryPolicy`：實作 P2-E `SecondaryPolicyA
   - [ ] 安全對抗式 — **adapter throw → 合成 deny**：注入的 `AgtEvaluateFn` throw → 經 `evaluateSecondaries` 合成 deny（deny-by-default，crashing advisor 只能 deny 更多）。
   - [ ] 對映保真：AGT `matchedRule`/`reason` 進我們的 `reason`；`auditRequired===true`。
   - [ ] **no-vendor-in-core 回歸護欄**：core 植入 `import ... agt` fixture → `deps:check` exit≠0；移除後 exit 0。
-- 首次紅燈證據（DRAFT 佔位）:
+- 首次紅燈證據（實測，adapter.ts/index.ts 暫移除後重跑）:
   ```
-  $ pnpm test src/policy/adapters/agt/adapter.test.ts
-  ... FAIL: Cannot find module '.../adapters/agt/index.js' ...
-  exit code: <填實測，預期 1>
+  $ node_modules/.bin/vitest run src/policy/adapters/agt/adapter.test.ts
+  ⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+  Error: Failed to load url ./index.js (resolved id: ./index.js) in
+    src/policy/adapters/agt/adapter.test.ts. Does the file exist?
+   Test Files  1 failed (1)
+  exit code: 1
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 證順序）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5：vitest exit 1, `Failed to load url ./index.js`；git history 證順序）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填實測，目標 0>
+  ✓ src/policy/adapters/agt/adapter.test.ts (15 tests)
+  ✓ src/policy/dedup.test.ts (12 tests)
+   Test Files  69 passed | 1 skipped (70)
+        Tests  691 passed | 1 skipped (692)
+  ... secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`deps:check` exit 0；`no-vendor-in-core` 持綠：agt import 只在 `adapters/agt/`；一個 adapter module 只 import 一個 policy 引擎）
-- [ ] low coupling / high cohesion 遵守（adapter 僅 import `../../dedup.js` interface + `../../types.js`；無 deep import / cyclic / 跨 vendor；未 import `evaluate.ts`）
-- [ ] secret-scan 乾淨（adapter / test 無 secret-like 值）
-- [ ] Docs 更新（`vendor-adapters.md` §2.4 已述）
-- [ ] Adversarial code review = PASS（fresh-context；mutation 驗 PDP-deny-prevails / 非-allow-deny 測試非 theater；確認 `require_approval`/malformed 不被誤映 allow）— 連結/摘要: <填>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probed：AGT-allow 永不翻 PDP-deny、AGT 非-allow 皆 deny、AGT throw 合成 deny、AGT 無法被接成平行 deny gate）
+- [x] dependency-boundary check 綠（`deps:check` exit 0：`✔ no dependency violations found (113 modules, 266 dependencies cruised)`；`no-vendor-in-core` 持綠：agt import 只在 `adapters/agt/`；一個 adapter module 只 import 一個 policy 引擎）
+- [x] low coupling / high cohesion 遵守（adapter 僅 import `../../dedup.js` interface + `../../types.js`；無 deep import / cyclic / 跨 vendor；未 import `evaluate.ts`）
+- [x] secret-scan 乾淨（`secret-scan: clean`；adapter / test 無 secret-like 值）
+- [x] Docs 更新（`vendor-adapters.md` §2.4 已述）
+- [x] Adversarial code review = PASS（fresh-context；mutation 驗 PDP-deny-prevails / 非-allow-deny 測試非 theater；確認 `require_approval`/malformed 不被誤映 allow）— 摘要: 獨立 review 已通過（slice R11-S4 passed independent review）
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probed：AGT-allow 永不翻 PDP-deny、AGT 非-allow 皆 deny、AGT throw 合成 deny、AGT 無法被接成平行 deny gate）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `adapters/agt/` + dedup.test.ts 新增案例）。
