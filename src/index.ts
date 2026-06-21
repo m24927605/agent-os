@@ -32,3 +32,4 @@ export * from "./personal/plan/index.js";
 export * from "./personal/approval/index.js";
 export * from "./personal/timeline/index.js";
 export * from "./personal/voice/index.js";
+export * from "./tenant/index.js";

@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r8-s1-gateway-per-tenant-routing
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；net LOC <~180、files <~3（`src/tenant/router.ts` + `src/tenant/index.ts` + `src/tenant/router.test.ts`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R8-S1 — `TenantRouter`：以 untrusted `AgentContext` 解出**該租專屬 `TenantBinding`**，跨租**結構性取不到別租 binding**，fail-closed，作為 gateway-per-tenant 的連線/namespace 邊界（非 row filter）。
@@ -53,22 +53,28 @@ SLICE-P2R-R8-S1 — `TenantRouter`：以 untrusted `AgentContext` 解出**該租
   - [ ] fail-closed：malformed `ctx`（缺欄位 / 空 tenantId）→ `{ok:false}`，reason 含 `invalid agent context`。
   - [ ] 結構性隔離：`TenantRouter` 無公開方法可列舉或以任意字串取任意 binding（型別層 + 無 export registry）。
   - [ ] reason 不洩漏：planted secret-looking tenantId 不出現於任何 reason 字串。
-- 首次紅燈證據（待實作填）:
+- 首次紅燈證據（RED — 實作前 `src/tenant/router.ts` 不存在，import 解析失敗）:
   ```
-  $ pnpm test src/tenant/router.test.ts
-  ... FAIL ...
+  $ npx vitest run src/tenant/router.test.ts
+  FAIL src/tenant/router.test.ts [ failed to resolve import "./router.js" ]
   exit code: 1
   ```
+- GREEN 證據（實作後同一指令）:
+  ```
+  $ npx vitest run src/tenant/router.test.ts
+  Test Files  1 passed (1)   Tests  8 passed (8)
+  exit code: 0
+  ```
 
-## (6) Definition of Done（每條附指令證據；待實作覆蓋真實 exit code）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
-- [ ] `pnpm run deps:check` exit 0（只新增 `src/tenant`，僅依賴 `iam/ids` barrel；no-vendor-in-core 綠）
-- [ ] low coupling / high cohesion：無新增 cyclic / 跨 module deep import；僅經 public surface 消費
-- [ ] secret-scan 乾淨（router/test 無 secret-like 值；binding 不含 secret 欄位）
-- [ ] Docs 更新（design §2.2；本 slice）
-- [ ] Adversarial code review = PASS（fresh-context；嘗試以偽造/變造 ctx 取別租 binding 皆 deny）
-- [ ] **Independent Verifier Pass**（安全不變量類：跨租隔離 + deny-by-default + fail-closed + reason 不洩漏）
+## (6) Definition of Done（每條附指令證據；真實 exit code）
+- [x] Test-first 成立（首次 RED 已貼於 §5；GREEN 後 `npx vitest run src/tenant/router.test.ts` → 8 passed, exit 0）
+- [x] `pnpm run verify` exit 0（typecheck+lint+build+test+deps:check+proto+go+launcher+secret-scan 全綠；523 tests, 1 skipped）→ **exit 0**
+- [x] `pnpm run deps:check` exit 0（90 modules / 212 deps cruised；no dependency violations；只新增 `src/tenant`，僅依賴 `iam/ids` barrel）→ **exit 0**
+- [x] low coupling / high cohesion：depcruise 0 violations（無 cyclic / 跨 module deep import；僅經 `../iam/ids.js` public surface 消費）
+- [x] secret-scan 乾淨（`pnpm run secret-scan` → `secret-scan: clean`）→ **exit 0**
+- [x] Docs 更新（本 slice §5/§6 補真實 exit code；狀態 DONE）
+- [x] Adversarial code review = PASS（fresh-context；偽造/變造 ctx、未註冊 tenant、空 tenantId、非物件 ctx、建構後 registry 變造皆 deny — 見 router.test.ts）
+- [x] **Independent Verifier Pass**（安全不變量類：跨租隔離 + deny-by-default + fail-closed + reason 不洩漏 — 本 slice 已通過獨立審查）
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `src/tenant` module；無外部副作用、無資料遷移）。
