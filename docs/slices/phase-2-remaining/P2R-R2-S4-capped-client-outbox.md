@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r2-s4-capped-client-outbox
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~140、files <~3（`src/audit/ingest/{outbox.ts,outbox.test.ts}` + barrel）、新增依賴 = 0、modules = 1
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（RED→GREEN 完成；`pnpm run verify` exit 0；adversarial review = PASS；Independent Verifier Pass = clean；已 merge 入 main）
 
 ## (1) ID + Title
 SLICE-P2R-R2-S4 — 新增有界（capped）client-side outbox：當 transport 暫時不可達，pending append 進入有界
@@ -58,14 +58,14 @@ buffer 等重送；**buffer 滿載時拒收新 enqueue（fail-closed）**，讓 
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；outbox 零 module import、無 cycle、無 vendor）
-- [ ] low coupling / high cohesion 遵守
-- [ ] secret-scan 乾淨（rec.canonicalEvent 已 redact；測試 canary 於 runtime 組裝）
-- [ ] Docs 更新
-- [ ] Adversarial code review = PASS（mutation：滿載丟棄最舊而非 throw → fail-closed RED 轉紅；flush 失敗仍移除未送筆 → at-least-once RED 轉紅）
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：滿載必 throw、flush 失敗零資料遺失）
+- [x] Test-first 成立（首次 RED 已貼於 §5）— 移除 `outbox.ts` 重跑：`vitest run src/audit/ingest/outbox.test.ts` → `FAIL ... Failed to load url ./outbox.js ... Does the file exist?`，exit code 1（SEEN to fail）；恢復後 6 tests passed（GREEN）。
+- [x] `pnpm run verify` exit 0（typecheck && lint && build && test && deps:check && proto:check && verify:go && verify:py && secret-scan 全綠；尾端輸出 `secret-scan: clean`，`VERIFY_EXIT=0`）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` → `no dependency violations found (39 modules, 82 dependencies cruised)`，exit code 0；outbox 零 module import、無 cycle、無 vendor）
+- [x] low coupling / high cohesion 遵守（`deliver` 注入；outbox 不 import 任何其他 module，僅經 `src/audit/ingest/index.ts` barrel 對外曝露 public surface）
+- [x] secret-scan 乾淨（`bash scripts/scan_secrets.sh` → `secret-scan: clean`；`rec.canonicalEvent` 為 byte-neutral pass-through，測試 canary 於 runtime 以 `["AKIA","CANARY","S4","SECRET"].join("")` 組裝、不落地 source/fixture literal）
+- [x] Docs 更新（本 slice doc §6 + 狀態已填實際 exit code 與 DONE）
+- [x] Adversarial code review = PASS（fresh-context、非作者、獨立 Opus 4.8；mutation 探針：滿載丟棄最舊而非 throw → fail-closed 測試轉紅；flush 失敗仍移除未送筆 → at-least-once 測試轉紅）
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（fresh-context 重跑 `pnpm run verify` exit 0 + probe：滿載必 throw `OutboxFullError`、flush 失敗零資料遺失/未送筆留 pending）
 
 ## (7) Rollback
 - `git revert <merge-sha>`（移除 outbox.ts + barrel）。
