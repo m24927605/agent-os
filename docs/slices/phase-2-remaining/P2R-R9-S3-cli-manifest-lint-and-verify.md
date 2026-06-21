@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r9-s3-cli-manifest-lint-and-verify
 - **Author**: agency-agents writer（Backend Architect）    **Adversarial reviewer**: <fresh-context Opus 4.8、非作者>
 - **Size budget**: <= 1 day；net LOC <~200、files <~4（`src/cli/main.ts` + `src/cli/main.test.ts` + `src/cli/index.ts` barrel + `package.json` 加一個 `bin`/script 入口一行）、modules = 1（新 `cli`）、新增依賴 = 0（用 Node 內建 `process.argv` + `node:child_process`）
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R9-S3 — 新增薄 CLI `agentos`，兩個 exit-code 化子命令：`agentos manifest lint <file>`（讀 JSON → `parseToolManifest` → 合法 exit 0 / 不合法 exit 1）與 `agentos verify --chain <f> --pubkey <f>`（spawn release verifier binary 並 relay 其 exit code）；零新第三方依賴、fail-closed（未知子命令/缺參數 → 非 0）。
@@ -53,23 +53,36 @@ SLICE-P2R-R9-S3 — 新增薄 CLI `agentos`，兩個 exit-code 化子命令：`a
 - 首次紅燈證據（貼 exit≠0；實作前填）:
   ```
   $ pnpm test src/cli/main.test.ts
-  ... FAIL（import ../cli/main.js 失敗：模組不存在）...
-  exit code: <填首次紅燈 exit>
+  ... FAIL（import ./main.js 失敗：runCli 模組不存在）...
+  exit code: 1
   ```
 
 ## (6) Definition of Done（每條附指令證據；實作時填真實 exit code）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <0>
+  ... typecheck/lint(148 files)/build/test(585 passed | 1 skipped；src/cli/main.test.ts 12 tests pass)/
+      deps:check(no violations, 100 modules)/proto:check/openshell:proto:check/verify:go/verify:py/
+      verify:cross-tenant/launcher:check/secret-scan(clean) 全綠
+  VERIFY_EXIT=0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`cli` 只 import sdk barrel + stdlib、無 deep import、no-vendor-in-core 綠）
-- [ ] low coupling / high cohesion 遵守（`cli` 單一責任=argv→exit-code relay；驗鏈/parse 不重實作）
-- [ ] secret-scan 乾淨（CLI/測試 fixture 無 secret-like 值；任何 pubkey/chain fixture 為公開測試資料）
-- [ ] Docs 更新（design/developer-sdk.md §2.2 S3 與本 slice 一致）
-- [ ] Adversarial code review = PASS（fresh-context；reviewer mutation：讓未知子命令 fallthrough exit 0 → fail-closed 測試應轉紅；讓 verify 在 binary 缺席時 exit 0 → 應轉紅）— 摘要: <填>
-- [ ]（安全不變量類：fail-closed/relay 不吞 broken）Independent Verifier Pass 已執行並 clean（probed：未知/缺參數/缺 binary 皆非 0；relay 不把 broken 變 intact）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`cli` 只 import sdk barrel + stdlib、無 deep import、no-vendor-in-core 綠）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (100 modules, 242 dependencies cruised)
+  DEPS_EXIT=0
+  ```
+- [x] low coupling / high cohesion 遵守（`cli` 單一責任=argv→exit-code relay；parse 委派 R3-via-sdk-barrel、驗鏈委派 verifier 進程，不重實作）
+- [x] secret-scan 乾淨（CLI/測試 fixture 無 secret-like 值；pubkey/chain fixture 為公開 stub 測試資料，canary 不入磁碟）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  SECRET_EXIT=0
+  ```
+- [x] Docs 更新（design/developer-sdk.md §2.2 S3 標記 DONE，與本 slice 一致）
+- [x] Adversarial code review = PASS（fresh-context、非作者）— 摘要：mutation 探針確認 fail-closed 守住——未知子命令 fallthrough exit 0 → `frobnicate`/空 argv 測試轉紅；verify 在 binary 缺席時若 exit 0 → 缺-binary 測試轉紅；relay 不吞 broken（mock verifier exit 1 → runCli 回 1）。
+- [x]（安全不變量類：fail-closed/relay 不吞 broken）Independent Verifier Pass 已執行並 clean（fresh-context 重跑 `pnpm run verify` exit 0；probed：未知/缺參數/缺檔/缺 binary 皆非 0；relay 把 verifier 0/1/2 原樣傳出，broken 永不變 intact）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `src/cli/` + `package.json` bin 一行）。

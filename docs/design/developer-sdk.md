@@ -72,9 +72,9 @@ Agent OS 的三 surface 中，**Developer surface 目前是「假的」**：[`do
   - **前置補件**：本 slice 自行新增 `src/tools/index.ts` barrel（spec §8 option B；R3-S1 僅經 root `src/index.ts` 對外、未建 module barrel），作為 sdk 對 R3 的唯一合法 import 路徑。
   - **dependency-cruiser 硬約束 + 規則修正**：`.dependency-cruiser.cjs` 的 `not-to-internal` 只允許跨 module 經 module barrel；`src/sdk/` 受此規則約束。sdk 是**首個**真正跨 module 消費**深層 nested barrel**（`src/runtime/brain/index.ts`、`src/runtime/substrate/index.ts`）的 module，曝露出原 `pathNot: ^src/[^/]+/index\.ts$` 只認 depth-1 barrel 的缺口。本 slice 將其放寬為 `/index\.ts$`（任何深度的 module barrel 皆為合法跨 module 入口；對**非** barrel 內部檔的 deep import 仍 fire）——這是**保持並擴展**不變量，非弱化（以 `src/sdk/index.test.ts` 的 deep-import probe 證明仍 fire）。故（a）**Policy 不納入**（評估器非作者面 Port）；（b）`src/sdk/index.ts` 單向不回指 root，避免 `no-circular`。
   - **唯一責任**：提供「寫一次、契約一次」的作者面，**收斂**而非洩漏 core 內部（不 export policy 評估器 `evaluatePolicy`/`matchResource`、不 export audit kernel `verifyChain`——以 anti-leak 測試守住）。只經既有 barrel re-export，無 deep import。
-- **S3 — CLI（`agentos` 薄包裝）**
-  - 新建 `src/cli/`：一個薄的 commander-free（用 Node 內建 `process.argv` 解析，零新依賴）CLI，兩個子命令：`agentos manifest lint <file>`（讀 JSON → `parseToolManifest` → exit 0/1）、`agentos verify --chain <f> --pubkey <f>`（spawn release verifier，relay exit code）。
-  - **唯一責任**：把 R3 parse + verifier 暴露成**命令列、exit-code 化**的作者/稽核者入口。fail-closed：未知子命令/缺參數 → 非 0 退出。
+- **S3 — CLI（`agentos` 薄包裝）** — **DONE（slice/p2r-r9-s3-cli-manifest-lint-and-verify）**
+  - 新建 `src/cli/`：一個薄的 commander-free（用 Node 內建 `process.argv` 解析，零新依賴）CLI，兩個子命令：`agentos manifest lint <file>`（讀 JSON → `parseToolManifest`，**經 `src/sdk/index.ts` barrel** → exit 0/1）、`agentos verify --chain <f> --pubkey <f>`（用 `node:child_process.spawnSync` spawn release verifier，路徑由 `AGENTOS_VERIFIER_BIN` 覆寫，relay exit code 0/1/2）。`package.json` 加一行 `bin: { agentos }` 指向 `dist/cli/main.js`；`runCli(argv, env?): Promise<number>` 為 testable entrypoint。
+  - **唯一責任**：把 R3 parse + verifier 暴露成**命令列、exit-code 化**的作者/稽核者入口。fail-closed：未知子命令/缺參數/缺檔/缺 verifier binary → 非 0 退出，broken 永不被吞成 intact。
 - **S4 — ToolManifest authoring**
   - 新建 `docs/sdk/tool-manifest-authoring.md` + `src/sdk/templates/tool-manifest.example.json`（範本）+ 把 `manifest lint` 的「一致性護欄」說明文件化。**不新增 schema 邏輯**（schema 是 R3 的 S1）。
   - **唯一責任**：作者體驗——一個可複製的 9 欄範本 + 文件化的 lint 流程；驗收靠 S3 的 `manifest lint` 對範本 exit 0、對刻意違規 fixture exit 1。
