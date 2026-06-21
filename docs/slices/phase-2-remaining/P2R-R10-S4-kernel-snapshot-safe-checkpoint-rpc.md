@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r10-s4-kernel-checkpoint-rpc
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~150、files <~4（`kernel/internal/server/checkpoint.go` + `kernel/internal/server/checkpoint_test.go` + proto 一個 RPC + 既有 server.go 一處接線）、modules <~2（server，+ proto 契約）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R10-S4 — kernel `Checkpoint` RPC：在 `IngestServer` 的 append mutex 下**原子**回傳一致快照錨點 `{committedSequence(head 的 sequence), headEntryHash, perSourceNextSeq}`，使「取得 checkpoint 那一刻沒有半寫入的 torn frame」成立（取代 design §60 不可行的 ftruncate-to-N），**不**改任何 append-only 不變量。
@@ -53,19 +53,33 @@ SLICE-P2R-R10-S4 — kernel `Checkpoint` RPC：在 `IngestServer` 的 append mut
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0（含 `verify:go`、`proto:check`）
+- [x] Test-first 成立（首次 RED 已貼於 §5；method `Checkpoint` 未實作 → 編譯失敗，作者已見紅燈，獨立 review 確認）
+- [x] `pnpm run verify` exit 0（含 `verify:go`、`proto:check`、secret-scan、cross-tenant、depcruise）
   ```
   $ pnpm run verify
-  ... exit code: <填實測>
+  ... secret-scan: clean
+  exit code: 0
   ```
-- [ ] `go test ./kernel/... -race` 綠（含併發 append/checkpoint）
-- [ ] dependency-boundary 綠：depguard 無違規；`Checkpoint` 不 import 新 package；append-only 表面（store.go）零改動
-- [ ] low coupling / high cohesion 遵守（checkpoint.go 只讀錨點；無寫入 / 無 truncate / 無新狀態）
-- [ ] secret-scan 乾淨（checkpoint 回傳僅 hash + sequence 數字，無 secret）
-- [ ] Docs 更新（design §41/§60 已標記此為必修；索引已連結）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：把 `s.mu.Lock()` 拿掉 → `-race` 須報 data race / 原子性測試須轉紅，證明鎖是 load-bearing）
-- [ ] **安全不變量（append-only + 一致性）**：Independent Verifier Pass 已執行——對抗式確認 Checkpoint 唯讀（不能成為繞過 append-only 的旁路）、原子（無 torn 讀）、空 log fail-safe
+- [x] `go test ./... -race` 綠（含併發 append/checkpoint；於 kernel/ module 執行）
+  ```
+  $ (cd kernel && env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local go test ./... -race -run Checkpoint)
+  ok  github.com/agent-os/kernel/internal/server  3.577s
+  exit code: 0
+  $ (cd kernel && env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local go test ./... -race)
+  ok  github.com/agent-os/kernel/internal/server  2.348s
+  exit code: 0
+  ```
+- [x] dependency-boundary 綠：`no-vendor-in-core` + `not-to-internal` + depcruise `Contracts: 1 kept, 0 broken`；`Checkpoint` 不 import 新 package；append-only 表面（store.go）零改動（`git status --porcelain kernel/internal/store/` 為空）
+  ```
+  $ bash scripts/proto-check.sh
+  proto:check: go ok / proto:check: ts ok / proto:check: ok
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（checkpoint.go 只讀錨點；無寫入 / 無 truncate / 無新狀態）
+- [x] secret-scan 乾淨（checkpoint 回傳僅 hash + sequence 數字，無 secret）— `secret-scan: clean`（verify 內）
+- [x] Docs 更新（design §41/§60 已標記此為必修；`docs/design/time-travel-snapshot-replay.md` 已連結）
+- [x] Adversarial code review = PASS（fresh-context；mutation：拿掉 `s.mu.Lock()` → `-race` 報 data race / 原子性測試轉紅，證明鎖 load-bearing）
+- [x] **安全不變量（append-only + 一致性）**：Independent Verifier Pass 已執行——對抗式確認 Checkpoint 唯讀（不能成為繞過 append-only 的旁路）、原子（無 torn 讀）、空 log fail-safe
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `checkpoint.go` + proto RPC + 接線）。

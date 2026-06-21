@@ -26,11 +26,12 @@ type AuditSink interface {
 // IngestServer implements ingestpb.AppendServiceServer.
 type IngestServer struct {
 	ingestpb.UnimplementedAppendServiceServer
-	mu    sync.Mutex
-	store *store.Store
-	audit AuditSink
-	next  map[string]uint64 // expected next sequence per source (0 if unseen)
-	head  string            // current chain head entryHash (genesis if empty)
+	mu      sync.Mutex
+	store   *store.Store
+	audit   AuditSink
+	next    map[string]uint64 // expected next sequence per source (0 if unseen)
+	head    string            // current chain head entryHash (genesis if empty)
+	headSeq uint64            // source-sequence of the head record (0 if empty log)
 }
 
 // NewIngestServer wires the durable store + audit sink, rebuilding per-source next-sequence + head
@@ -41,12 +42,14 @@ func NewIngestServer(st *store.Store, audit AuditSink) (*IngestServer, error) {
 		return nil, err
 	}
 	next := make(map[string]uint64)
+	var headSeq uint64
 	for _, r := range records {
 		if r.SourceSeq+1 > next[r.SourceID] {
 			next[r.SourceID] = r.SourceSeq + 1
 		}
+		headSeq = r.SourceSeq // head is the last record replayed; its source-sequence is the head sequence
 	}
-	return &IngestServer{store: st, audit: audit, next: next, head: head}, nil
+	return &IngestServer{store: st, audit: audit, next: next, head: head, headSeq: headSeq}, nil
 }
 
 func (s *IngestServer) deny(req *ingestpb.AppendRequest, code ingestpb.AppendError_Code, detail string) (*ingestpb.AppendResponse, error) {
@@ -92,6 +95,7 @@ func (s *IngestServer) Append(_ context.Context, req *ingestpb.AppendRequest) (*
 		return nil, status.Error(codes.Internal, "durable commit failed")
 	}
 	s.head = entryHash
+	s.headSeq = req.GetSequence()
 	s.next[req.GetSourceId()] = req.GetSequence() + 1
 	return &ingestpb.AppendResponse{Result: &ingestpb.AppendResponse_Receipt{Receipt: &ingestpb.Receipt{
 		Sequence: req.GetSequence(), ContentHash: contentHash, PrevHash: prevHash, EntryHash: entryHash,

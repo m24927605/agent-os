@@ -10,6 +10,11 @@ option go_package = "github.com/agent-os/kernel/internal/ingestpb;ingestpb";
 // per-source sequence and fails closed (typed AppendError + audit) on replay/gap/malformed.
 service AppendService {
   rpc Append(AppendRequest) returns (AppendResponse);
+  // Checkpoint is READ-ONLY: under the same append mutex it atomically captures a consistent snapshot
+  // anchor {head_entry_hash, head_sequence, per_source_next_seq}. It NEVER appends, rewrites, or
+  // truncates — it is a consistent read of the chain head + per-source next sequence so a snapshot
+  // cannot observe a torn (half-written) tail. It does NOT widen the append-only surface.
+  rpc Checkpoint(CheckpointRequest) returns (CheckpointResponse);
 }
 
 message AppendRequest {
@@ -42,4 +47,15 @@ message AppendResponse {
     Receipt receipt = 1;
     AppendError error = 2;
   }
+}
+
+// CheckpointRequest carries no fields: the anchor is the kernel's single global chain head; there is
+// no per-task / per-tenant scoping at the kernel (the WORM log is shared, monotonic, single-writer).
+message CheckpointRequest {}
+
+// CheckpointResponse — the snapshot-safe anchor captured atomically under the append mutex.
+message CheckpointResponse {
+  string head_entry_hash = 1;             // current chain head entryHash ("sha256:"-prefixed); genesis if empty log
+  uint64 head_sequence = 2;               // sequence of the head record (0 for an empty log; check per_source_next_seq for emptiness)
+  map<string, uint64> per_source_next_seq = 3; // expected next sequence per source (empty map => no appends yet)
 }
