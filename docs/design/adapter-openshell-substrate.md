@@ -160,6 +160,15 @@ Get/Exec/Delete 用對映回來的 OpenShell name/id 呼叫。**對映遺失 = f
 
 > 持久化對映屬 out-of-scope（§6）；R1 的 in-memory map 足以過 contract + 單進程 Personal 場景。
 
+> **S2 實作對齊（DONE）：** `src/runtime/openshell/adapter.ts` `OpenShellSandboxAdapter` 持有
+> `private nameById = Map<SandboxId, openshellName>`。`createSandbox`：① 壞 ctx → deny（未呼 RPC）；
+> ② image（`spec.image` 或 `PINNED_SANDBOX_IMAGE` 預設）非 `sha256:` digest → deny（未呼 RPC）；
+> ③ 呼 `transport.createSandbox`，取 `resp.sandbox.metadata.name`，空/缺 → deny（不存對映）；
+> ④ 產 `SandboxId = sbx-os-<uuid>`、存對映 → ok。`destroySandbox`：壞 ctx / 非法 id / 對映遺失 → deny
+> （未呼 `DeleteSandbox`）；否則用對映 name 呼 `transport.deleteSandbox`，成功才移除對映（RPC reject →
+> deny 並**保留**對映供 forward-fix 重試）。任何 transport reject → deny，**永不 throw**、reason 不含 baseUrl。
+> 對映遺失 = fail-closed deny。`start/stop` 在 S2 仍是 fail-closed deny（noop shim 留 S6）。
+
 ### 3.4 timeout / retry / fail-closed 預算（reliability）
 
 - 每個 unary RPC 有**明確 timeout**（client deadline）；逾時 → `deny(reason:"openshell rpc deadline exceeded")`，
