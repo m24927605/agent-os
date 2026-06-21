@@ -5,3 +5,4 @@
  */
 export * from "./types.js";
 export * from "./model-allowlist.js";
+export * from "./egress-allowlist.js";
