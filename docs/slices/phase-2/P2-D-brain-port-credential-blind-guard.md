@@ -31,6 +31,7 @@ SLICE-P2-D — 新增 vendor-neutral Brain port（`BrainEvent` 判別聯集 plan
 - [x] **first RED**（brain 不存在）：`vitest run brain-adapter.test.ts` → import 失敗、no tests（exit≠0）。
 - [x] `pnpm run verify` **exit 0**（88 tests、deps 22 modules 0 violations、secret-scan clean）。
 - [x] `deps:check` 綠；IV 確認 credential-guard.ts **零 audit import**（偵測器注入）、brain path/import 無 vendor token、no-vendor-in-core 綠。
+- [x] secret-scan clean（secret canary 為 runtime 組裝、無 source 字面值）。
 - [x] **Adversarial review = PASS**（fresh-context IV，零 defect；mutation：guard 永遠 ok → 2 紅、governStream 不 stop → 1 紅；深層巢狀 secret、**全部 4 種事件 kind** 皆被 screen、stream 確實 stop、detector 拋例外 → deny-by-default、9 種壞 ctx 皆 yield 空）。
 
 ## (7) Rollback
