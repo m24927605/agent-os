@@ -7,6 +7,14 @@
 > 已完成的 P2-A~I 見 [`../phase-2/INDEX.md`](../phase-2/INDEX.md)。**AGENTS.md 勝出。only command output is truth。**
 
 ## 0. 狀態（2026-06-21 更新）
+- ✅ **R1（live OpenShell substrate adapter）完成**:S1–S6 全 merge 入 main(`src/runtime/openshell/`)。每刀 doc-first +
+  RED-first + Backend Architect/Opus4.8 writer + 獨立 Opus4.8 reviewer(S3 跑 2 回合);整合層 fresh-context 對抗式
+  Tier-2 驗證(Reality Checker)= PASS——獨立重跑 `pnpm run verify` exit 0(**261 tests + 1 env-gated skip**)、6 個
+  per-slice fail-closed 不變量 mutation 皆非 vacuous、connect-node+proto stub **命令實證封閉**於 `src/runtime/openshell/`
+  (往 core 注入 → depcruise exit 2)、credential-blind、grounded 真實 proto(無 Start/Stop → noop shim 誠實)。
+  **誠實邊界(spec 劃定、已揭露,非假綠)**:目前 production transport **僅 `Health` RPC 綁到真 gRPC descriptor**;
+  lifecycle/readiness/exec/provider-env 的邏輯+fail-closed 已對**注入 transport double** 完整測試並過 P2-A contract,
+  但真實 RPC round-trip 綁定延到 R7/R8 組合期;`PINNED_SANDBOX_IMAGE` 仍為 shape-enforced 的 placeholder digest。
 - ✅ **R2（TS→Go 真實 ingest）完成**:S1–S7 全 merge 入 main。每刀 doc-first + RED-first + agency-agents writer
   (Backend Architect/Opus4.8) + 獨立 Opus4.8 reviewer;另跑一道**整合層 fresh-context 對抗式 Tier-2 驗證**(Reality
   Checker)= PASS——獨立重跑 `pnpm run verify`+`depcruise` 皆 exit 0(171 tests),5 個 per-slice 不變量 mutation 皆
