@@ -175,6 +175,11 @@ kernel partition**，並用一條 **release-blocking 跨租 conformance** 把「
 - 形狀沿用既有 conformance harness（`kernel/internal/conformance/*`：fixture 對拍、wrong-key 必拒）。
 - **release-blocking 的意義**：這條 suite 紅 ⇒ `verify` 紅 ⇒ pre-commit guard 擋下 ⇒ 不得 merge。它把 §2.1 三邊界的
   「跨租結構不可能」從設計宣稱升級為**每次提交都重證一遍**的指令真相。
+- **已接線（R8-S6 落地）**：`package.json` 新增 `verify:cross-tenant`（`scripts/verify-cross-tenant.sh`：TS
+  `src/tenant/conformance/cross-tenant.conformance.test.ts` 重證 boundary①②③ 的 S1/S2/S5 公共面 + Go
+  `kernel/internal/partition -run Conformance` 重證 S3 per-tenant head/key），並插入 `verify` 鏈成為 release-blocking
+  子關卡。gate 自證：對 routing/repo/maker-checker/partition 各植入一條漏租 mutation 皆 exit≠0，移除後 exit 0
+  （證據見對應 slice §5）。
 
 ### 2.8 跨 plane / 低耦合（HARD CONSTRAINT A）
 

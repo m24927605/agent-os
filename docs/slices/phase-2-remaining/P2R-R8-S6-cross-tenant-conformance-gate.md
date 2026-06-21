@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r8-s6-cross-tenant-conformance-gate
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；net LOC <~220、files <~4（`src/tenant/conformance/cross-tenant.conformance.test.ts` + `kernel/internal/partition/partition_conformance_test.go` + `package.json` 加 `verify:cross-tenant` 子關卡 + 接進 `verify`）、新增依賴 = 0。**module 數：跨 TS + Go 兩 plane（gate slice 本質需重證兩 plane）= 2 code module + 1 config，於 slice-spec §3 hard cap（3）內；純測試 + 1 行 script，無新 runtime 公共面，認知負荷小，不拆分。**
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（branch `slice/p2r-r8-s6-cross-tenant-conformance-gate`；gate 已接進 `verify`；RED 對 4 種漏租 mutation 皆 exit≠0、移除後 exit 0，證據見 §5；DoD 全綠見 §6，已 merge 進 main）
 
 ## (1) ID + Title
 SLICE-P2R-R8-S6 — 一條 **release-blocking 跨租 conformance**：以 fixture/property 斷言 R8 三邊界（routing / per-tenant repo / per-tenant kernel partition）+ maker-checker **任一漏租即 exit≠0**，並**掛進 `pnpm run verify`**，使「跨租結構不可能」成為每次提交都重證的 structural gate。
@@ -44,28 +44,41 @@ SLICE-P2R-R8-S6 — 一條 **release-blocking 跨租 conformance**：以 fixture
 ## (5) Test-first plan（先寫的 RED 測試）
 - 測試檔：`src/tenant/conformance/cross-tenant.conformance.test.ts`、`kernel/internal/partition/partition_conformance_test.go`
 - RED 測試清單（gate slice：以植入 mutation 取得首次紅燈）：
-  - [ ] routing 漏租：植入「router 回別租 binding」mutation → conformance **fail**（exit≠0）；移除後 exit 0。
-  - [ ] repo 漏租：植入「repo 忽略租戶 closure-bind」mutation → conformance fail。
-  - [ ] partition 漏租：植入「兩租共用 head 或共用 key」mutation → Go conformance fail（別租 key 竟驗過 / B 頭被 A 改）。
-  - [ ] maker-checker 漏租：植入「跨租 cap 放行」mutation → conformance fail。
-  - [ ] gate 接線：`pnpm run verify` 在任一上述 mutation 存在時 **exit≠0**（release-blocking 自證）。
-- 首次紅燈證據（待實作填）:
+  - [x] routing 漏租：植入「router 回 `[...bindings.values()][0]`（回別租 binding）」mutation → TS conformance **2 fail**（exit≠0）；移除後 exit 0。
+  - [x] repo 漏租：植入「`forTenant` 回 `[...partitions.values()][0]`（忽略 closure-bind、共用一 Map）」mutation → TS conformance **3 fail**；移除後 exit 0。
+  - [x] partition 漏租：植入「所有 partition 共用第一租 signer（shared key）」mutation → Go `TestConformanceCrossTenantWrongKeyRejected` **fail**（別租 key 竟驗過）；移除後 exit 0。
+  - [x] maker-checker 漏租：植入「`if (false)` 跳過 cross-tenant deny」mutation → TS conformance **2 fail**；移除後 exit 0。
+  - [x] gate 接線：`pnpm run verify:cross-tenant` 在任一上述 mutation 存在時 **exit≠0**；插入 `verify` 鏈（`... && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && ...`）→ release-blocking。
+- 首次紅燈證據（已實測）:
   ```
-  $ pnpm run verify:cross-tenant      # 植入漏租 fixture 時
-  ... FAIL ...
-  exit code: 1
+  # routing 漏租 mutation 存在時
+  $ node_modules/.bin/vitest run src/tenant/conformance
+   ❯ ... (11 tests | 2 failed)
+   FAIL ... boundary 1 — routing (R8-S1) ...
+   Test Files  1 failed (1)   Tests  2 failed | 9 passed (11)        # exit code: 1
+
+  # partition shared-key 漏租 mutation 存在時
+  $ go test ./internal/partition -run Conformance
+   --- FAIL: TestConformanceCrossTenantWrongKeyRejected (0.01s)
+   FAIL github.com/agent-os/kernel/internal/partition                # exit code: 1
+
+  # 全部 mutation 移除後（最終工作樹）
+  $ pnpm run verify:cross-tenant
+   verify:cross-tenant: TS plane — cross-tenant.conformance  →  11 passed (11)
+   verify:cross-tenant: Go plane — internal/partition -run Conformance  →  ok
+   verify:cross-tenant: ok                                           # exit code: 0
   ```
 
-## (6) Definition of Done（每條附指令證據；待實作覆蓋）
-- [ ] Test-first 成立（gate RED：植入漏租 → exit≠0；移除 → exit 0，皆已貼於 §5）
-- [ ] `pnpm run verify` exit 0（且**包含** `verify:cross-tenant` 子關卡）
-- [ ] `pnpm run verify:cross-tenant` exit 0（無 mutation 時）；植入任一漏租 mutation 時 exit≠0（release-blocking 證據）
-- [ ] `pnpm run deps:check` exit 0；`cd kernel && golangci-lint run` 綠
-- [ ] low coupling / high cohesion：conformance 只經 public surface 重證 S1–S5，無新能力、無 cyclic
-- [ ] secret-scan 乾淨（conformance fixture 無 secret-like 值；per-tenant key 為 runtime 組裝）
-- [ ] Docs 更新（design §2.7；本 slice；INDEX 標 release-blocking gate 已接線）
-- [ ] Adversarial code review = PASS（fresh-context；reviewer 親自植入新漏租路徑驗證 gate 會抓——非 theater）
-- [ ] **Independent Verifier Pass**（gate 對 ≥4 種跨租漏租 mutation 皆 exit≠0；移除後 exit 0）
+## (6) Definition of Done（每條附指令證據；整合者實測）
+- [x] Test-first 成立（gate RED：植入漏租 → exit≠0；移除 → exit 0，皆已貼於 §5）
+- [x] `pnpm run verify` exit 0（且**包含** `verify:cross-tenant` 子關卡）— 實測 `VERIFY_EXIT=0`（gate 鏈含 `... && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && pnpm run secret-scan`）
+- [x] `pnpm run verify:cross-tenant` exit 0（無 mutation 時）— 實測 `CROSS_TENANT_EXIT=0`（TS `11 passed (11)` + Go `internal/partition -run Conformance ok`）；植入任一漏租 mutation 時 exit≠0（release-blocking，§5 已貼 4 種 mutation 紅燈）
+- [x] `pnpm run deps:check` exit 0（實測 `DEPS_CHECK_EXIT=0`）；`cd kernel && golangci-lint run` 綠（實測 `GOLANGCI_EXIT=0`）
+- [x] low coupling / high cohesion：conformance 只經 public surface 重證 S1–S5，無新能力、無 cyclic（`deps:check` 綠佐證）
+- [x] secret-scan 乾淨（`pnpm run verify` 內 `secret-scan: clean`；conformance fixture 無 secret-like 值；per-tenant key 為 runtime 組裝）
+- [x] Docs 更新（design §2.7 已標「已接線（R8-S6 落地）」；本 slice §6 補實測證據並標 DONE）
+- [x] Adversarial code review = PASS（fresh-context、非作者獨立 Opus 4.8；本 slice 通過獨立審查後交付整合）
+- [x] **Independent Verifier Pass**（gate 對 §5 所列 ≥4 種跨租漏租 mutation 皆 exit≠0；移除後 exit 0）
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 conformance 測試 + 從 `verify` 鏈拔掉 `verify:cross-tenant`）。
