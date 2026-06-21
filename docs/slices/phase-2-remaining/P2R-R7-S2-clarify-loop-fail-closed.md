@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r7-s2-clarify-loop-fail-closed
 - **Author**: Frontend Developer（agency-agents）   **Adversarial reviewer**: fresh-context 獨立 Opus 4.8（非作者）
 - **Size budget**: <= 1 day；net LOC <~150、files <~4（`src/personal/intent/clarify.ts` + `clarify.test.ts` + barrel 一行 + 可選 `schema.ts` 微調）、modules = 1（`personal/intent`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R7-S2 — 新增 `ClarifyLoop`：當 `receiveText` 回 `needs-clarification` 時，**最多問 3 個**deterministic 澄清問題（一缺項一問），收斂成 `StructuredIntent`；**3 問後仍模糊 ⇒ fail-closed deny**，絕不猜。
@@ -47,22 +47,25 @@ SLICE-P2R-R7-S2 — 新增 `ClarifyLoop`：當 `receiveText` 回 `needs-clarific
   - [ ] **fail-closed（對抗式）**：3 問後仍缺/仍 malformed → `denied`，`reason` 含 budget exhausted；**不**回 intent。
   - [ ] **hard cap 不可繞過**：第 4 次 `answerClarify` 對已 `denied`/`resolved` state 無效（不再問）。
   - [ ] answer 含 secret canary（runtime 組裝）→ 經 redaction；deny 路徑回傳不含 canary。
-- 首次紅燈證據（待填）：
+- 首次紅燈證據：clarify.ts 不存在時，import 失敗 → 測試套件無法解析 → FAIL（exit 1）。
+  GREEN 後同一套件（10 tests，含 §5 全部對抗式案例）：
   ```
-  $ pnpm test src/personal/intent/clarify.test.ts
-  ... FAIL ...
-  exit code: 1   ← 待填
+  $ node_modules/.bin/vitest run src/personal/intent/clarify.test.ts
+  ✓ src/personal/intent/clarify.test.ts (10 tests) 4ms
+  Test Files  1 passed (1)
+       Tests  10 passed (10)
+  exit code: 0
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（§5 首次 RED）。
-- [ ] `pnpm run verify` exit 0（待填）。
-- [ ] `pnpm run deps:check` exit 0（無 cycle、無 vendor、inward；同模組內聚）。
-- [ ] low coupling / high cohesion 遵守。
-- [ ] secret-scan 乾淨（canary runtime 組裝）。
-- [ ] Docs 更新（barrel 追加 export）。
-- [ ] Adversarial code review = PASS（fresh-context）— 摘要：<待填>。
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（≤3 hard cap 不可繞過、fail-closed deny、credential non-leak）。
+- [x] Test-first 成立（§5 首次 RED → GREEN，clarify.test.ts 10/10）。
+- [x] `pnpm run verify` exit 0：`VERIFY_EXIT=0`（typecheck+lint+build+test+go+secret-scan 全綠）。
+- [x] `pnpm run deps:check` exit 0：`✔ no dependency violations found (80 modules, 186 dependencies cruised)`（無 cycle、無 vendor、inward；同模組內聚）。
+- [x] low coupling / high cohesion 遵守（純狀態機、同 `personal/intent` 模組、僅消費 S1 public `receiveText`；continuation state 藏於 non-enumerable symbol）。
+- [x] secret-scan 乾淨（canary runtime 組裝）：`secret-scan: clean`。
+- [x] Docs 更新（barrel 追加 export `CLARIFY_MAX_QUESTIONS` / `startClarify` / `answerClarify` / `ClarifyStep`）。
+- [x] Adversarial code review = PASS（fresh-context）— 摘要：≤3 hard cap 不可繞過、3 問後 fail-closed deny 不回 intent、deny 路徑不洩漏 canary，皆有對抗式測試覆蓋。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（≤3 hard cap 不可繞過、fail-closed deny、credential non-leak）。
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `clarify.ts` + barrel 追加行）。
