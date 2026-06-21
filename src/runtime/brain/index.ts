@@ -3,5 +3,6 @@
  * adapters (Scripted/Echo fakes). Real vendor brains (e.g. Hermes) land under src/runtime/brain/<vendor>/.
  */
 export * from "./port.js";
+export * from "./state.js";
 export * from "./credential-guard.js";
 export * from "./fakes.js";

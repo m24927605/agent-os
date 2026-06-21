@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r10-s6-brain-memory-versioning
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~160、files <~4（`src/runtime/brain/state.ts` + `src/test-contracts/brain-state.test.ts` + `src/runtime/brain/fakes.ts` 擴一個 impl + barrel 一行）、modules <~1（runtime/brain）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R10-S6 — 在既有 vendor-neutral Brain port 上新增 `BrainState{ export(): VersionedMemory; import(VersionedMemory): void; schemaVersion: number }` 抽象，讓 orchestration 能 snapshot/restore 腦的 memory 到某版本（`memory@T = fold(memory events ≤ N)`）**而不需懂 Hermes 內部**（保 pluggability，design §34）；export **credential-blind**（序列化前過 redact，design §52）。
@@ -49,26 +49,32 @@ SLICE-P2R-R10-S6 — 在既有 vendor-neutral Brain port 上新增 `BrainState{ 
   - [ ] **credential-blind（對抗式）**：memory 含 secret-shaped 值（藏在 entry value）→ `export` 經注入 detector **fail-closed**（不吐物件）；detector 拋例外 → deny-by-default（不 export）。
   - [ ] **`.strict()`**：VersionedMemory 多餘欄位 → parse fail。
   - [ ] `valueRef` 為參照字串（非 raw value）→ schema 接受；塞入 raw-looking secret value 於 `valueRef` → 仍被 credential-blind detector 攔。
-- 首次紅燈證據（待填）：
+- 首次紅燈證據（state.ts 暫移除後實測）：
   ```
-  $ pnpm test src/test-contracts/brain-state.test.ts
-  ... FAIL (cannot find module '../runtime/brain/state.js') ...
-  exit code: <填實測>
+  $ node_modules/.bin/vitest run src/test-contracts/brain-state.test.ts
+   FAIL  src/test-contracts/brain-state.test.ts [ src/test-contracts/brain-state.test.ts ]
+  Error: Failed to load url ./state.js (resolved id: ./state.js) in
+    /Users/.../src/runtime/brain/index.ts. Does the file exist?
+   Test Files  1 failed (1)
+        Tests  no tests
+  exit code: 1（非 0；模組不存在）
   ```
+  GREEN（state.ts 就位後）：`9 passed (9)`，exit 0。
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；state.ts 移除 → exit 1 模組不存在）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填實測>
+  ... verify:cross-tenant: ok ... launcher-check: clean ... secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary 綠（`pnpm run deps:check` exit 0；state.ts 零 audit import、零 vendor token、no-vendor-in-core 綠；orchestration 不 import hermes）
-- [ ] low coupling / high cohesion 遵守（state.ts 只做 memory 版本化契約 + redact 守門；detector 注入）
-- [ ] secret-scan 乾淨（secret canary runtime 組裝、無 source 字面值）
-- [ ] Docs 更新（design §27-§37、§50 能力閘已標：Hermes 未版本化為 capability-gated、sandbox 記憶體不可還原、interim = reset+prefetch fallback）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：把 export 的 redact 守則拿掉 → credential-blind 測試須轉紅；把 schemaVersion 檢查拿掉 → 相容門檻測試須轉紅）
-- [ ] **安全不變量（credential-blind）**：Independent Verifier Pass 已執行——對抗式探測 secret 不出 export、detector 拋例外 → deny-by-default、深層巢狀 secret 亦攔
+- [x] dependency-boundary 綠（`pnpm run deps:check` exit 0：`✔ no dependency violations found (105 modules, 256 dependencies cruised)`；state.ts 零 audit import、零 vendor token、no-vendor-in-core 綠；orchestration 不 import hermes）
+- [x] low coupling / high cohesion 遵守（state.ts 只做 memory 版本化契約 + redact 守門；detector 注入）
+- [x] secret-scan 乾淨（`secret-scan: clean`；secret canary runtime 組裝、無 source 字面值）
+- [x] Docs 更新（design §27-§37、§50 能力閘已標：Hermes 未版本化為 capability-gated、sandbox 記憶體不可還原、interim = reset+prefetch fallback）
+- [x] Adversarial code review = PASS（fresh-context；mutation：把 export 的 redact 守則拿掉 → credential-blind 測試須轉紅；把 schemaVersion 檢查拿掉 → 相容門檻測試須轉紅）
+- [x] **安全不變量（credential-blind）**：Independent Verifier Pass 已執行——對抗式探測 secret 不出 export、detector 拋例外 → deny-by-default、深層巢狀 secret 亦攔
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `state.ts` + fakes 擴充 + barrel 一行）。
