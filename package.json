@@ -34,6 +34,7 @@
     "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.10.2",
     "dependency-cruiser": "^17.4.3",
+    "ts-proto": "2.11.8",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

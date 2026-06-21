@@ -47,6 +47,13 @@ encapsulation) + depguard (`.golangci.yml`), wired into `pnpm run verify:go`.
   proto:check` (in `verify`) fails on drift / skips if the protoc toolchain is absent. Deps pinned to
   `grpc v1.64.0` + `protobuf v1.34.2` (go-1.22-compatible; see `docs/guardrails.md`). Generated
   `*.pb.go` are excluded from golangci-lint. Server/client BEHAVIOR is P1-S6.
+- **P2R-R2-S5** — TS face of the same contract (no consumer). `pnpm run proto:gen` additionally
+  emits a **type-only** TS stub (`ts-proto onlyTypes=true`; **zero runtime imports, no RPC client** —
+  a devDependency codegen tool, never in `dependencies`) into `src/runtime/_generated/ingest/`
+  (committed, generated; excluded from biome). `pnpm run proto:check` adds a mirror TS drift gate:
+  regenerate to a temp dir and `diff` against the committed stub — drift OR a missing/failed
+  `protoc-gen-ts_proto` exits non-zero (fail-closed). The stub is a leaf contract: nothing imports it
+  until the S6 transport adapter. See `docs/design/ingest-client-sync-commit.md`.
 - **P1-S7** — TS↔Go **cross-language conformance** + Phase-1 exit-criteria closeout (zero kernel
   behavior). `conformance/cross-lang/` holds a language-neutral chain fixture (pure data — the only
   cross-plane coupling). A TS-produced chain verifies in the Go verifier and a Go-produced chain

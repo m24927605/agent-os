@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r2-s5-proto-ts-stub-codegen
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~80（`scripts/proto-gen.sh`/`proto-check.sh` 擴充；生成的 TS stub 為 **generated**，不計 net LOC）、files <~4、modules <~1、**新增依賴 = TS proto codegen 工具（devDependency；非 runtime RPC client）**
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R2-S5 — 擴充 [`scripts/proto-gen.sh`](../../../scripts/proto-gen.sh)（目前只有 `--go_out`/`--go-grpc_out`，
@@ -55,14 +55,37 @@ TS stub 漂移時 `proto:check` exit≠0。**此 slice 不引入任何 runtime R
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（drift RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0（含 `proto:check` 之 TS drift 校驗）
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；generated stub 無被 core import、無 cycle）
-- [ ] low coupling / high cohesion 遵守（契約產物為葉節點；無消費者、無 runtime 依賴）
-- [ ] secret-scan 乾淨（生成 stub 無 secret-like 值）
-- [ ] Docs 更新（`proto:gen` 新增 TS 生成、`proto:check` 新增 TS drift gate 的記錄）
-- [ ] Adversarial code review = PASS（mutation：刪掉 TS drift 校驗段 → drift RED 無法轉紅，立即被抓）
-- [ ] （非安全不變量類 slice — 契約/工具）Independent Verifier Pass 非必需；以 §7 adversarial review 達成 Tier-2 acceptance（slice-spec §6.6 消歧）
+- [x] Test-first 成立（drift RED 已貼於 §5）
+  ```
+  $ printf '\n// drift-canary\n' >> src/runtime/_generated/ingest/ingest.ts && pnpm run proto:check
+  proto:check: FAIL — ingest.ts drifted from proto/ingest.proto (run: pnpm run proto:gen)
+  exit code: 1
+  # restored byte-for-byte → pnpm run proto:check → exit code: 0
+  ```
+- [x] `pnpm run verify` exit 0（含 `proto:check` 之 TS drift 校驗）
+  ```
+  $ pnpm run verify
+  typecheck ✓ | lint: Checked 58 files ✓ | build ✓ | test: 22 files, 159 tests passed ✓
+  deps:check: no dependency violations found (40 modules, 82 dependencies) ✓
+  proto:check: go ok / ts ok / ok ✓ | verify:go: ok ✓ | verify:py: skip ✓ | secret-scan: clean ✓
+  exit code: 0
+  ```
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；generated stub 無被 core import、無 cycle）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (40 modules, 82 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（契約產物為葉節點；無消費者、無 runtime 依賴；type-only ts-proto，僅入 devDependencies）
+- [x] secret-scan 乾淨（生成 stub 無 secret-like 值）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（`proto:gen` 新增 TS 生成、`proto:check` 新增 TS drift gate 的記錄 — `kernel/README.md` P2R-R2-S5 條目）
+- [x] Adversarial code review = PASS（mutation：刪掉 TS drift 校驗段 → drift RED 無法轉紅，立即被抓；獨立 review 已通過）
+- [x] （非安全不變量類 slice — 契約/工具）Independent Verifier Pass 非必需；以 §7 adversarial review 達成 Tier-2 acceptance（slice-spec §6.6 消歧）
 
 ## (7) Rollback
 - `git revert <merge-sha>`（移除 proto-gen/proto-check 的 TS 段 + generated 目錄 + devDependency）。
