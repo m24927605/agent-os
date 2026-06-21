@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r12-s1-costgate-release-commit-abort
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~180、files <~6（`src/cost/{port.ts,null.ts,in-memory.ts}` + `src/test-contracts/cost-gate-adapter.test.ts` + **既有** `src/orchestration/pipeline.ts`（改 abort 分支）+ **既有** `src/orchestration/pipeline.e2e.test.ts`（擴一條 abort→release 斷言））、modules ≤ 2（cost + orchestration 接線）、新增依賴 = 0、新建檔 = 0（皆擴既有檔）
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 P2R-R12-S1 — 在 CostGate port 新增 `release(reservationId)`（歸還仍 RESERVED 的預留：`held -= reserved`、`settled` 不變），於兩個 in-tree impl 實作，並把 `commitBeforeEffect` 的 **abort 路徑**接上 `release`，關閉「reserve-then-abort 預算洩漏」。
@@ -73,18 +73,39 @@ P2R-R12-S1 — 在 CostGate port 新增 `release(reservationId)`（歸還仍 RES
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: 0
+  > typecheck (tsc --noEmit) ... ok
+  > lint (biome check src) ... Checked 171 files. No fixes applied.
+  > build (tsc -p tsconfig.build.json) ... ok
+  > test (vitest run) ... Test Files 69 passed | 1 skipped (70); Tests 703 passed | 1 skipped (704)
+  >   - src/test-contracts/cost-gate-adapter.test.ts (30 tests) PASS
+  >   - src/orchestration/pipeline.e2e.test.ts (9 tests) PASS
+  >   - src/inference/gate.test.ts (17 tests) PASS
+  >   - src/cost/adapters/spendguard/adapter.test.ts (11 tests) PASS
+  > deps:check ... ✔ no dependency violations found (113 modules, 266 dependencies cruised)
+  > proto:check / openshell:proto:check / verify:go / verify:py / verify:cross-tenant / launcher:check ... ok
+  > secret-scan ... clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；no-vendor-in-core enforcing；cost 在 core from-list）
-- [ ] low coupling / high cohesion 遵守（commitgate **未**被 cost import；接線只在 orchestration；無新跨 module / cyclic 依賴）
-- [ ] secret-scan 乾淨（source/log/artifact/fixture/snapshot/trace 無 secret-like 值；release 介面 credential-blind）
-- [ ] Docs 更新（`docs/design/follow-ups.md` §2.1 / §5 與此 slice 對齊；P2-G slice 註記 release 已補）
-- [ ] Adversarial code review = PASS（fresh-context；mutation 驗證 double-release / abort-release 測試非 theater）— 連結/摘要: <...>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probe：double-release 不歸負、abort 必 release、commit 後不可 release、壞 ctx fail-closed）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；no-vendor-in-core enforcing；cost 在 core from-list）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (113 modules, 266 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（commitgate **未**被 cost import；接線只在 orchestration；無新跨 module / cyclic 依賴 — deps:check exit 0 證；release 純 cost↔orchestration，無 cycle）
+- [x] secret-scan 乾淨（source/log/artifact/fixture/snapshot/trace 無 secret-like 值；release 介面 credential-blind — 只收 `reservationId:string`）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（`docs/design/follow-ups.md` §2.1 標記 DONE 並註記 SpendGuard 真實 release_session 仍留 R11；與此 slice 對齊）
+- [x] Adversarial code review = PASS（fresh-context；mutation 驗證 double-release / abort-release 測試非 theater）— Slice R12-S1 通過獨立 review（INTEGRATOR 接手前置條件）。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probe：double-release 不歸負、abort 必 release、commit 後不可 release、壞 ctx fail-closed）— 對應斷言見 `src/test-contracts/cost-gate-adapter.test.ts` + `src/orchestration/pipeline.e2e.test.ts`，全綠。
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 port 第三條邊 + 2 impl 的 release + orchestration helper）。

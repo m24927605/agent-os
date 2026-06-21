@@ -92,6 +92,10 @@ NemoClaw 為什麼是這個缺口的 grounding（verified-from-code）：NemoCla
 
 ### 2.1 R12-S1 — CostGate `release(reservationId)` + commit-abort 接線
 
+> **狀態：DONE（slice/p2r-r12-s1-costgate-release-commit-abort）。** port 第三條邊 `release` + Null/InMemory
+> 實作 + `runGovernedToolCall` abort 分支接線皆已落地；SpendGuard adapter 的真實 `release_session` RPC 仍 deny-all
+> 留給 **R11**（見 §4 capability gate）。
+
 **新增 port 第三條邊**，補完 reserve/commit/release 三態（auth / capture / **void**，對齊 Stripe-style 與 SpendGuard `Release`）：
 
 ```

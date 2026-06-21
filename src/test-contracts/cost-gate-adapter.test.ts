@@ -62,12 +62,33 @@ describe.each(ADAPTERS)("CostGate contract — $name", ({ make }) => {
     const a = make();
     await expect(a.reserve({}, { estimatedTokens: 1, resource: "x" })).resolves.toBeDefined();
     await expect(a.commit(undefined, "nope", { actualTokens: 1 })).resolves.toBeDefined();
+    await expect(a.release(undefined, "nope")).resolves.toBeDefined();
+  });
+
+  it("release of an unknown reservation is DENIED, no throw", async () => {
+    const r = await make().release(validCtx, "rsv-never");
+    expect(r.status).toBe("denied");
+    expect(r.event.phase).toBe("release");
+    expect(r.event.result).toBe("denied");
+    if (r.status === "denied") expect(r.reason).toBeTruthy();
+  });
+
+  it("release is FAIL-CLOSED on a malformed AgentContext: denied, no throw", async () => {
+    const r = await make().release({ tenantId: "" }, "rsv-1");
+    expect(r.status).toBe("denied");
+    expect(r.event.contextError).toBeDefined();
   });
 });
 
 describe("NullCostGate — deny-all (fail-closed when no budget is configured)", () => {
   it("denies every reserve with a deny-by-default reason", async () => {
     const r = await new NullCostGate().reserve(validCtx, { estimatedTokens: 1, resource: "x" });
+    expect(r.status).toBe("denied");
+    if (r.status === "denied") expect(r.reason).toContain("deny-by-default");
+  });
+
+  it("denies every release with a deny-by-default reason", async () => {
+    const r = await new NullCostGate().release(validCtx, "rsv-1");
     expect(r.status).toBe("denied");
     if (r.status === "denied") expect(r.reason).toContain("deny-by-default");
   });
@@ -114,6 +135,62 @@ describe("InMemoryCostGate — reserve-before-effect + budget hard-cap", () => {
     expect((await gate.reserve(validCtx, { estimatedTokens: 1, resource: "x" })).status).toBe(
       "denied",
     );
+  });
+
+  it("RELEASE: a reserved-but-not-committed reservation is returned (held budget freed)", async () => {
+    const gate = new InMemoryCostGate(100);
+    const r = await gate.reserve(validCtx, { estimatedTokens: 100, resource: "x" });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    // Whole budget is held -> a fresh reserve must be denied (hard-cap) BEFORE release.
+    expect((await gate.reserve(validCtx, { estimatedTokens: 100, resource: "x" })).status).toBe(
+      "denied",
+    );
+    const rel = await gate.release(validCtx, r.reservationId);
+    expect(rel.status).toBe("released");
+    // After release the held budget is freed -> the same estimate now reserves.
+    expect((await gate.reserve(validCtx, { estimatedTokens: 100, resource: "x" })).status).toBe(
+      "ok",
+    );
+  });
+
+  it("DOUBLE-RELEASE: a second release of the same reservation is DENIED and never frees budget twice", async () => {
+    const gate = new InMemoryCostGate(100);
+    const r = await gate.reserve(validCtx, { estimatedTokens: 60, resource: "x" });
+    if (r.status !== "ok") throw new Error("reserve should succeed");
+    expect((await gate.release(validCtx, r.reservationId)).status).toBe("released");
+    expect((await gate.release(validCtx, r.reservationId)).status).toBe("denied");
+    // held was freed exactly once (not driven negative) -> the full budget is available, no more.
+    expect((await gate.reserve(validCtx, { estimatedTokens: 100, resource: "x" })).status).toBe(
+      "ok",
+    );
+    expect((await gate.reserve(validCtx, { estimatedTokens: 1, resource: "x" })).status).toBe(
+      "denied",
+    );
+  });
+
+  it("RELEASE after COMMIT is DENIED (commit and release are mutually-exclusive terminal edges)", async () => {
+    const gate = new InMemoryCostGate(100);
+    const r = await gate.reserve(validCtx, { estimatedTokens: 40, resource: "x" });
+    if (r.status !== "ok") throw new Error("reserve should succeed");
+    expect((await gate.commit(validCtx, r.reservationId, { actualTokens: 40 })).status).toBe(
+      "committed",
+    );
+    expect((await gate.release(validCtx, r.reservationId)).status).toBe("denied");
+  });
+
+  it("RELEASE leaves settled untouched (no real spend occurred)", async () => {
+    const gate = new InMemoryCostGate(100);
+    const a = await gate.reserve(validCtx, { estimatedTokens: 30, resource: "x" });
+    if (a.status !== "ok") throw new Error("reserve should succeed");
+    await gate.release(validCtx, a.reservationId);
+    // settled is unchanged by release: a later 100-token reserve+commit still fits the full budget
+    // and reports no overrun (would overrun if release had bumped settled).
+    const b = await gate.reserve(validCtx, { estimatedTokens: 100, resource: "x" });
+    if (b.status !== "ok") throw new Error("reserve should succeed");
+    const c = await gate.commit(validCtx, b.reservationId, { actualTokens: 100 });
+    expect(c.status).toBe("committed");
+    if (c.status === "committed") expect(c.overrun).toBe(false);
   });
 
   it("a within-budget commit reports overrun=false", async () => {

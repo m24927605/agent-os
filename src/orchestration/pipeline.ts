@@ -88,8 +88,9 @@ export async function runGovernedToolCall<TC extends GovernedCall, R>(
     effect: () => deps.effect(toolCall),
   });
   if (committed.status === "aborted") {
-    // The audit was not durably recorded, so the effect never ran. NOTE: the reservation remains held
-    // (CostGate has no release op yet — tracked follow-up in the slice spec §8); we do NOT cost.commit.
+    // The audit was not durably recorded, so the effect never ran and no spend occurred. Release the
+    // held reservation (NOT commit) so reserve-then-abort cannot chronically erode the hard-cap.
+    await deps.cost.release(toolCall.context, reservation.reservationId);
     return { status: "denied", stage: "commit", reason: committed.reason };
   }
 

@@ -169,6 +169,30 @@ describe("runGovernedToolCall — end-to-end composition over the real fakes", (
     expect((await fake.startSandbox(ctx, "sbx-fake-1")).status).toBe("denied");
   });
 
+  it("ABORT RELEASES THE RESERVATION: appender rejects -> reservation freed, no budget leak", async () => {
+    // Budget = one call's worth. An aborted call MUST release its held reservation so the SAME budget
+    // can be reserved again — otherwise reserve-then-abort would chronically erode the hard-cap.
+    const cost = new InMemoryCostGate(10);
+    const aborted = makeDeps({
+      allow: allowAll,
+      cost,
+      appender: failAppender,
+      fake: new FakeSandboxAdapter(),
+    });
+    expect(await runGovernedToolCall(aborted, toolCall())).toMatchObject({
+      status: "denied",
+      stage: "commit",
+    });
+    // The whole budget would still be held if abort leaked it -> this reserve would be denied.
+    const ok = makeDeps({
+      allow: allowAll,
+      cost,
+      appender: okAppender(),
+      fake: new FakeSandboxAdapter(),
+    });
+    expect((await runGovernedToolCall(ok, toolCall())).status).toBe("executed");
+  });
+
   it("invocation count: the effect runs EXACTLY ONCE on the happy path, ZERO times on a short-circuit", async () => {
     // A counting effect catches a regression the startSandbox probe cannot (an effect that runs twice).
     let calls = 0;

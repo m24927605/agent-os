@@ -33,10 +33,12 @@ import {
   type CommitResult,
   type CommitSettle,
   type CostGate,
+  type ReleaseResult,
   type ReserveRequest,
   type ReserveResult,
   contextOrError,
   denyCommit,
+  denyRelease,
   denyReserve,
   isValidTokenCount,
 } from "../../port.js";
@@ -155,5 +157,16 @@ export class SpendGuardCostGate implements CostGate {
           : undefined,
       },
     };
+  }
+
+  // The real SpendGuard release_session RPC (ledger.proto :129) is deliberately out of scope (R11).
+  // Until it is wired, release is fail-CLOSED deny-all — never frees a reservation here.
+  release(ctx: unknown, _reservationId: string): Promise<ReleaseResult> {
+    return Promise.resolve(
+      denyRelease(
+        ctx,
+        "release not wired (deny-by-default, fail-closed; SpendGuard Release -> R11)",
+      ),
+    );
   }
 }

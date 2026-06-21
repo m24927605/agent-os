@@ -10,10 +10,12 @@ import { SandboxId, parseAgentContext } from "../iam/ids.js";
 import {
   type CommitResult,
   type CostGate,
+  type ReleaseResult,
   type ReserveRequest,
   type ReserveResult,
   contextOrError,
   denyCommit,
+  denyRelease,
   denyReserve,
   isValidTokenCount,
 } from "./port.js";
@@ -87,6 +89,25 @@ export class InMemoryCostGate implements CostGate {
           ? "committed with budget overrun (recorded; further reserves denied)"
           : undefined,
       },
+    });
+  }
+
+  release(ctx: unknown, reservationId: string): Promise<ReleaseResult> {
+    const c = contextOrError(ctx);
+    if ("contextError" in c) {
+      return Promise.resolve(denyRelease(ctx, "invalid agent context (fail-closed)"));
+    }
+    const reserved = this.reservations.get(reservationId);
+    if (reserved === undefined) {
+      // Unknown / already committed / already released: deny-by-default — never free budget twice,
+      // never drive `held` negative (double-release defence).
+      return Promise.resolve(denyRelease(ctx, "unknown reservation (deny-by-default)"));
+    }
+    this.reservations.delete(reservationId);
+    this.held -= reserved; // settled is untouched: no real spend occurred.
+    return Promise.resolve({
+      status: "released",
+      event: { phase: "release", result: "ok", context: c.context },
     });
   }
 }
