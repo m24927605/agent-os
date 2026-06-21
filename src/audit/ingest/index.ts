@@ -9,3 +9,4 @@
  */
 export type { AppendRequestShape, AppendResponseShape, AppendTransport } from "./transport.js";
 export { parseAppendResponse } from "./parse.js";
+export { createIngestClient, type IngestClientDeps } from "./client.js";
