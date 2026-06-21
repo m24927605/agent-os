@@ -14,7 +14,7 @@ import { type AgentContext, parseAgentContext } from "../iam/ids.js";
 
 /** Auditable cost-gate event (NOT yet appended to the evidence kernel). Carries no secret/credential. */
 export interface CostEvent {
-  readonly phase: "reserve" | "commit";
+  readonly phase: "reserve" | "commit" | "release";
   readonly result: "ok" | "denied";
   readonly context?: AgentContext;
   readonly contextError?: string;
@@ -35,6 +35,15 @@ export type CommitResult =
   | { status: "committed"; overrun: boolean; event: CostEvent }
   | { status: "denied"; reason: string; event: CostEvent };
 
+// `release` returns a still-RESERVED reservation: `held -= reserved`, `settled` unchanged (no real
+// spend occurred). It is the third terminal edge, MUTUALLY EXCLUSIVE with `commit` — releasing an
+// unknown / already-committed / already-released reservation is DENIED (idempotent, deny-by-default;
+// never frees budget twice, never drives `held` negative). Used by the abort path (run aborted before
+// the effect, cf. SpendGuard ledger `Release`).
+export type ReleaseResult =
+  | { status: "released"; event: CostEvent }
+  | { status: "denied"; reason: string; event: CostEvent };
+
 export interface ReserveRequest {
   readonly estimatedTokens: number;
   readonly resource: string;
@@ -47,6 +56,7 @@ export interface CommitSettle {
 export interface CostGate {
   reserve(ctx: unknown, req: ReserveRequest): Promise<ReserveResult>;
   commit(ctx: unknown, reservationId: string, settle: CommitSettle): Promise<CommitResult>;
+  release(ctx: unknown, reservationId: string): Promise<ReleaseResult>;
 }
 
 /** A finite, positive integer token count — anything else is fail-closed denied. */
@@ -76,4 +86,9 @@ export function denyReserve(ctx: unknown, reason: string, resource?: string): Re
 export function denyCommit(ctx: unknown, reason: string): CommitResult {
   const c = contextOrError(ctx);
   return { status: "denied", reason, event: { phase: "commit", result: "denied", reason, ...c } };
+}
+
+export function denyRelease(ctx: unknown, reason: string): ReleaseResult {
+  const c = contextOrError(ctx);
+  return { status: "denied", reason, event: { phase: "release", result: "denied", reason, ...c } };
 }

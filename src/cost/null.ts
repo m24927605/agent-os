@@ -5,9 +5,11 @@
 import {
   type CommitResult,
   type CostGate,
+  type ReleaseResult,
   type ReserveRequest,
   type ReserveResult,
   denyCommit,
+  denyRelease,
   denyReserve,
 } from "./port.js";
 
@@ -23,5 +25,8 @@ export class NullCostGate implements CostGate {
     _settle: { actualTokens: number },
   ): Promise<CommitResult> {
     return Promise.resolve(denyCommit(ctx, DENY_REASON));
+  }
+  release(ctx: unknown, _reservationId: string): Promise<ReleaseResult> {
+    return Promise.resolve(denyRelease(ctx, DENY_REASON));
   }
 }

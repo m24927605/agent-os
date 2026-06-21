@@ -74,6 +74,9 @@ class SpyCostGate implements CostGate {
   commit(...args: Parameters<CostGate["commit"]>): ReturnType<CostGate["commit"]> {
     return this.inner.commit(...args);
   }
+  release(...args: Parameters<CostGate["release"]>): ReturnType<CostGate["release"]> {
+    return this.inner.release(...args);
+  }
 }
 
 function deps(over: Partial<InferenceGateDeps> = {}): InferenceGateDeps {
@@ -216,6 +219,7 @@ describe("InferenceRoutingGate.authorize — fail-closed", () => {
         throw new Error("reserve blew up");
       },
       commit: () => Promise.reject(new Error("nope")),
+      release: () => Promise.reject(new Error("nope")),
     };
     const out = await new InferenceRoutingGate().authorize(
       rawReq,
