@@ -29,7 +29,7 @@
 | **P2-E** | [P2-E-…](./P2-E-pdp-sole-deny-authority-dedup.md) | PDP 唯一 deny 權威 — secondary policy 去重（PDP-deny 勝 secondary-allow） | policy | ~200 | （獨立；用既有 PDP） | **DONE** |
 | **P2-F** | [P2-F-…](./P2-F-tenant-scoped-policy-rules.md) | tenant-scoped PDP 規則 — 跨租 deny-by-default（Enterprise 多租脊椎第一塊磚） | policy | ~150 | （獨立；用既有 PDP） | **DONE** |
 | **P2-G** | [P2-G-…](./P2-G-costgate-port-budget-hardcap.md) | vendor-neutral CostGate port + reserve/commit + budget hard-cap（≥2 impls） | cost | ~280 | （獨立；用 iam/ids） | **DONE** |
-| **P2-H** | [P2-H-…](./P2-H-agenthosting-port-tenant-scoped.md) | vendor-neutral AgentHosting port + tenant-scoped lifecycle（≥2 impls） | hosting | ~300 | （獨立；用 iam/ids） | DRAFT |
+| **P2-H** | [P2-H-…](./P2-H-agenthosting-port-tenant-scoped.md) | vendor-neutral AgentHosting port + tenant-scoped lifecycle（≥2 impls） | hosting | ~300 | （獨立；用 iam/ids） | **DONE** |
 
 ### Slice DAG（鄰接表，無 cycle）
 ```
