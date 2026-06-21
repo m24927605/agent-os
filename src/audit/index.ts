@@ -14,6 +14,11 @@ export type {
   AppendTransport,
 } from "./ingest/index.js";
 export { parseAppendResponse } from "./ingest/index.js";
+// Read-only WORM projection types (Audit Completeness invariant 3). The Personal surface
+// TaskTimeline (slice P2R-R7-S5) folds these into plain-language events through this barrel,
+// never the internal ./event.ts / ./kernel/log.ts, so dependency-cruiser `not-to-internal` holds.
+export type { AuditEvent, AuditPolicyDecision, AuditResult } from "./event.js";
+export type { AppendReceipt, LogEntry } from "./kernel/log.js";
 // Entry/exit redaction (Credential Non-Leak invariant). Sibling modules — e.g. the Personal
 // surface IntentGateway (slice P2R-R7-S1) — redact text through this barrel, never the internal
 // ./redact.ts, so dependency-cruiser `not-to-internal` stays satisfied.
