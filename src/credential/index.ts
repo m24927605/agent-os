@@ -7,3 +7,14 @@
  * the audit layer (the redact detector is injected in tests only). See docs/design/credential-lease.md.
  */
 export { CredentialLease, LeaseState, parseCredentialLease } from "./lease.js";
+export {
+  type LeaseTransition,
+  LeaseEvent,
+  LeaseSpec,
+  LeaseTransitionKind,
+  expire,
+  inject,
+  mint,
+  revoke,
+  use,
+} from "./fsm.js";
