@@ -21,6 +21,7 @@ export * from "./audit/kernel/log.js";
 export * from "./audit/kernel/verify.js";
 export * from "./commitgate/index.js";
 export * from "./cost/index.js";
+export * from "./inference/index.js";
 export * from "./credential/index.js";
 export * from "./hosting/index.js";
 export * from "./orchestration/index.js";

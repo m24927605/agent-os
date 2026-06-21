@@ -57,7 +57,7 @@ module.exports = {
       from: {
         // The pure governance core. `runtime` (where substrate/hosting adapters live) is intentionally
         // NOT listed; adapter sub-trees inside a core module are carved out below.
-        path: "(^|/)src/(iam|policy|audit|commitgate|orchestration|credential|approval|tools|cost|hosting|build)/",
+        path: "(^|/)src/(iam|policy|audit|commitgate|orchestration|credential|approval|tools|cost|hosting|build|inference)/",
         pathNot: "(^|/)src/[^/]+/adapters/",
       },
       to: {

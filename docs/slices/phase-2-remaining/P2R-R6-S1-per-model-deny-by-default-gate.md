@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r6-s1-per-model-deny-by-default
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~180、files <~5（`src/inference/{types.ts,model-allowlist.ts,index.ts}` + `src/inference/model-allowlist.test.ts` + `src/index.ts` barrel）、modules = 1、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R6-S1 — 新增 vendor-neutral `InferenceRequest` Zod schema（**無**任何 credential/api_key 欄位）+ `isModelAllowed()` 純函式，做 **per-model deny-by-default**：請求的 `(model, providerType)` 必須在明確 allowlist 上，否則 deny。
@@ -53,26 +53,45 @@ SLICE-P2R-R6-S1 — 新增 vendor-neutral `InferenceRequest` Zod schema（**無*
   - [ ] **fail-closed**：malformed `InferenceRequest`（缺 model / 非字串 / 多餘欄位）→ `allowed: false`，永不 throw、永不 allow。
   - [ ] **credential-blind 結構斷言**：`types.ts` source（strip 註解）不含 `apiKey`/`api_key`/`secret`/`token`(bearing) 欄位名。
   - [ ] reason 不洩值：deny reason 為靜態文字 / 關卡名（不回顯整個請求物件）。
-- 首次紅燈證據（待實作時貼 exit≠0）:
+- 首次紅燈證據（impl 前，import 失敗 → RED）:
   ```
-  $ pnpm test src/inference/model-allowlist.test.ts
-  ... FAIL（Cannot find module '../inference/...'）...
-  exit code: <填入>
+  $ node_modules/.bin/vitest run src/inference/model-allowlist.test.ts
+  FAIL  src/inference/model-allowlist.test.ts [ ... ]
+  Error: Failed to load url ./model-allowlist.js (Cannot find module '.../src/inference/model-allowlist.ts')
+  exit code: 1
+  ```
+  - GREEN（impl 後，本次整合驗證）:
+  ```
+  $ node_modules/.bin/vitest run src/inference/model-allowlist.test.ts
+  ✓ src/inference/model-allowlist.test.ts (14 tests)
+  Test Files  1 passed (1) | Tests  14 passed (14)
+  exit code: 0
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5：impl 前 import 失敗 exit 1 → impl 後 14 passed exit 0）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填入>
+  ... verify:go: ok / verify:py: skip / secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`inference` 已加入 core from-list、無 vendor、無 cycle、無 deep import）
-- [ ] low coupling / high cohesion 遵守（`inference` 只 import `iam/ids` + 同模組；無跨 module / cyclic 依賴）
-- [ ] secret-scan 乾淨（source/test/fixture 無 secret-like 值；schema 無 credential 欄位）
-- [ ] Docs 更新（本 slice 連結回 design §7；INDEX.md R6 標進度）
-- [ ] Adversarial code review = PASS（fresh-context；deny-by-default / fail-closed / credential-blind 三維對抗探測）— 連結/摘要: <填入>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（per-model deny-by-default、malformed fail-closed、credential-blind schema mutation 皆被抓）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`inference` 已加入 core from-list、無 vendor、無 cycle、無 deep import）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (72 modules, 154 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（`inference` 只 import `iam/ids` + 同模組；無跨 module / cyclic 依賴 — depcruise 0 violations）
+- [x] secret-scan 乾淨（source/test/fixture 無 secret-like 值；schema 無 credential 欄位）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（本 slice 連結回 design §7；INDEX.md R6 標進度 = S1 DONE）
+- [x] Adversarial code review = PASS（fresh-context、非作者、Opus 4.8；deny-by-default / fail-closed / credential-blind 三維對抗探測）— 摘要: independent review 通過，無 defect 留待修正。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（per-model deny-by-default、malformed fail-closed、credential-blind schema mutation 皆被抓）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `src/inference/` + barrel 一行 + dependency-cruiser from-list 一行）。
