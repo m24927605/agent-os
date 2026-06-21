@@ -26,6 +26,7 @@
 | **P2-A** | [P2-A-…](./P2-A-vendor-neutral-substrate-port-contract.md) | vendor-neutral ExecutionSubstrate port + Fake 第二實作 + contract harness（`runtime/openshell`→`runtime/substrate` 正名） | runtime/substrate | ~300 | P2-B | **DONE** |
 | **P2-C** | [P2-C-…](./P2-C-ts-commit-before-effect-guard.md) | TS commit-before-effect guard — 關閉 BLOCKING「護城河空心」 | commitgate | ~190 | （獨立；承接 P1 commitgate 概念） | **DONE** |
 | **P2-D** | [P2-D-…](./P2-D-brain-port-credential-blind-guard.md) | vendor-neutral Brain port + credential-blind guard + 2 impls | runtime/brain | ~300 | P2-A | **DONE** |
+| **P2-E** | [P2-E-…](./P2-E-pdp-sole-deny-authority-dedup.md) | PDP 唯一 deny 權威 — secondary policy 去重（PDP-deny 勝 secondary-allow） | policy | ~200 | （獨立；用既有 PDP） | DRAFT |
 
 ### Slice DAG（鄰接表，無 cycle）
 ```
@@ -33,8 +34,9 @@ P2-B -> ()                 # 可插拔法則先於 adapter 增生；承接 P0/P1
 P2-A -> { P2-B }           # 第一個 ≥2-impl 的 port；在 B 鎖死 no-vendor-in-core 後正名 substrate/ 並加 Fake
 P2-C -> ()                 # commit-before-effect guard；純 sequencing、零 src 耦合
 P2-D -> { P2-A }           # Brain port 沿用 A 的 port+contract-harness 模式
+P2-E -> ()                 # PDP-sole-deny dedup；只用既有 PDP types，獨立
 ```
-> 無 cycle 證明：rank(B)=0, rank(A)=1, rank(C)=0, rank(D)=2；每條邊嚴格遞減 ⇒ DAG。
+> 無 cycle 證明：rank(B)=0, rank(A)=1, rank(C)=0, rank(D)=2, rank(E)=0；每條邊嚴格遞減 ⇒ DAG。
 > 排序紀律：先 **B** 把「core 不得 import vendor」變 verify 可驗（adapter 增生前先鎖），再 **A** 交出第一個真正
 > ≥2-impl 的 port（順手正名 `runtime/openshell`→`runtime/substrate`），**C** 補 commit-before-effect（先前只是口號），
 > **D** 讓「腦」成為可驗可插拔槽位並把 credential-blind 變強制。B/C 互相獨立；A 在 B 之後；D 沿用 A。
