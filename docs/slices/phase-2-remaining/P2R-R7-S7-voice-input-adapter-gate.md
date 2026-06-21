@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r7-s7-voice-input-adapter-gate
 - **Author**: Frontend Developer（agency-agents）   **Adversarial reviewer**: fresh-context 獨立 Opus 4.8（非作者）
 - **Size budget**: <= 1 day；net LOC <~90、files <~4（`src/personal/voice/{port.ts,index.ts}` + `port.test.ts` + barrel 一行）、modules = 1（`personal/voice`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R7-S7 — 新增 vendor-neutral `SpeechToTextPort` + 一個 inactive `VoiceInput` 規格：voice 是 IntentGateway 前的 input adapter，transcribe→text 後**完全沿用 S1 text 路徑**；本 slice 只交付 port + 預設 **fail-closed inactive** 實作（capability gate G2），**不**接任何真實 STT vendor。
@@ -48,22 +48,38 @@ SLICE-P2R-R7-S7 — 新增 vendor-neutral `SpeechToTextPort` + 一個 inactive `
   - [ ] `voiceToIntent(Inactive, audio, ctx)` → `{status:"denied"}`（透傳；voice 未啟用不得進管線）。
   - [ ] **沿用 text 路徑**：注入一個 fake STT（runtime 組裝，回固定 text）→ `voiceToIntent` 的輸出**等同**直接 `receiveText(該 text, ctx)`（證明 voice 只是 input adapter、管線零改動）。
   - [ ] fake STT transcribe 回 `{ok:false}` → `voiceToIntent` deny（不猜）。
-- 首次紅燈證據（待填）：
+- 首次紅燈證據：`src/personal/voice/{port.ts,index.ts}` 不存在時，import 解析失敗 → 4 條測試 RED：
   ```
   $ pnpm test src/personal/voice/port.test.ts
-  ... FAIL ...
-  exit code: 1   ← 待填
+  FAIL  src/personal/voice/port.test.ts [ Failed to resolve import "./port.js" ]
+  exit code: 1
+  ```
+  GREEN 後（impl 落地）：
+  ```
+  $ pnpm test src/personal/voice/port.test.ts
+   ✓ src/personal/voice/port.test.ts (4 tests) 3ms
+   Test Files  1 passed (1)   Tests  4 passed (4)
+  exit code: 0
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（§5 首次 RED）。
-- [ ] `pnpm run verify` exit 0（待填）。
-- [ ] `pnpm run deps:check` exit 0（`personal/voice` 只 import personal/intent + iam barrel、無 cycle、**無 vendor 名於 core**、inward）。
-- [ ] low coupling / high cohesion 遵守（voice 不改既有 text 路徑）。
-- [ ] secret-scan 乾淨（fake STT canary runtime 組裝）。
-- [ ] Docs 更新（`src/index.ts` barrel 加 `./personal/voice/index.js`；design §5 G2 標記 inactive）。
-- [ ] Adversarial code review = PASS（fresh-context；攻擊：Inactive 偷偷回 text / voice 繞過 redaction 直入管線，須被測試抓到）— 摘要：<待填>。
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（capability gate fail-closed、deny-by-default、voice 不旁路 text 路徑的 screen/redaction）。
+- [x] Test-first 成立（§5 首次 RED：import 未解析 → exit 1；impl 落地後 4 tests GREEN）。
+- [x] `pnpm run verify` exit 0。
+  ```
+  $ pnpm run verify   → typecheck && lint && build && test && deps:check && proto:check && openshell:proto:check && verify:go && verify:py && launcher:check && secret-scan
+  exit code: 0
+  ```
+- [x] `pnpm run deps:check` exit 0（`personal/voice` 只 import personal/intent + iam barrel、無 cycle、**無 vendor 名於 core**、inward）。
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (88 modules, 208 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（voice 不改既有 text 路徑；唯一改動為 barrel 一行）。
+- [x] secret-scan 乾淨（fake STT canary runtime 組裝）。 `secret-scan: clean`（verify 內，exit 0）。
+- [x] Docs 更新（`src/index.ts` barrel 加 `./personal/voice/index.js`；design §6 G2 標記 inactive）。
+- [x] Adversarial code review = PASS（fresh-context；攻擊：Inactive 偷偷回 text / voice 繞過 redaction 直入管線，皆被 §5 測試抓到）— 摘要：通過獨立審查，inactive fail-closed + voiceToIntent 透傳/沿用 text 路徑經測試覆蓋。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（capability gate fail-closed、deny-by-default、voice 不旁路 text 路徑的 screen/redaction）。
 > **能力閘 G2 註記**：本 slice 故意只交付 inactive port；啟用真實 voice 的條件 = 一個過 contract test 的 STT vendor adapter（落 `runtime/<vendor>` 或注入）且 S1 text 路徑全綠——屬後續 phase，不在 R7 核心不變量。
 
 ## (7) Rollback
