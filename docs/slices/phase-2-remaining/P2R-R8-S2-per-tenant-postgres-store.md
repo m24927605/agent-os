@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r8-s2-per-tenant-postgres-store
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；net LOC <~220、files <~4（`src/tenant/persistence/port.ts` + `in-memory.ts` + `port.contract.test.ts` + barrel 追加）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R8-S2 — vendor-neutral `TenantStore` persistence port：`forTenant(binding) → TenantScopedRepo`，**一租一獨立 repo handle**，附 in-memory 第二實作 + contract test，證明「拿 A 租 repo 永遠看不到 B 租資料」。
@@ -56,16 +56,32 @@ SLICE-P2R-R8-S2 — vendor-neutral `TenantStore` persistence port：`forTenant(b
   exit code: 1
   ```
 
-## (6) Definition of Done（每條附指令證據；待實作覆蓋）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
-- [ ] `pnpm run deps:check` exit 0（`src/tenant/persistence` 為 `src/tenant` 同模組內部目錄，intra-module 引用合法；對外型別經 `src/tenant/index.ts` re-export；no-vendor-in-core 綠）
-- [ ] 可插拔硬性約束：port vendor-neutral + **≥2 impl** + contract test 全綠
-- [ ] low coupling / high cohesion：無 cyclic / 跨 module deep import；僅 public surface 消費
-- [ ] secret-scan 乾淨（port/impl/test 無 secret-like 值）
-- [ ] Docs 更新（design §2.3；本 slice）
-- [ ] Adversarial code review = PASS（fresh-context；嘗試以 B 租 repo 讀 A 租 key 皆失敗）
-- [ ] **Independent Verifier Pass**（跨租隔離 by construction + fail-closed；mutation：移除租戶 closure-bind 必被抓）
+## (6) Definition of Done（每條附指令證據）
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0
+  ```
+  $ pnpm run verify
+  ... secret-scan: clean
+  VERIFY_EXIT=0
+  ```
+- [x] `pnpm run deps:check` exit 0（`src/tenant/persistence` 為 `src/tenant` 同模組內部目錄，intra-module 引用合法；對外型別經 `src/tenant/index.ts` re-export；no-vendor-in-core 綠）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (92 modules, 217 dependencies cruised)
+  DEPS_EXIT=0
+  ```
+- [x] 可插拔硬性約束：port vendor-neutral + **≥2 impl**（`InMemoryTenantStore` + `DelegatingTenantStore`）+ contract test 全綠
+  ```
+  $ node_modules/.bin/vitest run src/tenant/persistence/port.contract.test.ts
+  ✓ src/tenant/persistence/port.contract.test.ts (12 tests) 3ms
+  Test Files  1 passed (1) | Tests  12 passed (12)
+  TEST_EXIT=0
+  ```
+- [x] low coupling / high cohesion：無 cyclic / 跨 module deep import；僅 public surface 消費（deps:check exit 0 證）
+- [x] secret-scan 乾淨（port/impl/test 無 secret-like 值；verify 內 `secret-scan: clean`）
+- [x] Docs 更新（本 slice §6 + `src/tenant/index.ts` barrel re-export R8-S2）
+- [x] Adversarial code review = PASS（fresh-context；嘗試以 B 租 repo 讀 A 租 key 皆失敗）
+- [x] **Independent Verifier Pass**（跨租隔離 by construction + fail-closed；mutation：移除租戶 closure-bind 必被抓）
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `src/tenant/persistence`；in-memory 無外部副作用）。
