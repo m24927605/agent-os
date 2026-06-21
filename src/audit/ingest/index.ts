@@ -18,3 +18,8 @@ export {
   type CappedOutboxDeps,
   type OutboxRecord,
 } from "./outbox.js";
+export {
+  createIngestAppender,
+  type IngestAppender,
+  type IngestAppenderDeps,
+} from "./wire.js";
