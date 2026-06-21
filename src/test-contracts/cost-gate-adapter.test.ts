@@ -7,7 +7,17 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { type LedgerTransport, SpendGuardCostGate } from "../cost/adapters/spendguard/index.js";
 import { type CostGate, InMemoryCostGate, NullCostGate } from "../cost/index.js";
+
+/** A healthy in-process SpendGuard ledger double: reserves within budget, settles without overrun. */
+const healthyLedger = (): LedgerTransport => {
+  let n = 0;
+  return {
+    reserve: () => Promise.resolve({ reservationId: `rsv-${++n}` }),
+    commit: () => Promise.resolve({ overrun: false }),
+  };
+};
 
 const validCtx = {
   actorId: "agent:claude",
@@ -20,6 +30,7 @@ const validCtx = {
 const ADAPTERS: { name: string; make: () => CostGate }[] = [
   { name: "NullCostGate", make: () => new NullCostGate() },
   { name: "InMemoryCostGate", make: () => new InMemoryCostGate(1000) },
+  { name: "SpendGuardCostGate", make: () => new SpendGuardCostGate(healthyLedger()) },
 ];
 
 describe.each(ADAPTERS)("CostGate contract — $name", ({ make }) => {
