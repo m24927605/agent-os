@@ -11,3 +11,10 @@ export type { AppendRequestShape, AppendResponseShape, AppendTransport } from ".
 export { parseAppendResponse } from "./parse.js";
 export { createIngestClient, type IngestClientDeps } from "./client.js";
 export { createDedupTable, type DedupResult, type DedupTable } from "./dedup.js";
+export {
+  createCappedOutbox,
+  OutboxFullError,
+  type CappedOutbox,
+  type CappedOutboxDeps,
+  type OutboxRecord,
+} from "./outbox.js";
