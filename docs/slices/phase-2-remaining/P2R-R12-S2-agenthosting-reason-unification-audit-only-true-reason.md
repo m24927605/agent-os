@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r12-s2-agenthosting-reason-unification
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~90、files <~3（`src/hosting/in-memory.ts` + `src/test-contracts/agent-hosting-adapter.test.ts` +（必要時）`src/hosting/port.ts` 常數）、modules ≤ 1（hosting）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 P2R-R12-S2 — 把 `InMemoryAgentHosting` 對 caller 回傳的 deny reason **統一為單一不可區分字串**（`"unknown sandbox"`），「unknown sandbox」與「cross-tenant」對 caller 不可區分；**真正的跨租真因只寫進 audit `event.reason`**（attester 可見、actor 不可見）。
@@ -66,18 +66,35 @@ P2R-R12-S2 — 把 `InMemoryAgentHosting` 對 caller 回傳的 deny reason **統
   > `r.event.reason`（見 §3 In-scope「遷移既有 tenant-isolation 測試斷言」）——遷移是契約改動的一部分，非繞過測試。
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: 0
+  ... secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；no-vendor-in-core enforcing；hosting 在 core from-list）
-- [ ] low coupling / high cohesion 遵守（無新跨 module / cyclic 依賴；只動 hosting 模組）
-- [ ] secret-scan 乾淨（無 secret-like 值；reason 字串無敏感資訊）
-- [ ] Docs 更新（`docs/design/follow-ups.md` §2.2 / §5 與此 slice 對齊；P2-H slice 註記 oracle 已消除）
-- [ ] Adversarial code review = PASS（fresh-context；mutation 驗證 no-oracle 測試非 theater——把 caller reason 還原成真因應令測試紅）— 連結/摘要: <...>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probe：caller 面 unknown≡cross-tenant 不可區分、audit 真因仍在、fail-closed/owner 路徑未退化）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；no-vendor-in-core enforcing；hosting 在 core from-list）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (113 modules, 267 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（無新跨 module / cyclic 依賴；只動 hosting 模組 + 其 contract harness）
+- [x] secret-scan 乾淨（無 secret-like 值；reason 字串無敏感資訊）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（`docs/design/follow-ups.md` §2.2 / §5 與此 slice 對齊；P2-H slice 註記 oracle 已消除）
+- [x] Adversarial code review = PASS（fresh-context；mutation 驗證 no-oracle 測試非 theater——把 caller reason 還原成真因應令測試紅）— 連結/摘要: 獨立 review PASS（slice harness `agent-hosting-adapter.test.ts` 17 tests 全綠）
+  ```
+  $ pnpm test src/test-contracts/agent-hosting-adapter.test.ts
+  Test Files  1 passed (1)
+       Tests  17 passed (17)
+  exit code: 0
+  ```
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probe：caller 面 unknown≡cross-tenant 不可區分、audit 真因仍在、fail-closed/owner 路徑未退化）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（caller reason 還原為原本兩種可區分字串）。

@@ -8,7 +8,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { NemoClawAgentHosting } from "../hosting/adapters/nemoclaw/index.js";
-import { type AgentHosting, InMemoryAgentHosting, NullAgentHosting } from "../hosting/index.js";
+import {
+  type AgentHosting,
+  InMemoryAgentHosting,
+  NullAgentHosting,
+  UNKNOWN_SANDBOX,
+} from "../hosting/index.js";
 
 /** In-process CommandSink that always reports a healthy launch + running probe (contract harness). */
 const okSink = {
@@ -84,7 +89,8 @@ describe("InMemoryAgentHosting — tenant-scoped lifecycle (the NemoClaw gap, cl
       await h.hostAgent(ctxB, spec), // re-host the same sandbox as another tenant
     ]) {
       expect(r.status).toBe("denied");
-      if (r.status === "denied") expect(r.reason.toLowerCase()).toContain("cross-tenant");
+      // Cross-tenant truth now lives ONLY in the audit event (attester-visible), not caller-facing.
+      if (r.status === "denied") expect(r.event.reason?.toLowerCase()).toContain("cross-tenant");
     }
   });
 
@@ -92,6 +98,41 @@ describe("InMemoryAgentHosting — tenant-scoped lifecycle (the NemoClaw gap, cl
     const h = new InMemoryAgentHosting();
     expect((await h.getAgentStatus(ctxA, "sbx-nope")).status).toBe("denied");
     expect((await h.reconcileAgentProcess(ctxA, "sbx-nope", "restart")).status).toBe("denied");
+  });
+
+  it("NO-ORACLE: caller reason for cross-tenant is INDISTINGUISHABLE from unknown sandbox", async () => {
+    const h = new InMemoryAgentHosting();
+    expect((await h.hostAgent(ctxA, spec)).status).toBe("ok");
+    const crossTenant = [
+      await h.getAgentStatus(ctxB, "sbx-1"),
+      await h.reconcileAgentProcess(ctxB, "sbx-1", "restart"),
+      await h.hostAgent(ctxB, spec),
+    ];
+    const unknown = [
+      await h.getAgentStatus(ctxB, "sbx-never"),
+      await h.reconcileAgentProcess(ctxB, "sbx-never", "restart"),
+    ];
+    for (const r of [...crossTenant, ...unknown]) {
+      expect(r.status).toBe("denied");
+      if (r.status === "denied") expect(r.reason).toBe(UNKNOWN_SANDBOX);
+    }
+  });
+
+  it("AUDIT INTEGRITY: event.reason still distinguishes cross-tenant from unknown", async () => {
+    const h = new InMemoryAgentHosting();
+    expect((await h.hostAgent(ctxA, spec)).status).toBe("ok");
+    const cross = await h.getAgentStatus(ctxB, "sbx-1");
+    const unknown = await h.getAgentStatus(ctxB, "sbx-never");
+    expect(cross.event.reason?.toLowerCase()).toContain("cross-tenant");
+    expect(unknown.event.reason?.toLowerCase()).toContain("unknown sandbox");
+    expect(cross.event.reason).not.toBe(unknown.event.reason);
+  });
+
+  it("FAIL-CLOSED: bad ctx reason is unchanged and does not leak existence", async () => {
+    const h = new InMemoryAgentHosting();
+    const r = await h.getAgentStatus({ tenantId: "" }, "sbx-1");
+    expect(r.status).toBe("denied");
+    if (r.status === "denied") expect(r.reason).toBe("invalid agent context (fail-closed)");
   });
 });
 

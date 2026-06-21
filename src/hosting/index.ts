@@ -18,5 +18,6 @@ export type {
   ReconcileResult,
   StatusResult,
 } from "./port.js";
+export { UNKNOWN_SANDBOX } from "./port.js";
 export { NullAgentHosting } from "./null.js";
 export { InMemoryAgentHosting } from "./in-memory.js";

@@ -14,6 +14,13 @@
  */
 import { type AgentContext, parseAgentContext } from "../iam/ids.js";
 
+/**
+ * Caller-facing deny reason for "no sandbox you may act on" — used for BOTH unknown-sandbox and
+ * cross-tenant denials so a caller cannot tell them apart (closes the cross-tenant existence oracle).
+ * The true reason (unknown vs cross-tenant) is kept only in the audit event.reason.
+ */
+export const UNKNOWN_SANDBOX = "unknown sandbox";
+
 export type AgentPhase = "running" | "stopped" | "unknown";
 export type HostingOperation = "host" | "status" | "reconcile";
 export type ReconcileAction = "health-probe" | "restart";
