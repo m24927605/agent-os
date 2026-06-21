@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r2-s6-rpc-transport-adapter
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~150、files <~4（`src/runtime/<adapter>/{transport.ts,index.ts,transport.test.ts}` + barrel）、modules <~1、**新增依賴 = RPC client（runtime；本 slice 是依賴-變更 slice，slice-spec §3）**
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R2-S6 — 用具體 RPC client（connect-es 對 connect protocol，或 grpc-js；選型於本 slice 落地）實作
@@ -60,14 +60,40 @@ S1 的 `AppendTransport`：把成功回應映成 `AppendResponseShape`（交 S1 
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0（含 `deps:check`、`proto:check`、`secret-scan`）
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；RPC 依賴僅在 `src/runtime` adapter、core 零 vendor、無 cycle）
-- [ ] low coupling / high cohesion 遵守（core 只見 `AppendTransport` port；vendor 僅在 runtime adapter）
-- [ ] secret-scan 乾淨（endpoint/credential 不入 source/log/fixture；測試憑證 runtime 組裝）
-- [ ] Docs 更新（新增 RPC 依賴、adapter surface 記錄）
-- [ ] Adversarial code review = PASS（mutation：timeout/連線失敗改成回 falsy receipt → fail-closed RED 轉紅；把 RPC 依賴 import 進 core → `deps:check` 轉紅）
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：所有傳輸失敗皆 reject、零 falsy 成功）
+- [x] Test-first 成立（首次 RED 已貼於 §5；`src/runtime/ingest/transport.test.ts` 7 tests，adapter 不存在 → cannot find module → exit 1，後 GREEN）
+- [x] `pnpm run verify` exit 0（含 `deps:check`、`proto:check`、`secret-scan`）
+  ```
+  $ pnpm run verify
+  ... typecheck ok | lint: Checked 63 files, No fixes | build ok
+  ... vitest: Test Files 23 passed (23) / Tests 166 passed (166)
+  ... deps:check: ✔ no dependency violations found (45 modules, 91 dependencies)
+  ... proto:check: ok | verify:go: ok | verify:py: skip | secret-scan: clean
+  exit code: 0
+  ```
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；RPC 依賴僅在 `src/runtime` adapter、core 零 vendor、無 cycle）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (45 modules, 91 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（core 只見 `AppendTransport` port；vendor 僅在 runtime adapter — `@grpc/grpc-js` import 僅在 `src/runtime/ingest/grpc-client.ts`；`src/build/no-vendor-in-core.test.ts` 6 tests passed）
+- [x] secret-scan 乾淨（endpoint/credential 不入 source/log/fixture；測試憑證 runtime 組裝）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（新增 RPC 依賴 `@grpc/grpc-js` 記於 `package.json`；adapter surface + 選型理由記於 `docs/design/ingest-client-sync-commit.md` 能力閘）
+- [x] Adversarial code review = PASS（mutation：timeout 改成 resolve falsy `{result:undefined}`（fail-open）→ `transport.test.ts` 1 failed | 6 passed → exit 1（fail-closed RED 轉紅）；還原後 7 passed exit 0。`deps:check` 對 core import RPC 依賴會轉紅由 `no-vendor-in-core` 守門。）
+  ```
+  $ npx vitest run src/runtime/ingest/transport.test.ts   # timeout fail-open mutation
+  Tests  1 failed | 6 passed (7) — "rejects.toThrow(/timeout/i)" got Object {}
+  exit code: 1
+  $ npx vitest run src/runtime/ingest/transport.test.ts   # clean (restored)
+  Tests  7 passed (7)
+  exit code: 0
+  ```
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：所有傳輸失敗皆 reject、零 falsy 成功 — RPC error / 同步 throw / timeout / empty oneof / error oneof 五個 fail-closed 路徑均經 reject 或交 S1 throw 驗證；slice 經 fresh-context 獨立審查 PASS）
 
 ## (7) Rollback
 - `git revert <merge-sha>`（移除 adapter + RPC 依賴；core port 不受影響）。
