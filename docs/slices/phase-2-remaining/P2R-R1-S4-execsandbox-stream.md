@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r1-s4-execsandbox-stream
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；預期 net LOC <~150、files <~3、modules = 1（`runtime/openshell`）；新增第三方依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R1-S4 — 為 `OpenShellSandboxAdapter` 加 `execSandbox`：呼 `ExecSandbox`（server-stream，openshell.proto:67），消費 `ExecSandboxEvent` oneof（stdout/stderr/exit，openshell.proto:690-696），收斂成一個帶 exit code 的結果，fail-closed。
@@ -55,18 +55,41 @@ SLICE-P2R-R1-S4 — 為 `OpenShellSandboxAdapter` 加 `execSandbox`：呼 `ExecS
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填實測>
+  ... typecheck ok / lint ok (73 files) / build ok / test 241 passed (28 files) /
+      deps:check ✔ no violations (54 modules) / proto:check ok / openshell:proto:check ok /
+      verify:go ok / verify:py skip / secret-scan clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`no-vendor-in-core` 仍綠）
-- [ ] low coupling / high cohesion 遵守（無新跨 module / cyclic 依賴）
-- [ ] secret-scan 乾淨（exec env 測試用 runtime 組裝的 canary，無 source 字面 secret）
-- [ ] Docs 更新（design §3.4 stream 收斂/fail-closed 與實作一致）
-- [ ] Adversarial code review = PASS（fresh-context）— 連結/摘要: <填>
-- [ ] Independent Verifier Pass：probe「無 exit / stream error / deadline ⇒ denied；明文 credential env ⇒ denied」
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`no-vendor-in-core` 仍綠）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (54 modules, 110 dependencies cruised)
+  exit code: 0
+  # no-vendor-in-core: src/build/no-vendor-in-core.test.ts (6 tests) PASS（real src tree clean）
+  ```
+- [x] low coupling / high cohesion 遵守（無新跨 module / cyclic 依賴）
+  ```
+  # depcruise: not-to-internal + no-vendor-in-core 皆綠；connect-node/proto stub 僅限 runtime/openshell
+  ```
+- [x] secret-scan 乾淨（exec env 測試用 runtime 組裝的 canary，無 source 字面 secret）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（design §3.4 stream 收斂/fail-closed 與實作一致）
+- [x] Adversarial code review = PASS（fresh-context）— 連結/摘要: S4 通過獨立審查（fresh-context、非作者 Opus 4.8）。
+- [x] Independent Verifier Pass：probe「無 exit / stream error / deadline ⇒ denied；明文 credential env ⇒ denied」
+  ```
+  $ pnpm test src/runtime/openshell/adapter.exec.test.ts
+  ✓ 39 tests passed（涵蓋：壞 ctx/未知 id → denied 未呼 RPC；stdout 拼接 + exit0 → ok；
+    exit≠0 → ok 如實回報；提前 error / 無 exit / deadline → denied；明文 credential env → denied）
+  exit code: 0
+  ```
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 execSandbox 與 transport 原語）。

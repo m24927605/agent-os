@@ -178,6 +178,30 @@ Get/Exec/Delete 用對映回來的 OpenShell name/id 呼叫。**對映遺失 = f
 - **任何 transport / decode / 未知 phase / 連線失敗 ⇒ deny**（deny-by-default）。adapter **永不 throw**
   跨 port 邊界（與 P2-A contract 一致：port.ts 的 deny/ok 一律回 `AdapterResult`）。
 
+> **S4 實作對齊（DONE）：** `src/runtime/openshell/adapter.ts` `OpenShellSandboxAdapter.execSandbox(ctx,
+> sandboxId, cmd, opts?)` 驅動 `ExecSandbox`（server-stream，openshell.proto:67），回 `ExecOutcome`
+> （`{status:"ok"; result:{exitCode,stdout,stderr}}` | `{status:"denied"; reason}`，每路皆帶可審計 event）。
+> 流程：① 壞 ctx / 非法或未知 id（對映遺失）/ env value 帶 raw credential marker（非乾淨
+> `openshell:resolve:env:` placeholder，見 `isExecEnvValueAllowed`，client.ts）→ deny（**未呼 RPC**）；
+> ② 組 `ExecSandboxRequest{sandbox_id=ref.id（gateway 穩定 id，proto:647，非 name）, command, workdir?,
+> environment?, timeout_seconds?, stdin?}`；③ 消費 stream，依序累積 stdout/stderr bytes，**僅在見到終端
+> `ExecSandboxExit`（proto:685）才收斂成 `ok`**（任意 exit code，含非零如實回報，非零 exit ≠ transport 失敗）。
+> **收斂/fail-closed 規則**：同步 throw / 串流中途 throw（RST_STREAM/decode）/ **未見 exit 即關閉** /
+> `ExecSandboxExit` 缺 exit_code / **累積 stdout+stderr 超過 `maxOutputBytes`（預設 8 MiB，防 OOM）** /
+> deadline 逾時 → **全部 denied**，**永不臆造 exit 0**、**永不回傳截斷的成功**、永不 throw 跨邊界、reason
+> 不含 baseUrl/endpoint/credential。逾時/溢位/任一收尾路徑皆 `AbortController.abort()` 真正取消底層
+> stream（`exec(req, signal)`；honour 的 transport 會拆掉 gRPC stream，`iterator.return()` 為 fallback）。
+> 信任邊界以 zod runtime schema 驗 cmd/opts（壞/超大形狀 → deny before RPC，**永不 throw**）：argv
+> count/bytes、env count/per-entry bytes、workdir/stdin length、timeout/deadline 上限、`maxOutputBytes`
+> 夾在有限正整數（不可用 Infinity/NaN 關掉 OOM 護欄）。每個 stream frame 亦 runtime 驗 oneof（恰一變體、
+> data 為 Uint8Array、exit_code 為整數），違反即 deny+abort。
+> seam `OpenShellExecTransport` **只 extends `OpenShellLifecycleTransport`**（S4 僅依賴 S2，不依賴 S3 的
+> get/watch；slice DAG: S4 -> {S2}）。env guard `isExecEnvValueAllowed` 比對 SecretResolver 的**確切**
+> placeholder grammar（rev0 `openshell:resolve:env:<KEY>` / revN `…:v<N>_<KEY>`，`^…$` 錨定）；alias
+> marker `OPENSHELL-RESOLVE-ENV-`、空/壞 placeholder、前綴埋在字串中段者 → deny。connect-node 真實
+> `ExecSandbox` descriptor 由 S6 / opt-in e2e 接線（mirror S2/S3：預設 transport double，不打網路）。
+> interactive/tty（proto:665-671/75）out-of-scope（§6）。RED 測試 `adapter.exec.test.ts`。
+
 ---
 
 ## 4. 重用 vs 新增
