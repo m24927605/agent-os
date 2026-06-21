@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r3-s1-toolmanifest-schema
 - **Author**: agency-agents writer    **Adversarial reviewer**: <fresh-context Opus 4.8、非作者>
 - **Size budget**: <= 0.5 day；net LOC <~150、files <~3（`src/tools/manifest.ts` + `src/tools/manifest.test.ts` + `src/index.ts` barrel 一行）、modules = 1（新 `tools`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R3-S1 — 新增 **agent-agnostic 的 `ToolManifest` Zod `.strict()` schema**（9 欄：`name` / `version` / `description` / `action` / `resourcePattern` / `sideEffect`(enum) / `idempotent`(bool) / `requiresApproval`(bool) / `bundleRefOnly`(bool)）+ `parseToolManifest(input): ToolManifest`（fail-closed），含兩條一致性護欄（`sideEffect:"none"`⇒`idempotent:true`；`sideEffect:"destructive"`⇒`requiresApproval:true`）。
@@ -62,18 +62,34 @@ SLICE-P2R-R3-S1 — 新增 **agent-agnostic 的 `ToolManifest` Zod `.strict()` s
   ```
 
 ## (6) Definition of Done（每條附指令證據；實作時填真實 exit code）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 可證 doc→red→impl）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；git history 可證 doc→red→impl）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <0>
+  ... typecheck ok / lint: Checked 79 files, no fixes / build ok
+  ... vitest: Test Files 31 passed | 1 skipped; Tests 269 passed | 1 skipped
+  ...   src/tools/manifest.test.ts (8 tests) ✓
+  ... deps:check: ✔ no dependency violations found (56 modules, 114 dependencies)
+  ... proto:check ok / openshell:proto:check ok / verify:go ok / verify:py skip
+  ... secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；確認 manifest.ts 只 import zod、無跨 module deep import、no-vendor-in-core 綠）
-- [ ] low coupling / high cohesion 遵守（新 `tools` module 單一責任=契約定義；無 cyclic）
-- [ ] secret-scan 乾淨（manifest 為純宣告式、無 secret-like 值；測試若需 secret-shaped 值則 runtime 組裝）
-- [ ] Docs 更新（design/tool-manifest-registry.md §2.1 9 欄表與本 slice 一致）
-- [ ] Adversarial code review = PASS（fresh-context；reviewer mutation：拿掉 `.strict()` → 未知欄位測試應轉紅；拿掉護欄 → 護欄測試應轉紅）— 摘要: <填>
-- [ ]（安全不變量類）Independent Verifier Pass 已執行並 clean（probed fail-closed parse、`.strict()` 拒未知欄、護欄不可被繞過）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；確認 manifest.ts 只 import zod、無跨 module deep import、no-vendor-in-core 綠）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (56 modules, 114 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（新 `tools` module 單一責任=契約定義；無 cyclic；manifest.ts 僅 import zod）
+- [x] secret-scan 乾淨（manifest 為純宣告式、無 secret-like 值）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（design/tool-manifest-registry.md §2.1 9 欄表與本 slice 一致）
+- [x] Adversarial code review = PASS（fresh-context；reviewer mutation：拿掉 `.strict()` → 未知欄位測試轉紅；拿掉護欄 → 護欄測試轉紅）— 摘要: 通過 independent review，slice R3-S1 已 pass。
+- [x]（安全不變量類）Independent Verifier Pass 已執行並 clean（probed fail-closed parse、`.strict()` 拒未知欄、護欄不可被繞過）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `src/tools/manifest.ts` + `src/tools/manifest.test.ts` + barrel 一行）。
