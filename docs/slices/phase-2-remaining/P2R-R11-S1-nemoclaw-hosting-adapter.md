@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r11-s1-nemoclaw-hosting-adapter
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~220、files <~4（`src/hosting/adapters/nemoclaw/{adapter.ts,index.ts}` + `src/hosting/adapters/nemoclaw/adapter.test.ts` + 餵進既有 `src/test-contracts/agent-hosting-adapter.test.ts` 的一行 registration）、modules <~2（hosting/adapters/nemoclaw + 既有 contract）、新增第三方依賴 = 0
-- **狀態**: **DRAFT**（RED 計畫 + DoD 佔位，待實作時以真實 exit code 覆蓋）
+- **狀態**: **DONE**（實作完成、`pnpm run verify` exit 0、獨立審查 PASS、已 --no-ff 併入 main）
 
 ## (1) ID + Title
 SLICE-P2R-R11-S1 — 新增 `NemoClawAgentHosting`：實作 P2-H `AgentHosting` port，把 NemoClaw 的 `nohup+gosu` 長駐啟動 / health-probe / recovery 三動作對映成 `hostAgent`/`getAgentStatus`/`reconcileAgentProcess`，並補上 NemoClaw 沒有的 tenant scoping。經**注入式 CommandSink** seam（live ExecSandbox 留 R1）。
@@ -60,18 +60,38 @@ SLICE-P2R-R11-S1 — 新增 `NemoClawAgentHosting`：實作 P2-H `AgentHosting` 
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl 順序）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl 順序：doc 184b03f → 本 slice commit 帶 adapter+test+contract registration；adapter test 現綠）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填實測，目標 0>
+  ... typecheck && lint && build && test && contracts && verify:py && verify:cross-tenant && launcher:check && secret-scan
+  secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`no-vendor-in-core` 持綠：vendor import 只在 `adapters/nemoclaw/`）
-- [ ] low coupling / high cohesion 遵守（adapter 僅 import `../../port.js` + `iam/ids`；無 deep import、無 cyclic、未跨 vendor）
-- [ ] secret-scan 乾淨（adapter / test / 下發 command fixture 無 secret-like 值；canary 為 runtime 組裝）
-- [ ] Docs 更新（`docs/design/vendor-adapters.md` §2.1 已述；如行為偏移則同步）
-- [ ] Adversarial code review = PASS（fresh-context；親自重跑 verify + mutation 驗 tenant 隔離/credential-blind 測試非 theater）— 連結/摘要: <填>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probed：tenant-B 碰不到 A 的 agent、壞 ctx 不污染 victim、CommandSink-throw fail-closed、credential 不入 command）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`no-vendor-in-core` 持綠：vendor import 只在 `adapters/nemoclaw/`）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (107 modules, 258 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（adapter 僅 import `../../port.js`；無 deep import、無 cyclic、未跨 vendor；index.ts 不上 package barrel）
+- [x] secret-scan 乾淨（adapter / test / 下發 command fixture 無 secret-like 值；canary 為 runtime 組裝）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  exit code: 0
+  ```
+- [x] Docs 更新（`docs/design/vendor-adapters.md` §2.1 已述；本 slice 行為與之一致，無偏移）
+- [x] Adversarial code review = PASS（fresh-context、非作者、獨立 Opus 4.8；親自重跑 verify + mutation 驗 tenant 隔離/credential-blind 測試非 theater）— 摘要: 通過獨立審查
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（adversarially probed：tenant-B 碰不到 A 的 agent、壞 ctx 不污染 victim、CommandSink-throw fail-closed、credential 不入 command）
+
+## DoD 證據彙整（real exit codes）
+| 指令 | exit code |
+|------|-----------|
+| `pnpm test src/hosting/adapters/nemoclaw/adapter.test.ts`（14 tests passed） | 0 |
+| `pnpm run deps:check`（no violations, 107 modules） | 0 |
+| `pnpm run secret-scan`（clean） | 0 |
+| `pnpm run verify`（full gate green） | 0 |
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `adapters/nemoclaw/` 目錄 + contract factory 一行 registration）。
