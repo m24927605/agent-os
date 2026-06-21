@@ -18,7 +18,7 @@
 
 ---
 
-## 1. Slice 清單與 DAG（實作順序 B→A→C→D→E）
+## 1. Slice 清單與 DAG（實作順序 B→A→C→D→E→F）
 
 | Slice | 檔案 | Title | 模組 | Net LOC（估） | Depends-on | 狀態 |
 |---|---|---|---|---|---|---|
