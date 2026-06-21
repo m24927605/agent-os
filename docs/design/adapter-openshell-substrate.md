@@ -195,6 +195,14 @@ Get/Exec/Delete 用對映回來的 OpenShell name/id 呼叫。**對映遺失 = f
   非 digest 形態 → deny）。
 - **不 fork**：repo 內**沒有** OpenShell 原始碼副本，只有 proto 子集 + client；升級 = 換 pin，不是 merge fork。
 
+> **S1 實作對齊（DONE）：** 子集 vendored 在 `src/runtime/openshell/proto/openshell.subset.proto`（pinned
+> rev `f23c2c8e84193beac5c35af8cd80276b60b8dbd4`），目前只含 `Health` RPC + `HealthRequest`/`HealthResponse`/
+> `ServiceStatus`（S2..S5 逐子集擴）。drift guard = `scripts/openshell-proto-check.sh`（比對
+> `openshell.subset.sha256` hash manifest；無 sha256 工具則 clean skip），已接進 `pnpm run verify`。
+> pinned image digest 常數 = `client.ts:PINNED_SANDBOX_IMAGE`（`sha256:<64 hex>` 形態），由
+> `assertPinnedImageDigest()` deny-by-default 守護；真值在 S2 接 `CreateSandbox` 時釘定。RPC vendor
+> （`@connectrpc/connect{,-node}` + `@bufbuild/protobuf`）**只**在 `src/runtime/openshell/` import。
+
 ---
 
 ## 6. Out-of-scope（明確不做，留給後續）

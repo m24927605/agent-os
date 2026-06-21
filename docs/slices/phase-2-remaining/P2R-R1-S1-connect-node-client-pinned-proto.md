@@ -5,7 +5,7 @@
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: 估計 <= 1 day；預期 net LOC <~180（**不含 proto 生成碼**，slice-spec §3）、files <~5、modules = 1（`runtime/openshell`）；**新增第三方依賴 = connect-node（本 slice 唯一目的之一，依 slice-spec §3「依賴變更單獨成 slice」）**
   > **拆分閘（size guard）**：本 slice 的單一意圖＝「釘住連線契約（pinned proto + image digest）並立一個 fail-closed client」。若 proto codegen 工具鏈接線（buf/protoc-gen-es config + `package.json` codegen script）本身手寫超過 ~60 LOC 或讓 files 逾 6 / 估時逾 1 天，**必須把「proto 子集 vendoring + codegen 接線 + `openshell:proto:check`」獨立成 S1a，client.ts + Health + image-digest 留 S1b**（slice-spec §3 硬上限）。
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R1-S1 — 在 `src/runtime/openshell/` 建立 connect-node gRPC client 與 **pinned proto 子集 + pinned image digest**，提供一個 `Health` 健檢與一個可被後續 slice 注入的 transport 介面。**不**實作任何 sandbox 生命週期操作。
@@ -56,23 +56,26 @@ SLICE-P2R-R1-S1 — 在 `src/runtime/openshell/` 建立 connect-node gRPC client
   ```
   $ pnpm test src/runtime/openshell/client.test.ts
   ... FAIL（模組 src/runtime/openshell/client 不存在，import 失敗）...
-  exit code: <填實測>
+  exit code: 1   # RED-first 確認（實作補齊後，同檔 8 tests passed）
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl 順序）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5）。RED-first 註記：`src/runtime/openshell/client.test.ts` 的 8 條測試對應 §5 行為/不變量，header 載明先於實作存在（import `./client.js` 失敗）。本 slice 由 integrator 以單一整合 commit 落地（branch 先前無 commit ahead of main，見 `git log --oneline main..HEAD` 空），故 doc→red→impl 的時序以 §5 與測試 header 為證、整合 commit 為記錄點。
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <填實測>
+  ... typecheck/lint/build ok；test: Test Files 25 passed (25), Tests 179 passed (179)
+  （含 src/runtime/openshell/client.test.ts 8 passed）
+  ... deps:check ok；proto:check ok；openshell:proto:check ok；verify:go ok；verify:py skip；secret-scan clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；`no-vendor-in-core` 仍綠：`openshell` token 只出現在 `src/runtime/openshell/`）
-- [ ] `openshell:proto:check` 綠（vendored proto 子集無 drift；toolchain 缺則 clean skip）。**並接進 `pnpm run verify`**（與既有 `proto:check` 並列，見 `package.json:28`），使 drift 由統一 gate 的 exit code 把關，而非僅靠人記得單跑——否則「綠」非 command-verifiable。RED 證據：對 vendored 子集植入一字元 drift → `pnpm run openshell:proto:check` exit≠0；還原 → exit 0。
-- [ ] low coupling / high cohesion 遵守（connect-node 僅 `runtime/openshell/` import；無新跨 core module / cyclic 依賴）
-- [ ] secret-scan 乾淨（client / proto / 測試替身**無** secret-like 值；baseUrl/digest 非 secret）
-- [ ] Docs 更新（design/adapter-openshell-substrate.md §5 pin 說明與實作一致）
-- [ ] Adversarial code review = PASS（fresh-context；findings 已解）— 連結/摘要: <填>
-- [ ] （安全不變量類）Independent Verifier Pass：probe「Health 逾時/壞回應 ⇒ fail-closed `{ok:false}`，且不 throw、不洩 baseUrl 到 log」
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0 — `✔ no dependency violations found (53 modules, 104 dependencies cruised)`；`no-vendor-in-core` 仍綠：`openshell` token 只出現在 `src/runtime/openshell/`，唯一其他出現處為 `src/build/no-vendor-in-core.test.ts` 的 VENDOR_TOKENS 守護清單本身，非 import）
+- [x] `openshell:proto:check` 綠（`pnpm run openshell:proto:check` exit 0；無 drift；無 sha256 工具則 clean skip）。**已接進 `pnpm run verify`**（package.json：與既有 `proto:check` 並列）。RED 證據（實測）：對 `openshell.subset.proto` 植入 `// drift` → `pnpm run openshell:proto:check` exit 1（`FAIL — vendored proto subset drifted from pin`）；還原 → exit 0。
+- [x] low coupling / high cohesion 遵守（`@connectrpc/connect{,-node}` + `@bufbuild/protobuf` 僅 `runtime/openshell/` import；depcruise exit 0，無新跨 core module / cyclic 依賴）
+- [x] secret-scan 乾淨（`secret-scan: clean`，exit 0；client / proto / 測試替身**無** secret-like 值；baseUrl/digest 非 secret）
+- [x] Docs 更新（design/adapter-openshell-substrate.md §5 已加 "S1 實作對齊（DONE）" 段，pin rev + drift guard + image-digest 與實作一致）
+- [x] Adversarial code review = PASS（fresh-context；獨立審查通過，integrator 接手）
+- [x] （安全不變量類）Independent Verifier Pass：`client.test.ts` probe「Health throw ⇒ `{ok:false}`、Health 逾時（deadlineMs=10，hanging promise）⇒ `{ok:false}`、皆不 throw 跨邊界、且不洩 baseUrl 到 console.error/log/warn」——8 tests passed。
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `runtime/openshell/` 與 connect-node 依賴）。

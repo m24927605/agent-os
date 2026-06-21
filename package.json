@@ -21,11 +21,12 @@
     "deps:check": "depcruise src --config .dependency-cruiser.cjs",
     "proto:gen": "bash scripts/proto-gen.sh",
     "proto:check": "bash scripts/proto-check.sh",
+    "openshell:proto:check": "bash scripts/openshell-proto-check.sh",
     "verify:p1-exit": "bash scripts/verify-p1-exit.sh",
     "verify:go": "env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local bash scripts/verify-go.sh",
     "verify:py": "bash scripts/verify-py.sh",
     "secret-scan": "bash scripts/scan_secrets.sh",
-    "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run secret-scan"
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run secret-scan"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",
@@ -33,6 +34,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@bufbuild/protobuf": "^2.12.0",
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-node": "^2.1.2",
     "@types/node": "^22.10.2",
     "dependency-cruiser": "^17.4.3",
     "ts-proto": "2.11.8",
