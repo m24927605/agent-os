@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AgtSecondaryPolicy } from "./adapters/agt/index.js";
 import {
   AllowAllSecondaryPolicy,
   DenyAllSecondaryPolicy,
@@ -89,6 +90,28 @@ describe("evaluateSecondaries — fail-closed (a secondary that throws is treate
   it("a throwing secondary makes the combined decision deny even when PDP allowed", () => {
     const out = combineDecisions(allow, evaluateSecondaries([throwing], req));
     expect(out.effect).toBe("deny");
+  });
+});
+
+describe("REAL AGT advisory adapter through the dedup harness (R11-S4)", () => {
+  it("AGT-allow + PDP-deny => deny — the real AGT adapter is advisory, PDP is the sole deny authority", () => {
+    const agt = new AgtSecondaryPolicy(() => ({ allowed: true, action: "allow" }));
+    const out = combineDecisions(deny, evaluateSecondaries([agt], req));
+    expect(out.effect).toBe("deny");
+    expect(out.reason.toLowerCase()).toContain("allow"); // AGT allow recorded for audit only
+  });
+
+  it("AGT throw => synthetic deny — even when PDP allowed (deny-by-default)", () => {
+    const throwing = new AgtSecondaryPolicy(() => {
+      throw new Error("agt python engine blew up");
+    });
+    const out = combineDecisions(allow, evaluateSecondaries([throwing], req));
+    expect(out.effect).toBe("deny");
+  });
+
+  it("AGT require_approval (no approval channel here) => advisory deny, never allow", () => {
+    const agt = new AgtSecondaryPolicy(() => ({ allowed: true, action: "require_approval" }));
+    expect(combineDecisions(allow, evaluateSecondaries([agt], req)).effect).toBe("deny");
   });
 });
 
