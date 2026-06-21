@@ -4,7 +4,7 @@
 - **Branch**: slice/p2-d-brain-port
 - **Author**: <id>    **Adversarial reviewer**: <fresh-context、非作者>
 - **Size budget**: <= 1 day；net LOC <~300、files <~6（`src/runtime/brain/{port.ts,credential-guard.ts,fakes.ts,index.ts}` + `src/test-contracts/brain-adapter.test.ts` + barrel）、新增依賴 = 0
-- **狀態**: DRAFT
+- **狀態**: **DONE**（merge；fresh-context IV = PASS、零 defect）
 
 ## (1) ID + Title
 SLICE-P2-D — 新增 vendor-neutral Brain port（`BrainEvent` 判別聯集 plan-step|tool-call|memory-mutation|skill-mutation，各帶 AgentContext；`BrainAdapter.execute(ctx,intent): AsyncIterable<BrainEvent>`）+ **credential-blind guard**（帶 literal secret 的事件在 effect 前被 deny）+ **≥2 impl**（ScriptedBrain、EchoBrain）。
@@ -27,11 +27,11 @@ SLICE-P2-D — 新增 vendor-neutral Brain port（`BrainEvent` 判別聯集 plan
 - credential-blind：`screenBrainEvent` deny 帶 secret-shaped 值（藏在無辜欄位，by-shape）；detector 拋例外 → denied（deny-by-default）；`governBrainStream` 在 secret 事件 deny 並 **stop**（其後事件不浮現）；clean bundleRef 事件放行。
 > 預期首次 RED：import `../runtime/brain/index.js` 失敗。secret canary = runtime 組裝（`sk-${"d".repeat(24)}`）使 secret-scan 不誤報。
 
-## (6) Definition of Done（待填）
-- [ ] first RED exit code 已貼。
-- [ ] `pnpm run verify` exit 0（含 secret-scan clean）。
-- [ ] `deps:check` 綠；credential-guard 不 import audit、無 vendor token。
-- [ ] Adversarial review = PASS（含 mutation：guard 永遠 ok / governStream 不 stop → 測試紅；深層巢狀 secret、非 tool-call 事件、key-order/undefined/function 健壯性、8 種壞 ctx fail-closed）。
+## (6) Definition of Done（實測）
+- [x] **first RED**（brain 不存在）：`vitest run brain-adapter.test.ts` → import 失敗、no tests（exit≠0）。
+- [x] `pnpm run verify` **exit 0**（88 tests、deps 22 modules 0 violations、secret-scan clean）。
+- [x] `deps:check` 綠；IV 確認 credential-guard.ts **零 audit import**（偵測器注入）、brain path/import 無 vendor token、no-vendor-in-core 綠。
+- [x] **Adversarial review = PASS**（fresh-context IV，零 defect；mutation：guard 永遠 ok → 2 紅、governStream 不 stop → 1 紅；深層巢狀 secret、**全部 4 種事件 kind** 皆被 screen、stream 確實 stop、detector 拋例外 → deny-by-default、9 種壞 ctx 皆 yield 空）。
 
 ## (7) Rollback
 revert commit（移除 brain 模組 + barrel）。
