@@ -1,6 +1,6 @@
 # Phase 2 Slices — INDEX
 
-> **狀態（2026-06-21）：P2-B/A/C/D 已 doc-first 實作並 merge（每個皆 RED→GREEN→fresh IV PASS→--no-ff merge）。**
+> **狀態（2026-06-21）：P2-B/A/C/D/E 已 doc-first 實作並 merge（每個皆 RED→GREEN→fresh IV PASS→--no-ff merge）。**
 > 本目錄的 slice spec **先於實作撰寫**（doc-first，無 doc 不開工）；每個都將走 branch → **DRAFT spec 先行（本目錄）** → **RED test-first（親眼見紅）** →
 > 實作到 GREEN → `pnpm run verify` exit 0 → **fresh-context Independent Verifier = PASS** → `--no-ff` merge，
 > 完成後把該 slice spec 的 §RED/§DoD 以**真實 exit code** 覆蓋並標 DONE。
@@ -18,7 +18,7 @@
 
 ---
 
-## 1. Slice 清單與 DAG（規劃；實作順序 B→A→C→D）
+## 1. Slice 清單與 DAG（實作順序 B→A→C→D→E）
 
 | Slice | 檔案 | Title | 模組 | Net LOC（估） | Depends-on | 狀態 |
 |---|---|---|---|---|---|---|
