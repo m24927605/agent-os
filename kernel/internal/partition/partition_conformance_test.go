@@ -99,4 +99,20 @@ func TestConformanceCrossTenantWrongKeyRejected(t *testing.T) {
 	if chain.VerifyCheckpoint(pubs["b"], ck.HeadEntryHash, ck.Length, ck.Signature) {
 		t.Fatal("LEAK: tenant-a checkpoint was accepted under tenant-b's key (cross-tenant forgeable)")
 	}
+	// Symmetric direction (R8 IV MINOR-2 hardening): tenant B's checkpoint verifies under B's key
+	// and is REJECTED under tenant A's key. The one-directional A->B check above misses a
+	// "every tenant adopts tenant-A's signer" forgery (B verifiable under A); this closes that gap.
+	if _, err := p.Append("b", req("S", 0, `{"action":"y"}`)); err != nil {
+		t.Fatalf("append b: %v", err)
+	}
+	ckB, err := p.Checkpoint("b")
+	if err != nil {
+		t.Fatalf("checkpoint b: %v", err)
+	}
+	if !chain.VerifyCheckpoint(pubs["b"], ckB.HeadEntryHash, ckB.Length, ckB.Signature) {
+		t.Fatal("tenant-b checkpoint must verify under tenant-b's own public key")
+	}
+	if chain.VerifyCheckpoint(pubs["a"], ckB.HeadEntryHash, ckB.Length, ckB.Signature) {
+		t.Fatal("LEAK: tenant-b checkpoint was accepted under tenant-a's key (cross-tenant forgeable)")
+	}
 }
