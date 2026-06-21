@@ -88,9 +88,10 @@ export interface OpenShellObjectMeta {
   readonly id?: string;
 }
 
-/** `Sandbox` subset (openshell.proto:296-306). */
+/** `Sandbox` subset (openshell.proto:296-306). `status` is read by S3 readiness; absent => not ready. */
 export interface OpenShellSandbox {
   readonly metadata?: OpenShellObjectMeta;
+  readonly status?: OpenShellSandboxStatus;
 }
 
 /** `SandboxResponse` (openshell.proto:488-490). */
@@ -108,6 +109,67 @@ export interface DeleteSandboxResponse {
   readonly deleted?: boolean;
 }
 
+// --- S3 readiness wire shapes (TS face of the pinned proto subset) ----------------------------------
+//
+// These mirror the upstream `openshell.v1` messages S3 consumes for readiness (GetSandbox unary +
+// WatchSandbox server-stream). Like the S2 shapes they are intentionally PARTIAL: only `status.phase`
+// is typed (no conditions / policy version / log lines / platform events). The adapter treats every
+// field defensively — an absent status, an absent phase, OR an unknown enum value is fail-closed
+// (NEVER READY) — so a backend that sends more (or less) cannot break deny-by-default.
+
+/**
+ * `SandboxPhase` — the gateway-derived lifecycle summary clients use for readiness (openshell.proto:401-408).
+ * Numeric values match the upstream proto EXACTLY so wire decoding stays faithful. Only READY/ERROR are
+ * terminal for readiness; every other value (including UNSPECIFIED/UNKNOWN and any unknown enum number)
+ * is treated as not-yet-ready / fail-closed.
+ */
+export enum SandboxPhase {
+  SANDBOX_PHASE_UNSPECIFIED = 0,
+  SANDBOX_PHASE_PROVISIONING = 1,
+  SANDBOX_PHASE_READY = 2,
+  SANDBOX_PHASE_ERROR = 3,
+  SANDBOX_PHASE_DELETING = 4,
+  SANDBOX_PHASE_UNKNOWN = 5,
+}
+
+/** `SandboxStatus` subset — only `phase` is read for readiness (openshell.proto:366-380). */
+export interface OpenShellSandboxStatus {
+  /** May be any number on the wire; the adapter maps unknown values to NOT-ready (deny-by-default). */
+  readonly phase?: number;
+}
+
+/** `GetSandboxRequest` (openshell.proto:436-439) — keyed by the canonical sandbox `name`. */
+export interface GetSandboxRequest {
+  readonly name: string;
+}
+
+/**
+ * `WatchSandboxRequest` subset (openshell.proto:761-792). S3 sets only the readiness-relevant fields:
+ * the lookup key, `follow_status`, and `stop_on_terminal` (so the gateway closes the stream on a
+ * terminal READY/ERROR phase). Log/event following is OUT OF SCOPE (spec §3).
+ */
+export interface WatchSandboxRequest {
+  /** Sandbox lookup key (the mapped OpenShell canonical name/id). */
+  readonly id: string;
+  readonly followStatus?: boolean;
+  readonly stopOnTerminal?: boolean;
+}
+
+/**
+ * `SandboxStreamEvent` subset (openshell.proto:795-810). The upstream `oneof payload` may carry a
+ * snapshot, a log line, a platform event, a warning, or a draft-policy update; S3 reads ONLY the
+ * `sandbox` snapshot and ignores every other variant (an event with no `sandbox` carries no readiness
+ * signal and is skipped — never treated as READY).
+ */
+export interface SandboxStreamEvent {
+  readonly sandbox?: OpenShellSandboxReadinessSnapshot;
+}
+
+/** `Sandbox` readiness subset — only `status.phase` is consumed by S3. */
+export interface OpenShellSandboxReadinessSnapshot {
+  readonly status?: OpenShellSandboxStatus;
+}
+
 /**
  * Transport seam extended with the S2 unary sandbox-lifecycle primitives. The adapter consumes ONLY
  * this interface (vendor-neutral seam); the production wiring builds the connect-node-backed
@@ -117,6 +179,20 @@ export interface DeleteSandboxResponse {
 export interface OpenShellLifecycleTransport extends OpenShellTransport {
   createSandbox(req: CreateSandboxRequest): Promise<SandboxResponse>;
   deleteSandbox(req: DeleteSandboxRequest): Promise<DeleteSandboxResponse>;
+}
+
+/**
+ * Transport seam extended with the S3 readiness primitives: a one-shot `getSandbox` unary and a
+ * `watchSandbox` server-stream. The adapter consumes ONLY this vendor-neutral seam; production wires
+ * the connect-node-backed implementation while tests inject an in-process double.
+ *
+ * Fail-closed signalling: `getSandbox` rejects on RPC failure; `watchSandbox` may throw synchronously
+ * (transport refused) OR its async iterator may throw mid-stream (RST_STREAM / deadline) — BOTH are
+ * the adapter's signal to fail CLOSED (not-ready / deny), never throw across the port boundary.
+ */
+export interface OpenShellReadinessTransport extends OpenShellLifecycleTransport {
+  getSandbox(req: GetSandboxRequest): Promise<SandboxResponse>;
+  watchSandbox(req: WatchSandboxRequest): AsyncIterable<SandboxStreamEvent>;
 }
 
 export interface OpenShellClientOpts {
