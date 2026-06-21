@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r5-s1-task-agentsession-fsm-types
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~220、files <~5（`src/orchestration/task/{fsm.ts,session.ts}` + `*.test.ts` ×2 + `src/orchestration/index.ts` barrel 一行）、modules = 1（orchestration）、新增第三方依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R5-S1 — 新增 Task 狀態機（`pending|running|completed|failed|aborted` 的**純函式**轉移 + 顯式 guard，deny-by-default）與 `AgentSession` / `Task` / `StepRecord` 的 zod `.strict()` schema，作為 R5 的型別化契約基底（契約先於消費者）。
@@ -66,18 +66,37 @@ SLICE-P2R-R5-S1 — 新增 Task 狀態機（`pending|running|completed|failed|ab
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl 順序）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；TDD Red→Green→Refactor 依 §5 計畫執行，impl 前 fsm/session 測試見其失敗）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: 0
+  > typecheck (tsc --noEmit) → ok
+  > lint (biome check src) → Checked 96 files, No fixes applied
+  > build (tsc -p tsconfig.build.json) → ok
+  > test (vitest run) → Test Files 39 passed | 1 skipped (40); Tests 386 passed | 1 skipped (387)
+      ✓ src/orchestration/task/fsm.test.ts (11 tests)
+      ✓ src/orchestration/task/session.test.ts (13 tests)
+  > deps:check (depcruise) → ✔ no dependency violations found (65 modules, 136 dependencies cruised)
+  > proto:check → ok ; openshell:proto:check → ok
+  > verify:go → ok ; verify:py → skip (no Python plane)
+  > secret-scan → clean
+  VERIFY_EXIT=0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；orchestration/task 只 import iam barrel + zod、無 vendor、無 cycle）
-- [ ] low coupling / high cohesion 遵守（FSM 純函式無 I/O；schema 與轉移分檔；無 deep import）
-- [ ] secret-scan 乾淨（無 secret-like 值；schema/test 無字面憑證）
-- [ ] Docs 更新（design/task-agentsession-fsm.md §5 表已連結本 slice）
-- [ ] Adversarial code review = PASS（fresh-context；deny-by-default guard 經 mutation 驗證——把非法轉移改成靜默推進須被測試抓到）— 連結/摘要: <...>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（deny-by-default guard、`.strict()` schema fail-closed）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；orchestration/task 只 import iam/ids + zod、無 vendor、無 cycle）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (65 modules, 136 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（FSM 純函式無 I/O；schema 與轉移分檔 fsm.ts/session.ts；經 barrel 暴露；無 deep import）
+- [x] secret-scan 乾淨（無 secret-like 值；schema/test 無字面憑證）
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  ```
+- [x] Docs 更新（design/task-agentsession-fsm.md §5 表已連結本 slice — 見該檔 line 165）
+- [x] Adversarial code review = PASS（fresh-context、非作者、獨立 Opus 4.8；deny-by-default guard 經 mutation 驗證——非法轉移/未知 event/cursor 越界須回 `{ok:false}` 而非靜默推進）
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（deny-by-default guard、`.strict()` schema fail-closed）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `orchestration/task/` 兩檔 + barrel 一行）。
