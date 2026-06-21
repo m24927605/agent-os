@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { canonicalizeAuditEvent } from "../canonical.js";
+import { canonicalizeAuditEvent, contentAddress } from "../canonical.js";
 import { type AuditClock, type AuditEventInput, createAuditEvent } from "../event.js";
 import { createIngestClient } from "./client.js";
+import { createDedupTable } from "./dedup.js";
 import type { AppendRequestShape, AppendResponseShape, AppendTransport } from "./transport.js";
 
 /**
@@ -134,6 +135,45 @@ describe("createIngestClient (canonicalize -> sequence -> transport -> receipt; 
     const receipt = await client.append(makeEvent());
     expect(seen).toEqual([0, 0]);
     expect(receipt.sequence).toBe(0);
+  });
+
+  it("dedup replay: a pre-settled (sourceId,sequence) with the SAME hash returns the cached receipt and NEVER calls the transport", async () => {
+    const transport = new RecordingTransport();
+    const dedup = createDedupTable();
+    const event = makeEvent();
+    const cached = {
+      sequence: 0,
+      contentHash: "sha256:cached",
+      prevHash: "sha256:p",
+      entryHash: "sha256:e",
+    };
+    // Seed the slot (sourceId="src-1", sequence=0) as already settled with this event's content hash.
+    dedup.record("src-1", 0, contentAddress(event), cached);
+    const client = createIngestClient({ transport, sourceId: "src-1", dedup });
+
+    const receipt = await client.append(event);
+
+    expect(receipt).toEqual(cached);
+    // Idempotent no-op: the transport was NOT hit at all.
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it("dedup conflict (fail-closed): re-presenting a settled (sourceId,sequence) with a DIFFERENT hash THROWS and never calls the transport", async () => {
+    const transport = new RecordingTransport();
+    const dedup = createDedupTable();
+    const event = makeEvent();
+    // Settle slot 0 with a DIFFERENT content hash than the event we are about to append.
+    dedup.record("src-1", 0, "sha256:some-other-content", {
+      sequence: 0,
+      contentHash: "sha256:some-other-content",
+      prevHash: "sha256:p",
+      entryHash: "sha256:e",
+    });
+    const client = createIngestClient({ transport, sourceId: "src-1", dedup });
+
+    await expect(client.append(event)).rejects.toThrow(/conflict/i);
+    // Fail-closed: a conflicting slot is never overwritten and never delivered.
+    expect(transport.requests).toHaveLength(0);
   });
 
   it("credential non-leak: a runtime-assembled secret canary never reaches the transport bytes", async () => {

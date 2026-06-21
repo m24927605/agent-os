@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r2-s3-source-sequence-dedup
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~120、files <~3（`src/audit/ingest/{dedup.ts,dedup.test.ts}` + client.ts 接線 + barrel）、新增依賴 = 0、modules = 1
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R2-S3 — 為 IngestClient 加一張 `(sourceId,sequence)→contentHash` 的 delivered 表：已成功 commit 的
@@ -56,14 +56,31 @@ crash-resume 重複 append 或悄悄改寫意圖。
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；無 cycle、無 vendor）
-- [ ] low coupling / high cohesion 遵守
-- [ ] secret-scan 乾淨
-- [ ] Docs 更新
-- [ ] Adversarial code review = PASS（mutation：把 conflict 改成靜默覆寫 → 異-hash RED 轉紅；把 replay 改成重打 transport → spy RED 轉紅）
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：異-hash 必 throw、同-hash 零重打）
+- [x] Test-first 成立（首次 RED 已貼於 §5：`pnpm test src/audit/ingest/dedup.test.ts` → FAIL `cannot find ./dedup.js`，exit 1）
+- [x] `pnpm run verify` exit 0
+  ```
+  $ pnpm run verify
+  ... typecheck ✓ / lint ✓ (56 files) / build ✓ / test ✓ (21 files, 153 tests passed —
+      含 src/audit/ingest/dedup.test.ts 4 tests + src/audit/ingest/client.test.ts 7 tests) /
+      deps:check ✓ / proto:check ✓ / verify:go ✓ / verify:py skip / secret-scan clean
+  VERIFY_EXIT=0
+  ```
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；無 cycle、無 vendor）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (38 modules, 81 dependencies cruised)
+  DEPS_CHECK_EXIT=0
+  ```
+- [x] low coupling / high cohesion 遵守（dedup.ts 僅型別 import `../kernel/log.js` 的 `AppendReceipt`；client→dedup→kernel/log 為 inward acyclic；無第三方依賴、無 vendor 名）
+- [x] secret-scan 乾淨
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  SECRET_SCAN_EXIT=0
+  ```
+- [x] Docs 更新（本檔 §6 已填實際 exit code、狀態標記 DONE）
+- [x] Adversarial code review = PASS（fresh-context 獨立審查通過；mutation：把 conflict 改成靜默覆寫 → 異-hash RED 轉紅；把 replay 改成重打 transport → spy RED 轉紅）
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：異-hash 必 throw、同-hash 零重打 — client.test.ts 兩條 dedup 斷言 `transport.requests` length 0 + `rejects.toThrow(/conflict/i)`）
 
 ## (7) Rollback
 - `git revert <merge-sha>`（移除 dedup.ts + client 接線）。
