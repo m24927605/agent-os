@@ -4,6 +4,7 @@
  */
 export * from "./pipeline.js";
 export * from "./replay.js";
+export * from "./restore.js";
 export * from "./snapshot.js";
 export * from "./task/fsm.js";
 export * from "./task/session.js";
