@@ -7,7 +7,17 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { NemoClawAgentHosting } from "../hosting/adapters/nemoclaw/index.js";
 import { type AgentHosting, InMemoryAgentHosting, NullAgentHosting } from "../hosting/index.js";
+
+/** In-process CommandSink that always reports a healthy launch + running probe (contract harness). */
+const okSink = {
+  run: (command: string) =>
+    Promise.resolve({
+      exitCode: 0,
+      stdout: command.includes("http_code") ? "200" : "GATEWAY_PID=4242",
+    }),
+};
 
 const ctxA = {
   actorId: "agent:claude",
@@ -22,6 +32,7 @@ const spec = { sandboxId: "sbx-1", agentName: "hermes" };
 const ADAPTERS: { name: string; make: () => AgentHosting }[] = [
   { name: "NullAgentHosting", make: () => new NullAgentHosting() },
   { name: "InMemoryAgentHosting", make: () => new InMemoryAgentHosting() },
+  { name: "NemoClawAgentHosting", make: () => new NemoClawAgentHosting(okSink) },
 ];
 
 describe.each(ADAPTERS)("AgentHosting contract — $name", ({ make }) => {
