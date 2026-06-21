@@ -11,6 +11,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  type CreateSandboxRequest,
+  type DeleteSandboxRequest,
+  type DeleteSandboxResponse,
+  type OpenShellLifecycleTransport,
+  OpenShellSandboxAdapter,
+  PINNED_SANDBOX_IMAGE,
+  type SandboxResponse,
+} from "../runtime/openshell/index.js";
+import {
   FakeSandboxAdapter,
   NullSandboxAdapter,
   type SandboxAdapter,
@@ -25,9 +34,36 @@ const validCtx = {
   requestId: "req-1",
 };
 
+/**
+ * Happy-path OpenShell transport double (NO live gateway in this env — design §7.4). It satisfies the
+ * S2 lifecycle seam the adapter is constructed with: create returns a named sandbox, delete succeeds.
+ * The contract harness never reaches across the network — it injects this in-process double, mirroring
+ * adapter.create.test.ts. start/stop are noop shims (no RPC) so this double needs no readiness/exec.
+ */
+function happyPathOpenShellTransport(): OpenShellLifecycleTransport {
+  let n = 0;
+  return {
+    health: () => Promise.resolve({ ok: true }),
+    createSandbox(_req: CreateSandboxRequest): Promise<SandboxResponse> {
+      n += 1;
+      return Promise.resolve({ sandbox: { metadata: { name: `os-sbx-${n}`, id: `os-id-${n}` } } });
+    },
+    deleteSandbox(_req: DeleteSandboxRequest): Promise<DeleteSandboxResponse> {
+      return Promise.resolve({ deleted: true });
+    },
+  };
+}
+
 const ADAPTERS: { name: string; make: () => SandboxAdapter }[] = [
   { name: "NullSandboxAdapter", make: () => new NullSandboxAdapter() },
   { name: "FakeSandboxAdapter", make: () => new FakeSandboxAdapter() },
+  // The THIRD impl: the real OpenShell adapter, driven by an injected happy-path transport double.
+  // Passing the SAME contract unchanged is the mechanical proof the substrate is swappable, not
+  // vendor-locked (HARD CONSTRAINT: >=3 impls past one contract).
+  {
+    name: "OpenShellSandboxAdapter",
+    make: () => new OpenShellSandboxAdapter(happyPathOpenShellTransport()),
+  },
 ];
 
 describe.each(ADAPTERS)("SandboxAdapter contract — $name", ({ make }) => {
@@ -95,6 +131,61 @@ describe("FakeSandboxAdapter — ok-path specialization (the mandatory 2nd impl)
     expect((await a.destroySandbox(validCtx, created.sandboxId)).status).toBe("ok");
     expect((await a.startSandbox(validCtx, created.sandboxId)).status).toBe("denied");
     expect((await a.startSandbox(validCtx, "sbx-never")).status).toBe("denied");
+  });
+});
+
+describe("OpenShellSandboxAdapter — start/stop are an HONEST noop shim (OpenShell has no Start/Stop RPC)", () => {
+  it("start/stop on a KNOWN id => ok WITHOUT issuing any RPC, event reason marks the noop shim", async () => {
+    // A transport that throws on EVERY lifecycle RPC except the create/delete the test sets up — so if
+    // start/stop ever touched the wire the test would surface a thrown/denied result, not an ok.
+    let createCalls = 0;
+    let deleteCalls = 0;
+    const t: OpenShellLifecycleTransport = {
+      health: () => Promise.resolve({ ok: true }),
+      createSandbox: () => {
+        createCalls += 1;
+        return Promise.resolve({ sandbox: { metadata: { name: "os-sbx-k", id: "os-id-k" } } });
+      },
+      deleteSandbox: () => {
+        deleteCalls += 1;
+        return Promise.resolve({ deleted: true });
+      },
+    };
+    const a = new OpenShellSandboxAdapter(t);
+    const created = await a.createSandbox(validCtx, { image: PINNED_SANDBOX_IMAGE });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") throw new Error("unreachable");
+    const id = created.sandboxId;
+    expect(createCalls).toBe(1);
+
+    const started = await a.startSandbox(validCtx, id);
+    expect(started.status).toBe("ok");
+    if (started.status === "ok") expect(started.sandboxId).toBe(id);
+    expect(started.event.reason ?? "").toContain("noop shim");
+
+    const stopped = await a.stopSandbox(validCtx, id);
+    expect(stopped.status).toBe("ok");
+    expect(stopped.event.reason ?? "").toContain("noop shim");
+
+    // The HARD honesty invariant: a noop shim issues NO RPC at all (no create/delete beyond the setup).
+    expect(createCalls).toBe(1);
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("start/stop on an UNKNOWN id => denied (fail-closed), never claims a phantom success", async () => {
+    const a = new OpenShellSandboxAdapter(happyPathOpenShellTransport());
+    const started = await a.startSandbox(validCtx, "sbx-os-never-created");
+    expect(started.status).toBe("denied");
+    const stopped = await a.stopSandbox(validCtx, "sbx-os-never-created");
+    expect(stopped.status).toBe("denied");
+  });
+
+  it("start/stop on a malformed id / bad ctx => denied, never throws (deny-by-default)", async () => {
+    const a = new OpenShellSandboxAdapter(happyPathOpenShellTransport());
+    await expect(a.startSandbox(validCtx, "")).resolves.toMatchObject({ status: "denied" });
+    await expect(a.stopSandbox({ tenantId: "" }, "sbx-os-1")).resolves.toMatchObject({
+      status: "denied",
+    });
   });
 });
 

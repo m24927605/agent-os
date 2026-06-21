@@ -752,13 +752,52 @@ export class OpenShellSandboxAdapter implements SandboxAdapter {
     return { status: "denied", reason, event: deny(ctx, "start", reason).event };
   }
 
-  // start/stop are an explicit S6 concern (OpenShell has no Start/Stop RPC; design §3.2). Until the
-  // S6 noop-shim lands they fail CLOSED rather than claim a success the substrate cannot deliver.
-  startSandbox(ctx: unknown, _sandboxId: string): Promise<AdapterResult> {
-    return Promise.resolve(deny(ctx, "start", "start not implemented in this slice (S6)"));
+  /**
+   * start/stop are an HONEST noop shim (slice S6; design §3.2): OpenShell has NO Start/Stop RPC
+   * (the `service OpenShell` block has no StartSandbox/StopSandbox — only Create/Get/List/Delete/
+   * Exec/Watch/…), so a create'd sandbox is already running. Rather than let the port "lie" (claim a
+   * success that maps to nothing, or pretend to call an RPC), this shim:
+   *   - issues NO RPC at all (a noop is a noop — it never touches the transport);
+   *   - returns `ok` ONLY for a KNOWN id (one with a live mapping), with an event reason that names
+   *     the shim so the lifecycle event stays auditable and truthful;
+   *   - fails CLOSED (`deny`) for a bad AgentContext, a malformed id, OR an unknown id (no mapping) —
+   *     it never fabricates a phantom success for a sandbox we did not create.
+   */
+  startSandbox(ctx: unknown, sandboxId: string): Promise<AdapterResult> {
+    return Promise.resolve(this.noopShim(ctx, "start", sandboxId));
   }
 
-  stopSandbox(ctx: unknown, _sandboxId: string): Promise<AdapterResult> {
-    return Promise.resolve(deny(ctx, "stop", "stop not implemented in this slice (S6)"));
+  stopSandbox(ctx: unknown, sandboxId: string): Promise<AdapterResult> {
+    return Promise.resolve(this.noopShim(ctx, "stop", sandboxId));
+  }
+
+  /** Shared body for the start/stop noop shim (issues NO RPC; fail-closed on unknown/invalid id). */
+  private noopShim(ctx: unknown, lifecycle: "start" | "stop", sandboxId: string): AdapterResult {
+    const shimReason = `${lifecycle} is a noop shim (OpenShell has no Start/Stop RPC)`;
+    let context: ReturnType<typeof parseAgentContext>;
+    try {
+      context = parseAgentContext(ctx);
+    } catch {
+      return deny(ctx, lifecycle, "invalid agent context (fail-closed)");
+    }
+
+    let id: ReturnType<typeof SandboxId.parse>;
+    try {
+      id = SandboxId.parse(sandboxId);
+    } catch {
+      return deny(ctx, lifecycle, "invalid sandbox id (fail-closed)");
+    }
+
+    if (!this.refById.has(id)) {
+      // Unknown id (mapping missing) => deny-by-default; a noop shim never invents a success.
+      return deny(ctx, lifecycle, "unknown sandbox (fail-closed)");
+    }
+
+    // Known sandbox: succeed WITHOUT any RPC, but mark the event so the success is honestly a shim.
+    return {
+      status: "ok",
+      sandboxId: id,
+      event: { lifecycle, result: "ok", context, sandboxId: id, reason: shimReason },
+    };
   }
 }
