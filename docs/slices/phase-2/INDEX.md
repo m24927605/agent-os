@@ -1,6 +1,6 @@
 # Phase 2 Slices — INDEX
 
-> **狀態（2026-06-21）：P2-B/A/C/D/E 已 doc-first 實作並 merge（每個皆 RED→GREEN→fresh IV PASS→--no-ff merge）。**
+> **狀態（2026-06-21）：P2-B/A/C/D/E/F 已 doc-first 實作並 merge（每個皆 RED→GREEN→fresh IV PASS→--no-ff merge）。**
 > 本目錄的 slice spec **先於實作撰寫**（doc-first，無 doc 不開工）；每個都將走 branch → **DRAFT spec 先行（本目錄）** → **RED test-first（親眼見紅）** →
 > 實作到 GREEN → `pnpm run verify` exit 0 → **fresh-context Independent Verifier = PASS** → `--no-ff` merge，
 > 完成後把該 slice spec 的 §RED/§DoD 以**真實 exit code** 覆蓋並標 DONE。
@@ -27,7 +27,7 @@
 | **P2-C** | [P2-C-…](./P2-C-ts-commit-before-effect-guard.md) | TS commit-before-effect guard — 關閉 BLOCKING「護城河空心」 | commitgate | ~190 | （獨立；承接 P1 commitgate 概念） | **DONE** |
 | **P2-D** | [P2-D-…](./P2-D-brain-port-credential-blind-guard.md) | vendor-neutral Brain port + credential-blind guard + 2 impls | runtime/brain | ~300 | P2-A | **DONE** |
 | **P2-E** | [P2-E-…](./P2-E-pdp-sole-deny-authority-dedup.md) | PDP 唯一 deny 權威 — secondary policy 去重（PDP-deny 勝 secondary-allow） | policy | ~200 | （獨立；用既有 PDP） | **DONE** |
-| **P2-F** | [P2-F-…](./P2-F-tenant-scoped-policy-rules.md) | tenant-scoped PDP 規則 — 跨租 deny-by-default（Enterprise 多租脊椎第一塊磚） | policy | ~150 | （獨立；用既有 PDP） | DRAFT |
+| **P2-F** | [P2-F-…](./P2-F-tenant-scoped-policy-rules.md) | tenant-scoped PDP 規則 — 跨租 deny-by-default（Enterprise 多租脊椎第一塊磚） | policy | ~150 | （獨立；用既有 PDP） | **DONE** |
 
 ### Slice DAG（鄰接表，無 cycle）
 ```

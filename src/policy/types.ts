@@ -38,6 +38,12 @@ export interface AllowRule {
   readonly id: string;
   readonly action: string;
   readonly resource: string;
+  /**
+   * Tenant scope. Absent => the rule applies to ALL tenants (backward-compatible / global). When set,
+   * the allow applies ONLY to a request from the same tenant — a tenant-A allow never grants tenant-B
+   * (cross-tenant deny-by-default).
+   */
+  readonly tenantId?: string;
 }
 
 /**
@@ -49,6 +55,11 @@ export interface DenyRule {
   readonly id: string;
   readonly action: string;
   readonly resource: string;
+  /**
+   * Tenant scope. Absent => the deny applies to ALL tenants (fail-safe global deny — can only deny
+   * more). When set, the deny applies ONLY to its own tenant (tenant-A's deny does not block tenant-B).
+   */
+  readonly tenantId?: string;
 }
 
 /** A policy rule set: explicit allow + explicit deny. Deny is evaluated first (deny-precedence). */
