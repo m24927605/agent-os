@@ -4,7 +4,7 @@
 - **Branch**: slice/p2-c-commit-before-effect
 - **Author**: <id>    **Adversarial reviewer**: <fresh-context、非作者>
 - **Size budget**: <= 0.5 day；net LOC <~190、files <~4（`src/commitgate/{guard.ts,index.ts,guard.test.ts}` + `.dependency-cruiser.cjs` 把 commitgate 納 core from-list + barrel）、新增依賴 = 0
-- **狀態**: DRAFT
+- **狀態**: **DONE**（merge；fresh-context IV = PASS、零 defect）
 
 ## (1) ID + Title
 SLICE-P2-C — 新增 TS 端 commit-before-effect guard `commitBeforeEffect({appender,event,effect,timeoutMs?})`：外部 effect **只在** WORM append 取得 durable receipt **之後**才執行；append 失敗或逾時 → effect **絕不執行**、回 `{status:"aborted"}`（fail-closed）。鏡像 Go `kernel/internal/commitgate`。
@@ -29,12 +29,12 @@ SLICE-P2-C — 新增 TS 端 commit-before-effect guard `commitBeforeEffect({app
 - 接 FakeSandboxAdapter：append reject 時 `effect=()=>fake.createSandbox(...)` 未跑（事後 start 該 id → denied，證 create 從未發生）；append resolve 時 createSandbox 回 ok。
 > 預期首次 RED：import `./guard.js` 失敗。
 
-## (6) Definition of Done（待填）
-- [ ] first RED exit code 已貼。
-- [ ] `pnpm run verify` exit 0。
-- [ ] `deps:check` 綠（commitgate 無 cycle、無跨模組 import；core from-list 含 commitgate）。
-- [ ] secret-scan clean。
-- [ ] Adversarial review = PASS（含 mutation：effect 移到 append 前 / append 失敗仍跑 effect → 測試紅；hung append 逾時後 resolve 仍不跑 effect、無 open handle）。
+## (6) Definition of Done（實測）
+- [x] **first RED**（guard 不存在）：`vitest run guard.test.ts` → import 失敗、no tests（exit≠0）。
+- [x] `pnpm run verify` **exit 0**（80 tests、deps 18 modules 0 violations、secret-scan clean）。
+- [x] `deps:check` 綠（IV 確認 guard.ts 零 src import、無 cycle；commitgate 已在 core from-list）。
+- [x] secret-scan clean。
+- [x] **Adversarial review = PASS**（fresh-context IV，零 defect；mutation：effect 移 append 前 → 4 紅、append 失敗仍跑 effect → 3 紅；hung append 逾時後 resolve/reject 仍不跑 effect、0 open handle / 0 unhandled rejection；fail-closed 對 sync-throw/reject/non-Error 完整）。
 
 ## (7) Rollback
 revert commit（移除 commitgate 模組 + barrel + from-list 一詞）。
