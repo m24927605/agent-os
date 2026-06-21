@@ -1,0 +1,44 @@
+// PINNED proto SUBSET — vendored from NVIDIA OpenShell (integration Strategy B: no fork).
+//
+//   upstream file : proto/openshell.proto
+//   upstream repo : NVIDIA OpenShell
+//   pinned rev    : f23c2c8e84193beac5c35af8cd80276b60b8dbd4
+//
+// This file vendors ONLY the subset of `openshell.v1` that slice P2R-R1-S1 consumes: the `Health`
+// RPC and its request/response messages plus the `ServiceStatus` enum. The full service, the
+// sandbox lifecycle RPCs, and their datamodel/sandbox imports are intentionally OUT OF SCOPE here
+// (added subset-by-subset in S2..S5). Drift against this committed subset is guarded by
+// `pnpm run openshell:proto:check` (hash manifest in proto/openshell.subset.sha256).
+//
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package openshell.v1;
+
+// OpenShell service — SUBSET. Only the Health RPC is pinned in this slice (openshell.proto:22).
+service OpenShell {
+  // Check the health of the service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// Health check request (openshell.proto:277).
+message HealthRequest {}
+
+// Health check response (openshell.proto:280-284).
+message HealthResponse {
+  // Service status.
+  ServiceStatus status = 1;
+
+  // Service version.
+  string version = 2;
+}
+
+// Service status enum (openshell.proto:1485-1490).
+enum ServiceStatus {
+  SERVICE_STATUS_UNSPECIFIED = 0;
+  SERVICE_STATUS_HEALTHY = 1;
+  SERVICE_STATUS_DEGRADED = 2;
+  SERVICE_STATUS_UNHEALTHY = 3;
+}
