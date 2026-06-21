@@ -4,13 +4,14 @@
 - **Branch**: slice/p2-g-costgate-port
 - **Author**: <id>    **Adversarial reviewer**: <fresh-context、非作者>
 - **Size budget**: <= 1 day；net LOC <~280、files <~6（`src/cost/{port.ts,null.ts,in-memory.ts,index.ts}` + `src/test-contracts/cost-gate-adapter.test.ts` + `src/index.ts` barrel）、新增依賴 = 0
-- **狀態**: DRAFT（實作後以真實 exit code 覆蓋 §5/§6 並標 DONE）
+- **狀態**: **DONE**（merge；fresh-context IV = PASS；IV 的 DEFECT-1 已修：commit 超支記為 overrun 而非無上限）
 
 ## (1) ID + Title
 SLICE-P2-G — 新增 vendor-neutral **CostGate port**（`reserve`/`commit`，Stripe-style auth/capture）+ **≥2 impl**（`NullCostGate` 失敗封閉 deny-all；`InMemoryCostGate` 帶 token 預算的 **hard-cap**）+ contract harness。SpendGuard 為日後真實 adapter（落 `src/cost/adapters/spendguard/`）。
 
 ## (2) Goal（一句話）
-讓「成本閘」成為**可驗的可插拔槽位**，並把兩條安全不變量變指令可驗：**reserve-before-effect**（先預留才放行）與 **budget hard-cap**（超預算 → deny，by construction，一人公司不會被花到破產）；且 port **credential-blind**（介面只收 estimatedTokens/resource，從不收憑證）。
+讓「成本閘」成為**可驗的可插拔槽位**，並把兩條安全不變量變指令可驗：**reserve-before-effect**（先預留才放行）與 **budget hard-cap**；且 port **credential-blind**（介面只收 estimatedTokens/resource，從不收憑證）。
+> **誠實校正（IV DEFECT-1）**：hard-cap 是**對 reserve 的 proactive 上限**（擋住「開新的超預算工作」）。`commit` 的 `actualTokens` 是**已發生的真實花費**（provider 已被呼叫）——不可事後 deny（否則 WORM 少記真實花費，違反不可逆 external effect 原則）；超預算的 commit **如實記錄並標 `overrun: true`**，且使預算耗盡 → **後續每個 reserve 被擋**（reactive）。即「不能**開始**超預算工作；單一 in-flight 估算不準的 overshoot 會被記錄、不會被抹除」——對齊 SpendGuard 的 OVERRUN_DEBT。
 
 ## (3) In-scope / Out-of-scope
 - In-scope：`CostGate` 介面（`reserve(ctx,{estimatedTokens,resource})`→ ok+reservationId | denied；`commit(ctx,reservationId,{actualTokens})`→ committed | denied）；可稽核 `CostEvent`（phase=reserve|commit、result、context?/contextError?、resource?、reason?）；`NullCostGate`（deny-all，fail-closed）；`InMemoryCostGate`（per-instance token 預算、reserve 扣減/hold、over-budget → deny、commit 結算、unknown reservationId → deny）；contract test（factory over 2 impl + credential-blind 結構斷言）。
@@ -34,12 +35,12 @@ SLICE-P2-G — 新增 vendor-neutral **CostGate port**（`reserve`/`commit`，St
 - credential-blind 結構斷言：`port.ts` 不含 credential/secret/token-bearing 欄位名（只 estimatedTokens/actualTokens 數值 + resource id）。
 > 預期首次 RED：import `../cost/index.js` 失敗。
 
-## (6) Definition of Done（待填）
-- [ ] first RED exit code 已貼。
-- [ ] `pnpm run verify` exit 0。
-- [ ] `deps:check` 綠（cost 只 import iam、無 vendor token、no-vendor-in-core 綠）。
-- [ ] secret-scan clean。
-- [ ] Adversarial review = PASS（含 mutation：拿掉 hard-cap 讓 over-budget 通過 / commit 不檢查 reservationId / 壞 ctx 不 fail-closed → 測試紅）。
+## (6) Definition of Done（實測）
+- [x] **first RED**（cost 模組不存在）：`vitest run cost-gate-adapter.test.ts` → import 失敗、no tests（exit≠0）。
+- [x] `pnpm run verify` **exit 0**（118 tests、deps 27 modules 0 violations、secret-scan clean）。
+- [x] `deps:check` 綠（IV 確認 cost/* 只 import `./port.js` + `iam/ids`、無 vendor；no-vendor-in-core 綠；`cost` 在 core from-list）。
+- [x] secret-scan clean；credential-blind 結構斷言（strip 註解後掃，IV 確認 sound）。
+- [x] **Adversarial review = PASS**（fresh-context IV；reserve hard-cap、reserve-before-effect、double-commit 不可、denied reserve 不漏預算、non-finite/壞 ctx 兩側 fail-closed 皆 held；3 種 mutation 皆被抓）。**IV DEFECT-1（commit actual 無上限）已修**：超支 commit 如實記錄 `overrun: true`、預算耗盡使後續 reserve 被擋（加 OVERRUN + overrun=false 兩測試鎖定）。
 
 ## (7) Rollback
 revert commit（移除 cost 模組 + barrel 一行）。
