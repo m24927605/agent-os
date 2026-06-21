@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r7-s1-intent-gateway-text
 - **Author**: Frontend Developer（agency-agents）   **Adversarial reviewer**: fresh-context 獨立 Opus 4.8（非作者）
 - **Size budget**: <= 1 day；net LOC <~140、files <~4（`src/personal/intent/{schema.ts,gateway.ts,index.ts}` + `gateway.test.ts`）、modules = 1（`personal/intent`）、新增依賴 = 0（用既有 `zod`）
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R7-S1 — 新增 text-first `IntentGateway`：把一段自然語言 + AgentContext 收斂成一個 Zod-strict `StructuredIntent`，入口先過既有 audit redaction，模糊/含 secret/缺 required 欄 ⇒ **deny-by-default**（不猜、不執行）。
@@ -63,15 +63,40 @@ SLICE-P2R-R7-S1 — 新增 text-first `IntentGateway`：把一段自然語言 + 
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）。
-- [ ] `pnpm run verify` exit 0（待填輸出）。
-- [ ] `pnpm run deps:check` exit 0（`personal/intent` 只 import `src/iam`/`src/audit` **barrel**（B0 後）或
-      interim `src/iam/ids.ts` 例外、無 cycle、無 vendor、inward；**不** import 頂層 `src/index.ts`）。
-- [ ] low coupling / high cohesion 遵守（無新跨 module/cyclic 依賴；僅 public surface 消費）。
-- [ ] secret-scan 乾淨（canary runtime 組裝、無 source 字面值）。
-- [ ] Docs 更新（`src/index.ts` barrel 加 `./personal/intent/index.js`）。
-- [ ] Adversarial code review = PASS（fresh-context；findings 已解）— 摘要：<待填>。
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（deny-by-default + credential non-leak 對抗式探測）。
+- [x] Test-first 成立（首次 RED 已貼於 §5）。
+- [x] `pnpm run verify` exit 0。
+      ```
+      $ pnpm run verify   # typecheck && lint && build && test && deps:check && proto:check && openshell:proto:check && verify:go && verify:py && secret-scan
+      Test Files  47 passed | 1 skipped (48)
+           Tests  474 passed | 1 skipped (475)
+      verify:go: ok
+      secret-scan: clean
+      VERIFY_EXIT=0
+      ```
+      聚焦本 slice 測試：
+      ```
+      $ node_modules/.bin/vitest run src/personal/intent/gateway.test.ts
+      ✓ src/personal/intent/gateway.test.ts (8 tests) 4ms
+      Test Files  1 passed (1)   Tests  8 passed (8)
+      GW_EXIT=0
+      ```
+- [x] `pnpm run deps:check` exit 0（`personal/intent` 經 `src/audit` **barrel**（`redactSecrets`）+ interim
+      `src/iam/ids.js` 例外消費；無 cycle、無 vendor、inward；**不** import 頂層 `src/index.ts`）。
+      ```
+      $ pnpm run deps:check   # depcruise src --config .dependency-cruiser.cjs
+      ✔ no dependency violations found (79 modules, 180 dependencies cruised)
+      DEPS_EXIT=0
+      ```
+- [x] low coupling / high cohesion 遵守（無新跨 module/cyclic 依賴；僅 public surface 消費；depcruise 0 違規）。
+- [x] secret-scan 乾淨（canary runtime 組裝、無 source 字面值）。
+      ```
+      $ pnpm run secret-scan
+      secret-scan: clean
+      ```
+- [x] Docs 更新（`src/index.ts` barrel 加 `./personal/intent/index.js`；`src/audit/index.ts` re-export `redactSecrets`）。
+- [x] Adversarial code review = PASS（fresh-context；findings 已解）— 摘要：deny-by-default + credential
+      non-leak 對抗式探測 clean；獨立 review 通過後交付 INTEGRATOR。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（deny-by-default + credential non-leak 對抗式探測）。
 
 ## (7) Rollback
 - 回退方式：`git revert <merge-sha>`（移除 `personal/intent` 模組 + barrel 一行）。

@@ -27,3 +27,4 @@ export * from "./hosting/index.js";
 export * from "./orchestration/index.js";
 export * from "./runtime/brain/index.js";
 export * from "./runtime/substrate/index.js";
+export * from "./personal/intent/index.js";

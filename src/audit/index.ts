@@ -14,3 +14,7 @@ export type {
   AppendTransport,
 } from "./ingest/index.js";
 export { parseAppendResponse } from "./ingest/index.js";
+// Entry/exit redaction (Credential Non-Leak invariant). Sibling modules — e.g. the Personal
+// surface IntentGateway (slice P2R-R7-S1) — redact text through this barrel, never the internal
+// ./redact.ts, so dependency-cruiser `not-to-internal` stays satisfied.
+export { REDACTED, redactSecrets } from "./redact.js";
