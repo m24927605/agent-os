@@ -20,6 +20,18 @@
   Checker)= PASS——獨立重跑 `pnpm run verify`+`depcruise` 皆 exit 0(171 tests),5 個 per-slice 不變量 mutation 皆
   非 vacuous,無弱化測試,grpc dep 命令強制封閉於 `src/runtime/ingest/`、fail-closed,S7 commit-before-effect 仍守住。
   下一個 de-risk 目標:**R1 live OpenShell substrate adapter**。
+- ✅ **R3–R12 全部完成（10/10 ITEM,45 slice 全 merge 入 main）。** 每刀 doc-first + RED-first + per-item
+  agency-agents writer persona(R3/R12=Minimal Change Engineer、R4/R6=Security Engineer、R7=Frontend Developer、
+  其餘=Backend Architect)+ 獨立 Opus4.8 Code Reviewer;每 ITEM 全綠後再跑整合 Tier-2 對抗式 IV(Reality Checker)。
+  我事後親自 ground-truth:`go build/vet/test ./...` 全 exit 0、`pnpm run verify` exit 0(**706 TS tests + Go +
+  verify:cross-tenant + secret-scan clean**)。
+  - **R8 註記(誠實)**:自動化整合 IV 一度判 R8 IV-FAIL,經我親委派的 focused Tier-2 IV 查明為 **false-fail**——
+    根因是 `verify-cross-tenant.sh` 被直接呼叫時撞到本機 `GOROOT(go1.24.3) vs PATH go(go1.22.4)` 工具鏈不匹配,
+    編譯錯誤被誤讀為「partition leaked」。R8 程式碼實為正確(5/6 per-slice mutation 轉紅、跨租 gate 注入洩漏真的擋、
+    per-tenant 隔離 router→persistence→partition→maker-checker 端到端結構性強制)。已採納兩個 IV follow-up 並 merge:
+    對稱 B→A wrong-key conformance 斷言 + `verify-cross-tenant.sh` 自帶工具鏈正規化(防 false-fail 再現),經獨立 review PASS。
+  - **誠實邊界(沿用 R1)**:真實 vendor/RPC adapter(R1 OpenShell、R2 grpc ingest、R11 NemoClaw/Hermes/SpendGuard/AGT)
+    的「邏輯 + fail-closed + contract」皆對注入 double 完整測試,但完整連到跑著的真實外部 runtime 屬後續組合/部署期。
 
 - **全部 12 個 ITEM 的設計文件 + 58 個小 slice 文件已撰寫並通過文件對抗式 review**（每 ITEM verdict =
   FIXED-THEN-PASS：reviewer 抓到並修掉 barrel 違規、slice 切太大、捏造/過時引用後才放行；無 blocking 殘留）。
