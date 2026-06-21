@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r2-s7-wire-commitgate-appender
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~90、files <~3（composition-root 接線檔 + e2e test + barrel）、modules <~2（composition root + 一條 `src/audit/ingest` 組裝點）、**新增依賴 = 0**（純 wiring；依賴與契約已在 S5/S6）
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R2-S7 — 在 composition root 用 `createIngestClient({transport, sourceId})`（S2）+ S3 dedup + S4 outbox
@@ -54,14 +54,14 @@ SLICE-P2R-R2-S7 — 在 composition root 用 `createIngestClient({transport, sou
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0（含 `deps:check`、`proto:check`、`secret-scan`）
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；core 仍零 vendor、composition root 經 barrel、無 cycle）
-- [ ] low coupling / high cohesion 遵守（行為切換不洩漏 vendor 進 core）
-- [ ] secret-scan 乾淨（endpoint/credential 不入 source/log/fixture；測試憑證 runtime 組裝）
-- [ ] Docs 更新（composition-root appender 由 in-memory 替換為真實 ingest 的記錄）
-- [ ] Adversarial code review = PASS（mutation：transport reject 後仍跑 effect → fail-closed RED 轉紅；保留 in-memory appender 不替換 → 替換完整性 RED 轉紅）
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：傳輸失敗 effect 零次；happy path effect 恰 1 次、append 先於 effect）
+- [x] Test-first 成立（首次 RED 已貼於 §5；5 RED→GREEN，`pnpm test src/audit/ingest/wire.e2e.test.ts` → `5 passed`，exit 0）
+- [x] `pnpm run verify` exit 0（含 `deps:check`、`proto:check`、`secret-scan`）— `$ pnpm run verify` → `VERIFY_EXIT=0`
+- [x] dependency-boundary check 綠（`$ pnpm run deps:check` → `no dependency violations found (46 modules, 98 dependencies cruised)`，`DEPS_CHECK_EXIT=0`；core 仍零 vendor、composition root 經 barrel、無 cycle）
+- [x] low coupling / high cohesion 遵守（行為切換不洩漏 vendor 進 core；wire.ts 僅依 `AppendTransport` port + 同模組/barrel core 面）
+- [x] secret-scan 乾淨（`$ pnpm run secret-scan` → `secret-scan: clean`，`SECRET_SCAN_EXIT=0`；endpoint/credential 不入 source/log/fixture，測試以 in-process fake transport 注入）
+- [x] Docs 更新（`docs/design/ingest-client-sync-commit.md` §3 記錄 composition-root appender 由 in-memory 替換為真實 ingest；§7 rollback 標記 S7）
+- [x] Adversarial code review = PASS（獨立 fresh-context review 已通過；fail-closed mutation 與替換完整性 RED 守在 `wire.e2e.test.ts`）
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：傳輸失敗/server-error effect 零次；happy path effect 恰 1 次、append 先於 effect）
 
 ## (7) Rollback
 - `git revert <merge-sha>`：composition root appender 換回 in-memory（feature wiring 切換，非資料遷移）。

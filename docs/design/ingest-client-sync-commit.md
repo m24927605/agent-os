@@ -98,6 +98,15 @@ RPC transport 依賴**（package.json `dependencies` 僅 `zod`）。因此架構
 - `src/runtime/<transport-adapter>/`（非 core）：用具體 RPC client 實作 `AppendTransport`——**單獨的新依賴 slice**（S6），
   新增第三方 RPC 依賴依 slice-spec §3「新增第三方依賴 = 0；若必要則單獨成一個 slice」，且**依賴變更不與行為變更同 slice**。
 - composition-root 接線（取代 in-memory appender）——**單獨的行為 slice**（S7），零新依賴，純 wiring 切換。
+  **（S7 已落地）**：`createIngestAppender({transport, sourceId, dedup?, outboxCapacity?})`
+  （[`src/audit/ingest/wire.ts`](../../src/audit/ingest/wire.ts)）把 S2 `createIngestClient`（含 S3 dedup）與 S4 capped
+  outbox 組成單一 `CommitAppender<E, AppendReceipt>`，與 in-memory `AppendOnlyLog.append` 同形（同 receipt 型別、
+  同單參數 `append(event)`），故 P2-I 的 `CommitAppender<unknown,R>` 注入點**零型別改動**即可由 in-memory 換成真實 ingest。
+  composition-root e2e（[`src/audit/ingest/wire.e2e.test.ts`](../../src/audit/ingest/wire.e2e.test.ts)）以 S6
+  `createRpcAppendTransport` + in-process fake `AppendService` 驅動 `runGovernedToolCall`：happy → `executed`、append
+  恰 1 次且**先於** effect、effect 恰 1 次；transport reject / server-error oneof → `denied@commit`、effect **零次**
+  （`FakeSandboxAdapter` 無 sandbox）；並有「替換完整性」靜態斷言——wire.ts 與 orchestration pipeline 皆**不** import
+  in-memory `AppendOnlyLog` 作 appender（5 RED→GREEN，`pnpm run verify` exit 0）。
 
 ### 誠實能力閘（capability gates — 哪些是 verified-from-code，哪些是 inferred）
 - **verified-from-code**：Go server 的 fsync-before-Receipt、typed AppendError、append-only/monotonic 語意
@@ -182,6 +191,6 @@ P2-C ─▶ S1 ──────────────▶ S6 ──┐
 
 ## 7. Rollback / 演進
 - 每個 slice 可 `git revert <merge>` 獨立回退（core slice 無外部副作用）。
-- S5 含真實連線：回退 = 把 P2-I 的 appender 換回 in-memory（feature wiring 切換，非資料遷移）。WORM 已 append 的
+- S7 含真實接線：回退 = 把 P2-I 的 appender 換回 in-memory（feature wiring 切換，非資料遷移）。WORM 已 append 的
   evidence **不回寫**（append-only；靠 forward-correcting event）。
 - 演進：TS 有界記憶體 outbox → 後續可升 durable（鏡像 Go outbox 的 framed-append+fsync+replay），但屬獨立 ITEM。
