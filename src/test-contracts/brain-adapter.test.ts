@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { redactSecrets } from "../audit/redact.js";
 import type { AgentContext } from "../iam/ids.js";
+import { HermesBrainShim } from "../runtime/brain/adapters/hermes/index.js";
 import {
   type BrainAdapter,
   type BrainEvent,
@@ -48,6 +49,15 @@ const ADAPTERS: { name: string; make: () => BrainAdapter }[] = [
       ]),
   },
   { name: "EchoBrain", make: () => new EchoBrain() },
+  {
+    name: "HermesBrainShim",
+    make: () =>
+      new HermesBrainShim({
+        async *turns() {
+          yield { planText: "do a thing", toolCalls: [{ tool: "send", args: { to: "x" } }] };
+        },
+      }),
+  },
 ];
 
 describe.each(ADAPTERS)("BrainAdapter contract — $name", ({ make }) => {
