@@ -4,7 +4,7 @@
 - **Branch**: slice/p2-b-no-vendor-in-core
 - **Author**: <id>    **Adversarial reviewer**: <fresh-context、非作者>
 - **Size budget**: <= 0.5 day；net LOC <~120、files <~7（`.dependency-cruiser.cjs` 增一條規則 + `src/build/no-vendor-in-core.test.ts` + `test/fixtures/pluggability/{bad,clean}/...`）、新增依賴 = 0
-- **狀態**: DRAFT（實作後以真實 exit code 覆蓋 §5/§6 並標 DONE）
+- **狀態**: **DONE**（merge；fresh-context IV = PASS、零 defect）
 
 ## (1) ID + Title
 SLICE-P2-B — 在 `.dependency-cruiser.cjs` 新增 forbidden 規則 `no-vendor-in-core`（severity error），使「核心治理模組 import/命名任何 vendor（hermes/nemoclaw/openshell/agt/spendguard）」**即 fail `pnpm run verify`**。vendor 只能存在於自己的 adapter 模組。
@@ -30,12 +30,12 @@ SLICE-P2-B — 在 `.dependency-cruiser.cjs` 新增 forbidden 規則 `no-vendor-
 5. **real src**：`depcruise src` 無 `no-vendor-in-core` violation。
 > 預期首次 RED：結構斷言 + 行為「FIRES」失敗（規則不存在）。
 
-## (6) Definition of Done（每條附指令證據 — 待填）
-- [ ] first RED exit code（≠0）已貼。
-- [ ] `pnpm run verify` exit 0。
-- [ ] `deps:check` 綠；故意在 core 植 vendor import fixture → verify 紅，移除 → 綠（reviewer 驗非 no-op）。
-- [ ] secret-scan clean。
-- [ ] Adversarial review = PASS（含 mutation：weaken severity / 刪 vendor token → 測試紅）。
+## (6) Definition of Done（每條附指令證據 — 實測）
+- [x] **first RED**（規則未加）：`vitest run no-vendor-in-core.test.ts` → **4 failed | 2 passed**（exit≠0）。
+- [x] `pnpm run verify` **exit 0**（加規則後；68 tests、deps 0 violations、secret-scan clean）。
+- [x] `deps:check` 綠；IV 親植 `openshell-sdk`/`@hermes/agent`/bare 三種 vendor import fixture → 預設 output exit≠0；benign `magtools`/`fragment` → exit 0（非 no-op）。
+- [x] secret-scan clean。
+- [x] **Adversarial review = PASS**（fresh-context IV，零 defect；mutation：weaken severity → 2 紅、刪 vendor token → 4 紅）。
 
 ## (7) Rollback
 revert 該 commit 即移除規則 + 測試 + fixtures（無產品 code 受影響）。
