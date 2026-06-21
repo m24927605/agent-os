@@ -127,6 +127,11 @@ NemoClaw 為什麼是這個缺口的 grounding（verified-from-code）：NemoCla
 
 ### 2.2 R12-S2 — AgentHosting caller 面 reason 統一 + 真因只進 audit
 
+> **狀態：DONE（slice/p2r-r12-s2-agenthosting-reason-unification）。** `InMemoryAgentHosting` caller 面
+> 對 unknown / cross-tenant 統一回 `UNKNOWN_SANDBOX = "unknown sandbox"`（`hostAgent` + `requireOwned`
+> 三路徑），真因只留 audit `event.reason`；存在性 oracle 已消除。no-oracle 不變量已進 contract harness。
+> 真實 NemoClaw adapter 套同一不變量留 **R11**；hosting audit event 進 WORM kernel 留 **R2** ingest。
+
 **單一不可區分的 caller-facing reason；真因（unknown vs cross-tenant）只進 audit `event.reason`。**
 
 ```

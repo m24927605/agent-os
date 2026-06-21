@@ -12,6 +12,7 @@ import {
   type ReconcileAction,
   type ReconcileResult,
   type StatusResult,
+  UNKNOWN_SANDBOX,
   contextOrError,
   denyEvent,
 } from "./port.js";
@@ -37,12 +38,13 @@ export class InMemoryAgentHosting implements AgentHosting {
     }
     const existing = this.agents.get(spec.sandboxId);
     if (existing && existing.tenantId !== c.context.tenantId) {
-      // cross-tenant: another tenant already owns this sandbox.
-      const reason = "cross-tenant: sandbox is hosted by another tenant (deny-by-default)";
+      // cross-tenant: another tenant already owns this sandbox. Caller-facing reason is
+      // indistinguishable from unknown-sandbox; the true reason goes only to the audit event.
+      const auditReason = "cross-tenant: sandbox is hosted by another tenant (deny-by-default)";
       return Promise.resolve({
         status: "denied",
-        reason,
-        event: denyEvent(ctx, "host", reason, spec.sandboxId),
+        reason: UNKNOWN_SANDBOX,
+        event: denyEvent(ctx, "host", auditReason, spec.sandboxId),
       });
     }
     this.agents.set(spec.sandboxId, {
@@ -96,17 +98,27 @@ export class InMemoryAgentHosting implements AgentHosting {
         denied: { status: "denied", reason, event: denyEvent(ctx, operation, reason, sandboxId) },
       };
     }
+    // unknown-sandbox and cross-tenant return the SAME caller-facing reason (UNKNOWN_SANDBOX) so the
+    // caller cannot probe existence/ownership; the true reason is preserved only in the audit event.
     const agent = this.agents.get(sandboxId);
     if (agent === undefined) {
-      const reason = "unknown sandbox (deny-by-default)";
+      const auditReason = "unknown sandbox (deny-by-default)";
       return {
-        denied: { status: "denied", reason, event: denyEvent(ctx, operation, reason, sandboxId) },
+        denied: {
+          status: "denied",
+          reason: UNKNOWN_SANDBOX,
+          event: denyEvent(ctx, operation, auditReason, sandboxId),
+        },
       };
     }
     if (agent.tenantId !== c.context.tenantId) {
-      const reason = "cross-tenant: sandbox is hosted by another tenant (deny-by-default)";
+      const auditReason = "cross-tenant: sandbox is hosted by another tenant (deny-by-default)";
       return {
-        denied: { status: "denied", reason, event: denyEvent(ctx, operation, reason, sandboxId) },
+        denied: {
+          status: "denied",
+          reason: UNKNOWN_SANDBOX,
+          event: denyEvent(ctx, operation, auditReason, sandboxId),
+        },
       };
     }
     return { agent, context: c.context };
