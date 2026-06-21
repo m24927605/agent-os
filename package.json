@@ -25,9 +25,10 @@
     "verify:p1-exit": "bash scripts/verify-p1-exit.sh",
     "verify:go": "env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local bash scripts/verify-go.sh",
     "verify:py": "bash scripts/verify-py.sh",
+    "verify:cross-tenant": "env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local bash scripts/verify-cross-tenant.sh",
     "secret-scan": "bash scripts/scan_secrets.sh",
     "launcher:check": "node scripts/launcher-check.mjs",
-    "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run launcher:check && pnpm run secret-scan"
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && pnpm run secret-scan"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",
