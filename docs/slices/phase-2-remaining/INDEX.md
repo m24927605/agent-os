@@ -7,6 +7,12 @@
 > 已完成的 P2-A~I 見 [`../phase-2/INDEX.md`](../phase-2/INDEX.md)。**AGENTS.md 勝出。only command output is truth。**
 
 ## 0. 狀態（2026-06-21 更新）
+- ✅ **R2（TS→Go 真實 ingest）完成**:S1–S7 全 merge 入 main。每刀 doc-first + RED-first + agency-agents writer
+  (Backend Architect/Opus4.8) + 獨立 Opus4.8 reviewer;另跑一道**整合層 fresh-context 對抗式 Tier-2 驗證**(Reality
+  Checker)= PASS——獨立重跑 `pnpm run verify`+`depcruise` 皆 exit 0(171 tests),5 個 per-slice 不變量 mutation 皆
+  非 vacuous,無弱化測試,grpc dep 命令強制封閉於 `src/runtime/ingest/`、fail-closed,S7 commit-before-effect 仍守住。
+  下一個 de-risk 目標:**R1 live OpenShell substrate adapter**。
+
 - **全部 12 個 ITEM 的設計文件 + 58 個小 slice 文件已撰寫並通過文件對抗式 review**（每 ITEM verdict =
   FIXED-THEN-PASS：reviewer 抓到並修掉 barrel 違規、slice 切太大、捏造/過時引用後才放行；無 blocking 殘留）。
   設計文件在 `docs/design/`;slice 文件在本目錄 `P2R-R<n>-S<m>-*.md`(58 份,各含 RED plan + 指令可驗 DoD +
