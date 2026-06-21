@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r3-s3-pdp-tool-invoke
 - **Author**: agency-agents writer    **Adversarial reviewer**: <fresh-context Opus 4.8、非作者>
 - **Size budget**: <= 0.5 day；net LOC <~160、files <~3（`src/tools/authorize.ts` + `src/tools/authorize.test.ts` + `src/index.ts` barrel 一行）、modules = 1（`tools`；只「消費」既有 policy 公共面，不改 policy module）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R3-S3 — 新增 **`authorizeToolInvoke(req, registry, rules)`**：當 `req.action === "tool:invoke"` 且 `registry.has(req.resource)`（tool name）為 false → **直接 deny**（`reason: "tool:invoke for unregistered tool (deny-by-default)"`、`auditRequired: true`）；tool 已註冊 → 交既有 `evaluatePolicy` 評估（PDP 仍是唯一 deny 權威）。這是一個 **deny-only 前置篩**，永遠只能 deny 更多、不能 grant。
@@ -61,18 +61,32 @@ SLICE-P2R-R3-S3 — 新增 **`authorizeToolInvoke(req, registry, rules)`**：當
   ```
 
 ## (6) Definition of Done（每條附指令證據；實作時填）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5）— RED→GREEN 已完成；下方為 GREEN 之 slice-test 證據（7 tests pass）
+  ```
+  $ pnpm test src/tools/authorize.test.ts
+  ✓ src/tools/authorize.test.ts (7 tests) 4ms
+   Test Files  1 passed (1)
+        Tests  7 passed (7)
+  exit code: 0
+  ```
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <0>
+  ... typecheck / lint / build / test / proto:check / verify:go ok ...
+  secret-scan: clean
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；確認 authorize.ts 只經 policy public surface + S2，無 deep import、無 vendor，方向向內無 cycle）
-- [ ] low coupling / high cohesion 遵守（**未改** evaluate.ts/dedup.ts；只消費其 public surface）
-- [ ] secret-scan 乾淨
-- [ ] Docs 更新（design §2.3「不破壞 dedup #1」與本 slice 一致）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：unregistered 改回 allow → headline+deny-only 轉紅；registered 路徑改成自行 allow 而非委派 → deny-rule 測試轉紅）— 摘要: <填>
-- [ ]（安全不變量類）**Independent Verifier Pass** 已執行並 clean：adversarially probed deny-by-default（unregistered→deny）、fail-closed（malformed→deny）、PDP 唯一 deny 權威不被前置篩稀釋（deny-only）、與 dedup any-deny-wins 相容、audit `auditRequired:true` 永真。
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；確認 authorize.ts 只經 policy public surface + S2，無 deep import、無 vendor，方向向內無 cycle）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (59 modules, 122 dependencies cruised)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（**未改** evaluate.ts/dedup.ts；只消費其 public surface — authorize.ts 僅 import 自 `../policy/index.js` barrel + `./registry.js`）
+- [x] secret-scan 乾淨（`secret-scan: clean`，含於 verify exit 0）
+- [x] Docs 更新（design §2.3「不破壞 dedup #1」與本 slice 一致；本 slice doc 狀態=DONE）
+- [x] Adversarial code review = PASS（fresh-context；mutation：unregistered 改回 allow → headline+deny-only 轉紅；registered 路徑改成自行 allow 而非委派 → deny-rule 測試轉紅）— 摘要: 獨立審查通過；deny-only 前置篩不能被 allow rule 翻轉，registered 路徑完全委派 evaluatePolicy。
+- [x]（安全不變量類）**Independent Verifier Pass** 已執行並 clean：adversarially probed deny-by-default（unregistered→deny）、fail-closed（malformed→deny）、PDP 唯一 deny 權威不被前置篩稀釋（deny-only）、與 dedup any-deny-wins 相容、audit `auditRequired:true` 永真。
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 authorize.ts + 測試 + barrel 一行）。
