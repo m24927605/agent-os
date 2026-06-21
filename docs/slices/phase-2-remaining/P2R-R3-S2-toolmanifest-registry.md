@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r3-s2-toolmanifest-registry
 - **Author**: agency-agents writer    **Adversarial reviewer**: <fresh-context Opus 4.8、非作者>
 - **Size budget**: <= 0.5 day；net LOC <~140、files <~3（`src/tools/registry.ts` + `src/tools/registry.test.ts` + `src/index.ts` barrel 一行）、modules = 1（`tools`）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**
 
 ## (1) ID + Title
 SLICE-P2R-R3-S2 — 新增 **`ToolRegistry`**：in-memory `Map<string, ToolManifest>`，提供 `register(manifest)`（每筆走 S1 `parseToolManifest`；重複 `name` → **拒絕**，fail-closed）、`lookup(name): ToolManifest | undefined`、`has(name): boolean`、`list(): readonly ToolManifest[]`。
@@ -56,19 +56,35 @@ SLICE-P2R-R3-S2 — 新增 **`ToolRegistry`**：in-memory `Map<string, ToolManif
   exit code: <填>
   ```
 
-## (6) Definition of Done（每條附指令證據；實作時填）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+## (6) Definition of Done（每條附指令證據）
+- [x] Test-first 成立（首次 RED 已貼於 §5）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: <0>
+  ... typecheck ok / lint: Checked 81 files, no fixes / build ok
+  ... vitest: Test Files 32 passed | 1 skipped (33); Tests 277 passed | 1 skipped (278)
+  ...   src/tools/registry.test.ts (8 tests) — green
+  ... deps:check: ✔ no dependency violations found (57 modules, 116 dependencies cruised)
+  ... proto:check ok / openshell:proto:check ok / verify:go ok / verify:py skip (no Python plane)
+  ... secret-scan: clean
+  VERIFY_EXIT=0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；registry.ts 只 intra-module import S1、無 vendor）
-- [ ] low coupling / high cohesion 遵守（registry 單一責任=存證+重複拒絕；不做 policy 決策）
-- [ ] secret-scan 乾淨
-- [ ] Docs 更新（design §2.2 registry 行為與本 slice 一致）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：重複 name 改為覆蓋 → dup 測試轉紅；register 跳過 parse → malformed 測試轉紅）— 摘要: <填>
-- [ ]（安全不變量類）Independent Verifier Pass 已執行並 clean（probed dup-deny、malformed-deny、seed 原子性、lookup 不誤命中）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；registry.ts 只 intra-module import S1、無 vendor）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (57 modules, 116 dependencies cruised)
+  DEPS_EXIT=0
+  ```
+- [x] low coupling / high cohesion 遵守（registry 單一責任=存證+重複拒絕；不做 policy 決策；僅 import S1 public surface `./manifest.js`）
+- [x] secret-scan 乾淨
+  ```
+  $ pnpm run secret-scan
+  secret-scan: clean
+  SECRET_EXIT=0
+  ```
+- [x] Docs 更新（本 slice doc 狀態=DONE；registry 行為與 §1/§4 一致）
+- [x] Adversarial code review = PASS（fresh-context；mutation：重複 name 改為覆蓋 → dup 測試轉紅；register 跳過 parse → malformed 測試轉紅）— 摘要: 重複名拒絕、malformed 拒絕、seed 原子性、lookup 不誤命中均經測試覆蓋；register/seed 皆走 S1 `parseToolManifest`，fail-closed 成立。
+- [x]（安全不變量類）Independent Verifier Pass 已執行並 clean（probed dup-deny、malformed-deny、seed 原子性、lookup 不誤命中）— 已於 slice R3-S2 獨立審查通過。
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 registry.ts + 測試 + barrel 一行）。
