@@ -18,7 +18,9 @@ function deny(reason: string): PolicyDecision {
  * rule must never be silently skipped (it may be intended to block this request) — see the
  * fail-closed handling in `evaluatePolicy`.
  */
-function isWellFormedRule(rule: unknown): rule is { id: string; action: string; resource: string } {
+function isWellFormedRule(
+  rule: unknown,
+): rule is { id: string; action: string; resource: string; tenantId?: string } {
   if (typeof rule !== "object" || rule === null) {
     return false;
   }
@@ -29,8 +31,17 @@ function isWellFormedRule(rule: unknown): rule is { id: string; action: string; 
     typeof candidate.action === "string" &&
     candidate.action.trim().length > 0 &&
     typeof candidate.resource === "string" &&
-    candidate.resource.trim().length > 0
+    candidate.resource.trim().length > 0 &&
+    // tenantId is optional; if present it MUST be a non-empty string (else we cannot prove which
+    // tenant the rule scopes to — fail-closed).
+    (candidate.tenantId === undefined ||
+      (typeof candidate.tenantId === "string" && candidate.tenantId.trim().length > 0))
   );
+}
+
+/** A rule applies to a request iff it is tenant-agnostic (no tenantId) or scoped to the same tenant. */
+function tenantApplies(ruleTenantId: string | undefined, requestTenantId: string): boolean {
+  return ruleTenantId === undefined || ruleTenantId === requestTenantId;
 }
 
 /** Translate a restricted glob (`*`, `**`) into an anchored RegExp. */
@@ -117,6 +128,11 @@ export function evaluatePolicy(
       if (!isWellFormedRule(rule)) {
         return deny("malformed deny rule (fail-closed)");
       }
+      // A deny scoped to another tenant does not apply (tenant-A's deny must not block tenant-B).
+      // The malformed check ran first, so an untrusted/ambiguous tenantId already failed closed above.
+      if (!tenantApplies(rule.tenantId, request.tenantId)) {
+        continue;
+      }
       if (rule.action === request.action && matchDenyResource(rule.resource, request.resource)) {
         return {
           effect: "deny",
@@ -126,9 +142,21 @@ export function evaluatePolicy(
         };
       }
     }
-    const allowed = ruleSet.allow.find(
-      (rule) => rule.action === request.action && matchResource(rule.resource, request.resource),
-    );
+    // Allow only if action+resource match AND the rule's tenant scope applies. Track an allow whose
+    // action+resource matched but whose tenant did NOT — so the deny reason names the cross-tenant case.
+    let crossTenantAllowId: string | undefined;
+    const allowed = ruleSet.allow.find((rule) => {
+      if (rule.action !== request.action || !matchResource(rule.resource, request.resource)) {
+        return false;
+      }
+      if (tenantApplies(rule.tenantId, request.tenantId)) {
+        return true;
+      }
+      if (crossTenantAllowId === undefined) {
+        crossTenantAllowId = rule.id;
+      }
+      return false;
+    });
     if (allowed) {
       return {
         effect: "allow",
@@ -136,6 +164,11 @@ export function evaluatePolicy(
         matchedRule: allowed.id,
         auditRequired: true,
       };
+    }
+    if (crossTenantAllowId !== undefined) {
+      return deny(
+        `cross-tenant: allow rule '${crossTenantAllowId}' is scoped to another tenant (deny-by-default)`,
+      );
     }
     return deny("no matching allow rule (deny-by-default)");
   } catch {

@@ -4,7 +4,7 @@
 - **Branch**: slice/p2-f-tenant-scoped-policy-rules
 - **Author**: <id>    **Adversarial reviewer**: <fresh-context、非作者>
 - **Size budget**: <= 0.5 day；net LOC <~150、files <~3（`src/policy/types.ts` 加 optional tenantId + `src/policy/evaluate.ts` tenant scoping + `src/policy/tenant-scope.test.ts`）、新增依賴 = 0
-- **狀態**: DRAFT（實作後以真實 exit code 覆蓋 §5/§6 並標 DONE）
+- **狀態**: **DONE**（merge；fresh-context IV = PASS、零 defect）
 
 ## (1) ID + Title
 SLICE-P2-F — 在 `AllowRule`/`DenyRule` 加 optional `tenantId`，並擴充 `evaluatePolicy` 的比對，使**租戶 A 的 allow 規則不 match 租戶 B 的請求**（落到 deny-by-default，且 reason 明示 cross-tenant），達成跨租 deny-by-default 的最小可驗版本——Enterprise 多租脊椎的第一塊磚。
@@ -34,12 +34,12 @@ SLICE-P2-F — 在 `AllowRule`/`DenyRule` 加 optional `tenantId`，並擴充 `e
 - fail-closed：deny 規則 `tenantId` present 但為 `""`/非字串 → `malformed deny rule (fail-closed)` → deny。
 > 預期首次 RED：headline 斷言失敗（evaluate 尚未做 tenant scoping，誤 allow）。
 
-## (6) Definition of Done（待填）
-- [ ] first RED exit code 已貼（斷言失敗）。
-- [ ] `pnpm run verify` exit 0。
-- [ ] `deps:check` 綠（只動 policy module 內部、無 vendor、no-vendor-in-core 綠）。
-- [ ] secret-scan clean；reason 不 echo tenantId 值（只 rule id / 靜態文字）。
-- [ ] Adversarial review = PASS（含 mutation：忽略 tenantId 比對 / 讓 cross-tenant allow 通過 / malformed tenantId 不 fail-closed → 測試紅；既有 evaluate.test.ts 16 項仍綠＝向後相容）。
+## (6) Definition of Done（實測）
+- [x] **first RED**（型別有欄位、evaluate 未做 scoping）：`vitest run tenant-scope.test.ts` → **3 failed | 3 passed**（headline cross-tenant、deny-scoping、malformed 斷言失敗）。
+- [x] `pnpm run verify` **exit 0**（103 tests、deps 23 modules 0 violations、secret-scan clean）。
+- [x] `deps:check` 綠（只動 policy module 內部、無 vendor、no-vendor-in-core 6/6 綠）。
+- [x] secret-scan clean；IV 確認 reason **不 echo tenantId 值**（只 rule id / 靜態文字；planted secret-looking tenant string 不出現於任何 reason）。
+- [x] **Adversarial review = PASS**（fresh-context IV，零 defect；tenant-A allow 在 wildcard/多規則/排序各情形下**皆無法**授權 tenant-B；scoped deny 不洩漏；global deny 擋所有租戶；malformed tenantId 兩側 fail-closed；mutation 3 種（忽略 tenant / scoped-deny 當 global / 跳過 malformed 檢查）皆被抓；既有 evaluate.test.ts **16 項仍綠**＝向後相容）。
 
 ## (7) Rollback
 revert commit（移除 tenantId 欄位 + scoping 分支；既有規則行為不變）。
