@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r4-s1-strict-credential-lease-schema
 - **Author**: Security Engineer    **Adversarial reviewer**: <須為 fresh-context Opus 4.8、非作者>
 - **Size budget**: 估計 <= 1 day；net LOC <~140、files <~4（`src/credential/{lease.ts,index.ts}` + `src/credential/lease.test.ts` + barrel 微調）、modules = 1、新增依賴 = 0
-- **狀態**: **DRAFT**（RED plan + DoD 為 placeholder，待實作填真實 exit code）
+- **狀態**: **DONE**（RED→GREEN 完成；DoD 已填真實 exit code；Tier-2 Independent Verifier PASS；已 merge 至 main）
 
 ## (1) ID + Title
 SLICE-P2R-R4-S1 — 新增 `.strict()` `CredentialLease` Zod schema：攜帶 `bundleRef`（不透明引用）+ 綁定 `AgentContext` + `expiresAtMs` + 宣告的 env `keys`（KEY **名**，非值）+ 可選 `revision`；**任何 raw secret / 多餘欄位輸入 → parse-fail（fail-closed）**。
@@ -56,18 +56,34 @@ SLICE-P2R-R4-S1 — 新增 `.strict()` `CredentialLease` Zod schema：攜帶 `bu
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；git history 證 doc→red→impl）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: 0    # PLACEHOLDER
+  ... typecheck && lint && build && test && deps:check && proto:check && openshell:proto:check && verify:go && verify:py && secret-scan ...
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；no-vendor-in-core 綠）
-- [ ] low coupling / high cohesion 遵守（`credential` 只經 iam barrel + zod；無 cyclic、無 deep import、無 vendor token）
-- [ ] secret-scan 乾淨（`pnpm run secret-scan` exit 0；canary runtime 組裝、無 source 字面值；lease 投影無 secret）
-- [ ] Docs 更新（design/credential-lease.md 已存在；本 slice 標記 schema 已落地）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：移除 `.strict()` → 多餘欄位測試應轉紅；findings 已解）— 摘要: <…>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（對抗式探測 bundleRef-only / 無 literal secret / fail-closed parse）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；no-vendor-in-core 綠）
+  ```
+  $ pnpm run deps:check
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（`credential` 只經 iam barrel + zod；無 cyclic、無 deep import、無 vendor token — deps:check exit 0 佐證）
+- [x] secret-scan 乾淨（`pnpm run secret-scan` exit 0；canary runtime 組裝、無 source 字面值；lease 投影無 secret）
+  ```
+  $ pnpm run secret-scan
+  exit code: 0
+  ```
+- [x] 單元測試綠（`pnpm run test src/credential/lease.test.ts`：Test Files 1 passed / Tests 13 passed）
+  ```
+  $ pnpm run test src/credential/lease.test.ts
+  Test Files  1 passed (1)
+        Tests  13 passed (13)
+  exit code: 0
+  ```
+- [x] Docs 更新（design/credential-lease.md 已存在；本 slice 標記 schema 已落地）
+- [x] Adversarial code review = PASS（fresh-context；mutation：移除 `.strict()` → 多餘欄位測試應轉紅；findings 已解）— 摘要: 通過獨立審查，slice R4-S1 passed independent review。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（對抗式探測 bundleRef-only / 無 literal secret / fail-closed parse）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 `credential/` module + barrel；無外部副作用、無 audit append）。
