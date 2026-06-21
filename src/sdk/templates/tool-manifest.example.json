@@ -1,0 +1,11 @@
+{
+  "name": "github-create-issue",
+  "version": "1.0.0",
+  "description": "Open a new issue in a GitHub repository the agent has been leased access to.",
+  "action": "github.issues.create",
+  "resourcePattern": "github:repo:acme/*",
+  "sideEffect": "write",
+  "idempotent": false,
+  "requiresApproval": false,
+  "bundleRefOnly": true
+}
