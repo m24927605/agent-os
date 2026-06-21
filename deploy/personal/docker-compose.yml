@@ -1,0 +1,88 @@
+# docker-compose.yml — Agent OS Personal surface (R7 zero-skill shell) launcher
+#
+# One command starts/stops the whole Personal surface (intent -> approval -> timeline shell
+# + the existing substrate/kernel) for a single, local user.
+#
+# Security contract (enforced by `pnpm run launcher:check`, wired into `pnpm run verify`):
+#   - Network deny-by-default: every published port is pinned to 127.0.0.1. NEVER use
+#     0.0.0.0 or a bare "PORT:PORT" map (that binds all interfaces). For remote access use
+#     an SSH tunnel (`ssh -L 8080:localhost:8080 <host>`) or a reverse proxy that adds auth.
+#   - Credentials never on disk: this file contains ZERO plaintext secrets. Every secret is
+#     injected at runtime via ${ENV} interpolation or mounted read-only from the host. The
+#     compose file, the image, and the logs must stay credential-free.
+#
+# Run (set host UID/GID so files created in the container stay host-owned):
+#   PERSONAL_UID=$(id -u) PERSONAL_GID=$(id -g) docker compose -f deploy/personal/docker-compose.yml up -d
+#   docker compose -f deploy/personal/docker-compose.yml down
+#
+# Secrets are sourced from the host. Either export them in the shell that runs compose, or
+# put them in a local, git-ignored `.env` next to this file (never commit it).
+
+services:
+  kernel:
+    image: agent-os/audit-kernel
+    container_name: agent-os-kernel
+    restart: unless-stopped
+    # Append-only WORM evidence store. Localhost-only; never exposed off-box.
+    ports:
+      - "127.0.0.1:7070:7070"
+    environment:
+      - PERSONAL_UID=${PERSONAL_UID:-10000}
+      - PERSONAL_GID=${PERSONAL_GID:-10000}
+    volumes:
+      - ${HOME}/.agent-os/data:/var/lib/agent-os:rw
+    healthcheck:
+      test: ["CMD", "agent-os-kernel", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  substrate:
+    image: agent-os/substrate
+    container_name: agent-os-substrate
+    restart: unless-stopped
+    depends_on:
+      kernel:
+        condition: service_healthy
+    # Sandboxed execution substrate. Localhost-only.
+    ports:
+      - "127.0.0.1:7071:7071"
+    environment:
+      - PERSONAL_UID=${PERSONAL_UID:-10000}
+      - PERSONAL_GID=${PERSONAL_GID:-10000}
+    volumes:
+      - ${HOME}/.agent-os/work:/workspace:rw
+    healthcheck:
+      test: ["CMD", "agent-os-substrate", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  shell:
+    image: agent-os/personal-shell
+    container_name: agent-os-personal-shell
+    restart: unless-stopped
+    depends_on:
+      kernel:
+        condition: service_healthy
+      substrate:
+        condition: service_healthy
+    # The zero-skill shell (intent -> plan preview -> approval inbox -> task timeline).
+    # Localhost-only by design — Personal surface is single-machine.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PERSONAL_UID=${PERSONAL_UID:-10000}
+      - PERSONAL_GID=${PERSONAL_GID:-10000}
+      # Secrets injected at runtime — sourced from the host env / .env, NEVER written here.
+      - SHELL_SESSION_KEY=${SHELL_SESSION_KEY}
+      - KERNEL_ENDPOINT=http://kernel:7070
+      - SUBSTRATE_ENDPOINT=http://substrate:7071
+    volumes:
+      # Read-only secret mount: host-managed credentials surfaced inside the container.
+      - ${HOME}/.agent-os/secrets:/run/secrets:ro
+    healthcheck:
+      test: ["CMD", "agent-os-shell", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
