@@ -6,9 +6,16 @@
 > doc-first、小 slice、RED 先行、Independent Verifier Pass(獨立 Opus 4.8 reviewer)、5 回合上限 → Staff+ 升級。
 > 已完成的 P2-A~I 見 [`../phase-2/INDEX.md`](../phase-2/INDEX.md)。**AGENTS.md 勝出。only command output is truth。**
 
-## 0. 狀態
-- **設計文件 + 小 slice 文件**:由 doc-authoring workflow 產出後逐一補連結並標 READY-TO-BUILD。
-- 任一 slice 開工前必須:該 ITEM 設計文件 + 該 slice 文件齊備、且通過一次**文件對抗式 review**。
+## 0. 狀態（2026-06-21 更新）
+- **全部 12 個 ITEM 的設計文件 + 58 個小 slice 文件已撰寫並通過文件對抗式 review**（每 ITEM verdict =
+  FIXED-THEN-PASS：reviewer 抓到並修掉 barrel 違規、slice 切太大、捏造/過時引用後才放行；無 blocking 殘留）。
+  設計文件在 `docs/design/`;slice 文件在本目錄 `P2R-R<n>-S<m>-*.md`(58 份,各含 RED plan + 指令可驗 DoD +
+  獨立 Opus 4.8 reviewer)。
+- **READY-TO-BUILD**:任一 slice 現可開工——開工時走 [`looping-engineering.md`](../../standards/looping-engineering.md)
+  §6 每-slice 流程(RED→實作→verify→Independent Verifier Pass 5 回合→Staff+ 升級→`--no-ff` merge)。
+- 文件 review 抓到的**系統性風險(實作時注意)**:跨 module 只能走 `src/<module>/index.ts` barrel(多個 slice 曾誤踩
+  不存在的 barrel / 深 import);R12-S2 會**依 migration 指示改動既有跨租測試(非弱化)**;R2/R4/R5 少數 slice 貼近
+  size 上限,實作時若超界即再拆。
 
 ## 1. ITEM 清單、slice 分解、依賴、agent 指派
 
