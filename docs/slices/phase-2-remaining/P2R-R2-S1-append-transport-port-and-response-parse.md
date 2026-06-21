@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r2-s1-append-transport-port
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~150、files <~4（`src/audit/ingest/{transport.ts,parse.ts,index.ts,parse.test.ts}`）、新增依賴 = 0、modules = 1
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merge；writer=Backend Architect/Opus4.8;reviewer=獨立 Code Reviewer/Opus4.8 Independent Verifier Pass = PASS,第 1 回合、零 defect）
 
 ## (1) ID + Title
 SLICE-P2R-R2-S1 — 定義 vendor-neutral `AppendTransport` port（`append(req)→AppendResponseShape`）與一個純函式
@@ -59,15 +59,15 @@ receipt 結果（error / 空 oneof / CODE_UNSPECIFIED）→ **throw**（fail-clo
   exit code: 1
   ```
 
-## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；ingest 經 barrel 被消費、無 cycle、無 vendor）
-- [ ] low coupling / high cohesion 遵守（單一責任；僅同模組 public surface 消費）
-- [ ] secret-scan 乾淨
-- [ ] Docs 更新（若 behavior/commands/API 改變）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：把空 oneof / CODE_UNSPECIFIED 改成回 falsy receipt → 對應 RED 必須轉紅）
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（probe：所有非 receipt 路徑皆 throw）
+## (6) Definition of Done（每條附指令證據 — 實測）
+- [x] **Test-first 成立**：parse.test.ts 先寫,`vitest run …/parse.test.ts` → **exit 1**（module 缺,RED）;實作後 5/5 green。
+- [x] `pnpm run verify` **exit 0**（142 tests、deps 36 modules 0 violations、secret-scan clean;reviewer 獨立重跑同樣 exit 0）。
+- [x] dependency-boundary 綠（`depcruise src` exit 0;ingest 只 type-only intra-audit import `../kernel/log.js` + `./transport.js`、無 cycle、無 vendor）。
+- [x] low coupling / high cohesion（單一責任:定義 transport port + fail-closed 解析;僅同模組 public surface 消費）。
+- [x] secret-scan 乾淨;thrown message 只含 kernel-supplied code+detail,**不**含 canonical_event bytes（canary 測試證實;parse 無 event-bytes 存取）。
+- [x] Docs 更新（本 slice doc）。
+- [x] **Adversarial code review = PASS**（fresh-context 獨立 Opus 4.8 Code Reviewer;mutation:空 oneof / CODE_UNSPECIFIED / error 分支 改成回 falsy receipt → 對應測試皆轉紅,非 vacuous;index.ts 無 AppendReceipt re-export collision）。
+- [x] **Independent Verifier Pass clean**（所有非 receipt 路徑皆 throw,RED 重現 exit≠0→restore exit 0）。
 
 ## (7) Rollback
 - `git revert <merge-sha>`（移除 `src/audit/ingest` 新模組）。
