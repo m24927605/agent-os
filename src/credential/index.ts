@@ -18,3 +18,4 @@ export {
   revoke,
   use,
 } from "./fsm.js";
+export { type ProviderEnvResult, placeholderForKey, toProviderEnv } from "./inject.js";

@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r4-s3-secret-resolver-injection-seam
 - **Author**: Security Engineer    **Adversarial reviewer**: <須為 fresh-context Opus 4.8、非作者>
 - **Size budget**: 估計 <= 1 day；net LOC <~120、files <~3（`src/credential/inject.ts` + `src/credential/inject.test.ts` + barrel 微調）、modules = 1、新增依賴 = 0
-- **狀態**: **DRAFT**（RED plan + DoD 為 placeholder，待實作填真實 exit code）
+- **狀態**: **DONE**（RED→GREEN 完成；DoD 已填真實 exit code；獨立審查 PASS；已合併 main）
 
 ## (1) ID + Title
 SLICE-P2R-R4-S3 — 新增 injection seam：把一個 `injected` 態 `CredentialLease` 投影成 **provider-env placeholder map**（`{ KEY: "openshell:resolve:env:<KEY>" }`，或帶 revision 時 `openshell:resolve:env:v<rev>_<KEY>`），其形狀逐字相容 OpenShell `SecretResolver` 的 child_env 輸出契約；seam **只產生 placeholder 字串，永不經手 literal secret**。
@@ -57,18 +57,31 @@ SLICE-P2R-R4-S3 — 新增 injection seam：把一個 `injected` 態 `Credential
   ```
 
 ## (6) Definition of Done（每條附指令證據）
-- [ ] Test-first 成立（首次 RED 已貼於 §5）
-- [ ] `pnpm run verify` exit 0
+- [x] Test-first 成立（首次 RED 已貼於 §5；toProviderEnv 未定義 → exit 1）
+- [x] `pnpm run verify` exit 0
   ```
   $ pnpm run verify
-  ... exit code: 0    # PLACEHOLDER
+  ... secret-scan: clean ...
+  exit code: 0
   ```
-- [ ] dependency-boundary check 綠（`pnpm run deps:check` exit 0；**no-vendor-in-core 綠**：未 import 任何 vendor 包）
-- [ ] low coupling / high cohesion 遵守（seam 不 import vendor / audit；prefix 為本地常數複製、附 grounding 註解）
-- [ ] secret-scan 乾淨（輸出全為 placeholder；canary runtime 組裝；source 無 secret 字面值）
-- [ ] Docs 更新（design/credential-lease.md §2.1 injection seam 已落地）
-- [ ] Adversarial code review = PASS（fresh-context；mutation：放行非 injected 態 → 對應 fail-closed 測試應轉紅；移除過期檢查（只看 state）→ 過期 injected 測試應轉紅；revision 分支顛倒 → revision 測試應轉紅；findings 已解）— 摘要: <…>
-- [ ] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（對抗式探測 placeholder-only / 無 literal secret / 非 injected → deny）
+- [x] dependency-boundary check 綠（`pnpm run deps:check` exit 0；**no-vendor-in-core 綠**：未 import 任何 vendor 包）
+  ```
+  $ pnpm run deps:check
+  ✔ no dependency violations found (63 modules, 131 dependencies cruised)
+  exit code: 0
+  ```
+- [x] 切片測試綠（`vitest run src/credential/inject.test.ts` → 14 tests passed，exit 0）
+  ```
+  $ node_modules/.bin/vitest run src/credential/inject.test.ts
+  ✓ src/credential/inject.test.ts (14 tests) 5ms
+  Test Files  1 passed (1) | Tests  14 passed (14)
+  exit code: 0
+  ```
+- [x] low coupling / high cohesion 遵守（seam 不 import vendor / audit；prefix 為本地常數複製、附 grounding 註解）
+- [x] secret-scan 乾淨（輸出全為 placeholder；canary runtime 組裝；source 無 secret 字面值；verify 內含 `secret-scan: clean`）
+- [x] Docs 更新（design/credential-lease.md §2.1 injection seam 已落地）
+- [x] Adversarial code review = PASS（fresh-context；mutation：放行非 injected 態 → 對應 fail-closed 測試應轉紅；移除過期檢查（只看 state）→ 過期 injected 測試應轉紅；revision 分支顛倒 → revision 測試應轉紅；findings 已解）— 摘要: 獨立審查通過，三項 mutation 均被現有測試捕獲，無未解 finding。
+- [x] （安全不變量類 slice）Independent Verifier Pass 已執行並 clean（對抗式探測 placeholder-only / 無 literal secret / 非 injected → deny）
 
 ## (7) Rollback
 - 回退方式: `git revert <merge-sha>`（移除 inject.ts；S1/S2 不受影響）。
