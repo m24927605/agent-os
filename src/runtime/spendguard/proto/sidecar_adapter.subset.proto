@@ -1,0 +1,236 @@
+// PINNED proto SUBSET — vendored from SpendGuard (client-facing SidecarAdapter contract).
+//
+//   upstream files : proto/spendguard/sidecar_adapter/v1/adapter.proto
+//                    proto/spendguard/common/v1/common.proto
+//   upstream repo  : agentic-spendguard
+//   pinned rev     : 4ceb69a47a00f6ff440b1dc93c81524cedad1b87
+//
+// This file vendors ONLY the subset of the `SidecarAdapter` gRPC service that the SpendGuard
+// LedgerTransport seam (src/cost/adapters/spendguard/adapter.ts) needs S6 to implement for real:
+// the session-reservation lifecycle (ReserveSession / CommitSessionDelta / ReleaseSession —
+// adapter.proto:124/129/134) plus the explicit ReleaseReservation RPC (adapter.proto:116), with
+// their request/response messages and the transitive `spendguard.common.v1` dependencies
+// (UnitRef, PricingFreeze, Error). The handshake / decision-boundary / trace / budget-grant /
+// drain RPCs and their large datamodel are intentionally OUT OF SCOPE here (the client only
+// touches the reservation lifecycle; the rest stays upstream).
+//
+// Self-contained on purpose: the common.v1 dependency messages are inlined into THIS package so
+// the generated types-only TS stub is a single self-sufficient file with zero cross-proto imports
+// (mirrors src/runtime/openshell/proto/openshell.subset.proto). Drift against this committed
+// subset is guarded by `pnpm run spendguard:proto:check` (hash manifest in
+// sidecar_adapter.subset.sha256 + a regenerate-and-diff check of the TS stub).
+//
+// SPDX-FileCopyrightText: Copyright (c) 2026 SpendGuard. All rights reserved.
+
+syntax = "proto3";
+
+package spendguard.sidecar_adapter.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// SERVICE — SUBSET (session reservation lifecycle + explicit release)
+// ============================================================================
+
+service SidecarAdapter {
+  // Reserve a session-scoped ledger hold before a realtime session connects to
+  // paid model providers. Idempotent by
+  // (tenant_id, session_id, route, idempotency_key). (adapter.proto:124)
+  rpc ReserveSession(ReserveSessionRequest) returns (ReserveSessionOutcome);
+
+  // Commit one positive streaming spend delta against an existing session
+  // reservation. Idempotent by (session_reservation_id, streaming_commit_id).
+  // amount_atomic_delta MUST be > 0. (adapter.proto:129)
+  rpc CommitSessionDelta(CommitSessionDeltaRequest)
+      returns (CommitSessionDeltaOutcome);
+
+  // Release the uncommitted remainder of a session-scoped reservation.
+  // Idempotent by (session_reservation_id, idempotency_key). (adapter.proto:134)
+  rpc ReleaseSession(ReleaseSessionRequest) returns (ReleaseSessionOutcome);
+
+  // Adapter-initiated release of a held reservation before commit.
+  // Idempotent by (reservation_id, idempotency_key). (adapter.proto:116)
+  rpc ReleaseReservation(ReleaseReservationRequest)
+      returns (ReleaseReservationResponse);
+}
+
+// ============================================================================
+// COMMON dependency types — inlined from spendguard.common.v1 (common.proto)
+// ============================================================================
+
+// common.proto:72 — UnitRef.
+message UnitRef {
+  string unit_id = 1;
+
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    MONETARY = 1;
+    TOKEN = 2;
+    CREDIT = 3;
+    NON_MONETARY = 4;
+  }
+  Kind kind = 2;
+
+  string currency = 3;
+  string unit_name = 4;
+  string token_kind = 5;
+  string model_family = 6;
+  string credit_program = 7;
+}
+
+// common.proto:116 — PricingFreeze.
+message PricingFreeze {
+  string pricing_version = 1;
+  bytes price_snapshot_hash = 2;
+  string fx_rate_version = 3;
+  string unit_conversion_version = 4;
+}
+
+// common.proto:200 — Error.
+message Error {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    FENCING_EPOCH_STALE = 1;
+    LOCK_ORDER_TOKEN_MISMATCH = 2;
+    PRICING_VERSION_UNKNOWN = 3;
+    UNIT_NORMALIZATION_REQUIRED = 4;
+    BUDGET_EXHAUSTED = 5;
+    DEADLOCK_TIMEOUT = 6;
+    SYNC_REPLICA_UNAVAILABLE = 7;
+    TENANT_DISABLED = 8;
+    SCHEMA_BUNDLE_UNKNOWN = 9;
+    SIGNATURE_INVALID = 10;
+    AUDIT_INVARIANT_VIOLATED = 11;
+    DUPLICATE_DECISION_EVENT = 12;
+    RESERVATION_STATE_CONFLICT = 13;
+    PRICING_FREEZE_MISMATCH = 14;
+    OVERRUN_RESERVATION = 15;
+    RESERVATION_TTL_EXPIRED = 16;
+    MULTI_RESERVATION_COMMIT_DEFERRED = 17;
+    IDEMPOTENCY_CONFLICT = 18;
+  }
+  Code code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+// ============================================================================
+// Session reservation (D41 voice substrate SR-V1) — adapter.proto:855-955
+// ============================================================================
+
+message ReserveSessionRequest {
+  string tenant_id = 1;
+  string budget_id = 2;
+  string window_instance_id = 3;
+  UnitRef unit = 4;
+  PricingFreeze pricing = 5;
+  string session_id = 6;
+  string route = 7;
+  string estimated_amount_atomic = 8;
+  uint32 ttl_seconds = 9;
+  string idempotency_key = 10;
+}
+
+message ReserveSessionOutcome {
+  oneof outcome {
+    ReserveSessionAccepted accepted = 1;
+    ReserveSessionDenied denied = 2;
+    Error error = 3;
+  }
+}
+
+message ReserveSessionAccepted {
+  string session_reservation_id = 1;
+  string ledger_transaction_id = 2;
+  string audit_session_event_id = 3;
+  google.protobuf.Timestamp ttl_expires_at = 4;
+  string reserved_amount_atomic = 5;
+  string remaining_amount_atomic = 6;
+}
+
+message ReserveSessionDenied {
+  string audit_session_event_id = 1;
+  repeated string reason_codes = 2;
+  repeated string matched_rule_ids = 3;
+  Error error = 4;
+}
+
+message CommitSessionDeltaRequest {
+  string session_reservation_id = 1;
+  string streaming_commit_id = 2;
+  string amount_atomic_delta = 3;
+
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    SUCCESS = 1;
+    PROVIDER_ERROR = 2;
+    CLIENT_TIMEOUT = 3;
+    RUN_ABORTED = 4;
+  }
+  Outcome outcome = 4;
+
+  google.protobuf.Timestamp event_time = 5;
+  string idempotency_key = 6;
+}
+
+message CommitSessionDeltaOutcome {
+  oneof outcome {
+    CommitSessionDeltaAccepted accepted = 1;
+    Error error = 2;
+  }
+}
+
+message CommitSessionDeltaAccepted {
+  string session_reservation_id = 1;
+  string streaming_commit_id = 2;
+  string ledger_transaction_id = 3;
+  string audit_session_event_id = 4;
+  string committed_delta_atomic = 5;
+  string cumulative_committed_atomic = 6;
+  string remaining_amount_atomic = 7;
+  google.protobuf.Timestamp recorded_at = 8;
+}
+
+message ReleaseSessionRequest {
+  string session_reservation_id = 1;
+  string reason_code = 2;
+  google.protobuf.Timestamp event_time = 3;
+  string idempotency_key = 4;
+}
+
+message ReleaseSessionOutcome {
+  oneof outcome {
+    ReleaseSessionAccepted accepted = 1;
+    Error error = 2;
+  }
+}
+
+message ReleaseSessionAccepted {
+  string session_reservation_id = 1;
+  string ledger_transaction_id = 2;
+  string audit_session_event_id = 3;
+  string released_amount_atomic = 4;
+  string committed_amount_atomic = 5;
+  google.protobuf.Timestamp recorded_at = 6;
+}
+
+// ============================================================================
+// ReleaseReservation (Agent Spend Protocol Draft-01 §4) — adapter.proto:774-849
+// ============================================================================
+
+message ReleaseReservationRequest {
+  string reservation_id = 1;
+  string idempotency_key = 2;
+  repeated string reason_codes = 3;
+
+  string tenant_id = 100;
+  string workload_instance_id = 101;
+  string session_id = 102;
+}
+
+message ReleaseReservationResponse {
+  bytes audit_event_signature = 1;
+
+  string ledger_transaction_id = 100;
+  repeated string released_reservation_ids = 101;
+}

@@ -1,7 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["dist", "node_modules", "coverage", "src/runtime/_generated"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      "coverage",
+      "src/runtime/_generated",
+      "src/runtime/spendguard/_generated"
+    ]
   },
   "organizeImports": {
     "enabled": true
