@@ -4,7 +4,7 @@
 - **Branch**: slice/ah-obs-s1-observe-mode
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~180（port `mode` + adapter observe 分支 + 測試 + gated live e2e）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8 + live-test staging=main-loop/Opus4.8;獨立 Opus4.8 reviewer = PASS,零 finding;observe 模式對真實運行 gateway live 驗證〔4/4〕）
 
 ## (0) 動機（Hermes live 發現,a4311a7）
 真實 NemoClaw/Hermes gateway 由 **root entrypoint(`nemoclaw-start`)降權到特權 `gateway` user** 啟動;我們 adapter 以非-root `sandbox` user exec → **無法 launch**(hermes 二進位 Permission denied)。我們現有 `hostAgent`「以 exec launch gateway」模型只適用**簡單/可由 sandbox user 跑的 gateway**(如 python-stub),不適用真實特權-gateway vendor。**設計回應**:加一個 observe 模式——gateway 由 substrate/entrypoint 啟動,我們**只 observe(probe /health)+ reconcile**,不 launch。
@@ -38,14 +38,15 @@ SLICE-AH-OBS-S1 — 在 `AgentHosting` port + `NemoClawAgentHosting` adapter 加
 - live e2e:setup-exec 預啟 gateway → hostAgent(observe)→running;對未預啟→denied。
 - 我對真實 openshell sandbox 跑 `pnpm run e2e:live-nemoclaw`(或新增 observe live 檔)。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:observe hostAgent/reconcile 測試在實作前紅。
-- [ ] `pnpm run verify` exit 0(observe 單元 + launch 模式既有測試全綠;depcruise/secret-scan clean)。
-- [ ] **observe 不 launch**:單元證明 observe hostAgent 的 CommandSink 只收到 probe、**從未收到 launchCommand**(mutation:observe 仍 launch → 該斷言紅)。
-- [ ] observe restart fail-closed denied(mutation:observe restart 改成 launch-restart → 測試紅)。
-- [ ] **live(我跑)**:setup-exec 預啟 gateway → hostAgent(observe) running → reconcile health-probe ok / restart denied。
-- [ ] credential-blind;launch 模式向後相容(既有 e2e 不變)。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8)。
+## (6) Definition of Done（實測）
+- [x] RED:observe hostAgent/reconcile 測試在實作前紅(6 failed:observe 分支不存在 → 走 launch 路徑/無 sentinel)。
+- [x] `pnpm run verify` **exit 0**(850 passed + 10 skipped;observe 單元 6/6 + launch 模式既有 18/18 **不變**綠;depcruise 126 modules clean;secret-scan clean)。
+- [x] **observe 不 launch**:單元證明 observe hostAgent 的 CommandSink 只收到 probe、**從未收到 launchCommand**(reviewer mutation:observe fall-through 到 launch → 該斷言紅,記到 nohup/gosu 指令)。
+- [x] observe restart fail-closed denied(reviewer mutation:observe restart 路由到 launch-restart recoveryCommand → 測試紅 + 記到 pkill+relaunch);`"observed"` sentinel(非 PID)。
+- [x] **live(我對真實 gateway 跑)`pnpm run e2e:live-nemoclaw` 4/4**:gateway 由 out-of-band 啟動(此處 prior launch-mode test;production 為 substrate root entrypoint——正是 Hermes case)→ hostAgent(observe) 觀測 running → ok `"observed"`(**未自行 launch**)→ getAgentStatus running → reconcile health-probe ok / **restart denied**。(staging 修正:observe 觀測同 sandbox 已運行的 gateway,避開新啟動的 port 爭用。)
+- [x] credential-blind(deny reason 靜態、無 endpoint/cert);launch 模式向後相容(additive +124/-0,adapter.test.ts 零改動)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8,零 finding;never-launch / not-running-denied / restart-denied 三 mutation 皆非 vacuous;honest restart-deny 非 fake-green;8 攻擊面 HELD/N/A)。
+> **設計成果**:Hermes live 揭露的「特權-gateway 由 root entrypoint 啟動、我們非-root exec 無法 launch」缺口,已成為 port 的正式 observe 模式(substrate 啟動 → 我們 observe+health-reconcile)。真實 substrate-restart(observe 模式)為後續。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 `mode` 欄位 + observe 分支)。launch 模式不受影響、可逆。

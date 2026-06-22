@@ -43,6 +43,17 @@ export interface HostSpec {
   readonly gatewayCommand?: string;
   /** Optional inference route id (resolved to a backend by the substrate; not a key). */
   readonly inferenceProvider?: string;
+  /**
+   * Hosting lifecycle ownership. Default (absent) is treated as `"launch"` — fully backward-compatible.
+   *
+   * - `"launch"`: the adapter launches the gateway itself (exec the entrypoint, parse its PID) and
+   *   owns its lifecycle, including restart-on-failure.
+   * - `"observe"`: the SUBSTRATE / ENTRYPOINT launches the gateway (e.g. a root entrypoint dropping to
+   *   a privileged `gateway` user — the real NemoClaw/Hermes shape per the Hermes live finding). The
+   *   adapter does NOT exec-launch; it OBSERVES the gateway via the /health probe and health-reconciles
+   *   it. A restart is fail-closed denied in observe mode (the lifecycle is owned by the substrate).
+   */
+  readonly mode?: "launch" | "observe";
 }
 
 export type HostResult =
