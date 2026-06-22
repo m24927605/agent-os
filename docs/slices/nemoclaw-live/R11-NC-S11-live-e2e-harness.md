@@ -4,7 +4,7 @@
 - **Branch**: slice/r11-nc-s11-live-e2e-harness
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day（不含 OpenShell 安裝）；net LOC <~200（`scripts/e2e-live-nemoclaw.sh` + live e2e + 接線）、新增依賴 = 0
-- **狀態**: **DRAFT（live-run BLOCKED until 使用者提供 OpenShell;harness/e2e 可先寫好並 skip）**
+- **狀態**: **SUPERSEDED** → 由 `docs/slices/openshell-live/NC-S11b-nemoclaw-live-wiring.md` 取代(本檔寫於「OpenShell mTLS gRPC transport 缺口」發現前;NC-S11b 為含收斂+binding 的精確版)。
 
 ## (1) ID + Title
 SLICE-R11-NC-S11 — 一條 gated live e2e + harness,證明 `NemoClawAgentHosting`(注入 `createOpenShellExecCommandSink`)能對**真實 OpenShell sandbox** host 一個 **trivial agent**(在 dashboard port 服務 `/health` 的小程序)→ `getAgentStatus` 探得 running → `reconcileAgentProcess('health-probe'|'restart')`→ 清理。**不需 LLM key**(只證 hosting 生命週期,非 inference)。
