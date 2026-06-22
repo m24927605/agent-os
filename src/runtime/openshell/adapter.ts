@@ -260,6 +260,70 @@ export class OpenShellSandboxAdapter implements SandboxAdapter {
     return ok(context, "create", id);
   }
 
+  /**
+   * Adopt an EXTERNALLY-created sandbox (slice SLICE-HERMES-S1) — NOT one of the four frozen
+   * `SandboxAdapter` port methods (the P2-A shape is unchanged); it is an adapter-internal capability
+   * consumed by the layer above so the SAME adapter can then status/exec a sandbox it did NOT create.
+   *
+   * `createSandbox` populates `refById` from the gateway's CreateSandbox response. A Hermes sandbox is
+   * instead created OUT-OF-BAND by the user (`nemohermes onboard`), so adopt is the production-real
+   * "use an existing sandbox" entry: it resolves the {name,id} ref via the REAL GetSandbox path (NOT a
+   * test reflection seed), then returns the SAME `ok` / `sandboxId` shape `createSandbox` does — so the
+   * caller gets a `SandboxId` whose `refById` mapping is already wired for exec / status / dispose.
+   *
+   * FAIL-CLOSED INVARIANT (deny-by-default): a malformed AgentContext, a transport that cannot
+   * GetSandbox, a GetSandbox rejection (refused / deadline / decode), OR a response with no sandbox
+   * name ALL resolve a `denied` AdapterResult. The adapter NEVER throws across the port boundary and a
+   * denied `reason` NEVER carries baseUrl / endpoint / credential detail (the underlying transport
+   * error is deliberately not surfaced into the reason or logged here). The `"create"` lifecycle is
+   * reused (the P2-A enum is not extended) with the reason naming the adopt path.
+   */
+  async adoptSandbox(ctx: unknown, name: string): Promise<AdapterResult> {
+    let context: ReturnType<typeof parseAgentContext>;
+    try {
+      context = parseAgentContext(ctx);
+    } catch {
+      // Bad context: fail closed BEFORE any RPC (no GetSandbox is issued).
+      return deny(ctx, "create", "invalid agent context (fail-closed)");
+    }
+
+    // GetSandbox is an optional capability of the injected transport. A transport that cannot get a
+    // sandbox is fail-closed (cannot adopt) rather than silently treated as adopted.
+    const transport = this.transport as Partial<OpenShellReadinessTransport>;
+    const getSandbox = transport.getSandbox?.bind(transport);
+    if (getSandbox === undefined) {
+      return deny(ctx, "create", "openshell transport cannot get sandbox (fail-closed)");
+    }
+
+    let ref: OpenShellRef;
+    try {
+      // GetSandbox keys on the canonical `name` (server: get_message_by_name).
+      const resp = await getSandbox({ name });
+      const meta = resp.sandbox?.metadata;
+      const wireName = meta?.name;
+      if (typeof wireName !== "string" || wireName.length === 0) {
+        // Empty / malformed response: deny, retain no mapping (deny-by-default on garbled wire).
+        return deny(ctx, "create", "openshell returned no sandbox name (fail-closed)");
+      }
+      // Capture the stable gateway `id` too — Exec / WatchSandbox key on it (DISTINCT from `name`). If
+      // the gateway omits it, store an empty id; exec/readiness then fail CLOSED on the id-keyed path
+      // rather than mis-keying with the name (which a real gateway resolves to not_found).
+      const wireId = meta?.id;
+      ref = { name: wireName, id: typeof wireId === "string" ? wireId : "" };
+    } catch {
+      // Transport rejection (connection refused / deadline / decode): fail closed, NEVER throw, and do
+      // NOT surface the underlying error (it could carry baseUrl / endpoint detail).
+      return deny(ctx, "create", "openshell get rpc failed (fail-closed)");
+    }
+
+    // Mirror createSandbox's return shape EXACTLY (a fresh SandboxId keying the {name,id} ref) so the
+    // caller gets a sandboxId that the SAME adapter's exec / status / dispose resolve with no seed. The
+    // `adopt` infix distinguishes an adopted id from a self-created one for diagnostics only.
+    const id = SandboxId.parse(`sbx-os-adopt-${randomUUID()}`);
+    this.refById.set(id, ref);
+    return ok(context, "create", id);
+  }
+
   async destroySandbox(ctx: unknown, sandboxId: string): Promise<AdapterResult> {
     let context: ReturnType<typeof parseAgentContext>;
     try {
