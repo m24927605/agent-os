@@ -14,6 +14,13 @@ export type {
   AppendTransport,
 } from "./ingest/index.js";
 export { parseAppendResponse } from "./ingest/index.js";
+// The composed ingest appender (S7 `createIngestAppender`): canonicalize -> redact -> per-source
+// monotonic sequence -> send via the injected AppendTransport -> fail-closed parse, as ONE
+// CommitAppender. Sibling modules wiring a LIVE WORM sink (the Personal shell + the Enterprise
+// per-tenant partitioned sink, SLICE-ES2b) consume it through this barrel — never the internal
+// ./ingest/wire.ts — so dependency-cruiser `not-to-internal` holds.
+export { createIngestAppender } from "./ingest/index.js";
+export type { IngestAppender, IngestAppenderDeps } from "./ingest/index.js";
 // Read-only WORM projection types (Audit Completeness invariant 3). The Personal surface
 // TaskTimeline (slice P2R-R7-S5) folds these into plain-language events through this barrel,
 // never the internal ./event.ts / ./kernel/log.ts, so dependency-cruiser `not-to-internal` holds.

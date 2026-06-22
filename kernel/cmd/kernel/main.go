@@ -10,6 +10,7 @@ import (
 	"flag"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -57,6 +58,11 @@ func main() {
 		// per-tenant key provision (external generation, KMS-held private keys, per-tenant
 		// root-trust externalization, rotation) is P4 and is NOT solved by ES2a. This wiring exists
 		// to exercise the partition ROUTING contract, not to establish independent tenant root trust.
+		// The kernel owns its partition directory: create it (and parents) so the operator only has to
+		// pass -partition-dir, not pre-create it. store.Open opens a file and does not mkdir its parent.
+		if err := os.MkdirAll(*partitionDir, 0o755); err != nil {
+			log.Fatalf("create partition dir %q: %v", *partitionDir, err)
+		}
 		cfg := make(map[string]partition.PartitionConfig, len(ids))
 		for _, id := range ids {
 			st, err := store.Open(filepath.Join(*partitionDir, id+".wal"))

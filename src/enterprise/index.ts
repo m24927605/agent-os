@@ -16,3 +16,8 @@ export type {
   OperatorEvent,
   OperatorResult,
 } from "./bootstrap.js";
+// SLICE-ES2b: the per-tenant LIVE WORM sink factory. Enterprise consumers (the live-kernel e2e + a
+// future CLI composition root) build a `wormSinkFor` from this — binding an injected AppendTransport +
+// TenantBinding into a sink that appends to that tenant's INDEPENDENT kernel partition chain. Re-exported
+// through THIS barrel (from the runtime/ingest barrel) so Enterprise stays the single import surface.
+export { createPartitionedIngestSink } from "../runtime/ingest/index.js";

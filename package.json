@@ -33,6 +33,7 @@
     "secret-scan": "bash scripts/scan_secrets.sh",
     "launcher:check": "node scripts/launcher-check.mjs",
     "e2e:live-kernel": "bash scripts/e2e-live-kernel.sh",
+    "e2e:live-enterprise": "bash scripts/e2e-live-enterprise.sh",
     "e2e:live-spendguard": "bash scripts/e2e-live-spendguard.sh",
     "e2e:live-nemoclaw": "bash scripts/e2e-live-nemoclaw.sh",
     "e2e:live-hermes": "bash scripts/e2e-live-hermes.sh",

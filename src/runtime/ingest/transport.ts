@@ -60,10 +60,11 @@ export function createRpcAppendTransport(opts: RpcAppendTransportOpts): AppendTr
         sourceId: req.sourceId,
         sequence: req.sequence,
         canonicalEvent: req.canonicalEvent,
-        // ES2a: proto AppendRequest gained `partition_id` (field 4). The TS consumer does NOT route by
-        // partition yet (that is ES2b); send the proto3 default empty string so single-chain servers
-        // ignore it (back-compat) and the partitioned server fail-closed denies it. NOT consumed here.
-        partitionId: "",
+        // ES2b: thread the OPTIONAL `partitionId` from the shape into proto AppendRequest.partition_id
+        // (field 4). ABSENT (the Personal single-chain path) => proto3 default "" so a single-chain
+        // server ignores it and the wire stays BYTE-IDENTICAL to pre-ES2b; SET (the Enterprise
+        // per-tenant path) => the partitioned kernel routes to that tenant's independent WORM chain.
+        partitionId: req.partitionId ?? "",
       };
 
       // Race the call against the deadline. A synchronous throw, an async reject, OR a never-settling

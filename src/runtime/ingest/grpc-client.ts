@@ -111,7 +111,19 @@ function writeLenDelim(out: number[], field: number, bytes: Uint8Array): void {
   for (const b of bytes) out.push(b);
 }
 
-function encodeAppendRequest(req: AppendRequest): Buffer {
+/**
+ * Encode an `AppendRequest` to proto3 wire bytes (fields 1/2/3, and 4 = partition_id since ES2b).
+ *
+ * ES2b PREREQUISITE — the field-4 branch: ES2a added proto `partition_id = 4`, but this encoder had no
+ * field-4 branch (it only sent fields 1/2/3). That was wire-correct ONLY while every caller sent an
+ * empty partition_id (Personal's single-chain path). The moment a NON-EMPTY partition_id is sent (the
+ * Enterprise per-tenant path), a missing branch would SILENTLY DROP it -> the kernel's partitioned
+ * server receives an empty partition_id -> fail-closed MALFORMED deny. So we encode field 4 here, with
+ * the SAME `if (length > 0)` proto3-default guard as the other fields: an empty partitionId omits field
+ * 4 entirely, keeping Personal's wire BYTE-IDENTICAL. Exported for the wire-level codec unit test
+ * (no kernel needed), mirroring `encodeListEntriesRequest`.
+ */
+export function encodeAppendRequest(req: AppendRequest): Buffer {
   const out: number[] = [];
   if (req.sourceId.length > 0) {
     writeLenDelim(out, 1, new TextEncoder().encode(req.sourceId));
@@ -122,6 +134,11 @@ function encodeAppendRequest(req: AppendRequest): Buffer {
   }
   if (req.canonicalEvent.length > 0) {
     writeLenDelim(out, 3, req.canonicalEvent);
+  }
+  if (req.partitionId.length > 0) {
+    // proto field 4 (partition_id), len-delimited UTF-8. Empty => omitted (proto3 default), so the
+    // single-chain Personal append stays byte-identical and the partitioned server fail-closed denies.
+    writeLenDelim(out, 4, new TextEncoder().encode(req.partitionId));
   }
   return Buffer.from(out);
 }

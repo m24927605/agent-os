@@ -93,6 +93,19 @@ export interface EnterpriseFleetOpts {
    * to never-fault, so ES1's submit/approve path and production behaviour are untouched.
    */
   readonly failWormAppendFor?: (tenantId: string) => boolean;
+  /**
+   * Per-tenant LIVE WORM sink injection (SLICE-ES2b — the Enterprise analogue of Personal's
+   * `opts.wormSink`). Given a tenant's `TenantBinding`, return the sink its governed (and operator)
+   * AuditEvents are committed to. Injecting `createPartitionedIngestSink(transport, binding)` makes a
+   * tenant's events land in the REAL Go kernel's INDEPENDENT per-tenant WORM partition (its own chain
+   * head + Ed25519 key, routed by `binding.partitionId`).
+   *
+   * ABSENT (the default) => BYTE-IDENTICAL to ES1: each tenant's WORM is the per-tenant in-memory
+   * `InMemoryAppendOnlyLog` and `wormLogFor` returns it (the ES1 cross-tenant e2e + the ES3 operator
+   * e2e construct the fleet with NO wormSinkFor, so they stay green unchanged). The closure binds ONE
+   * binding, so the resulting sink can only ever write THAT tenant.
+   */
+  readonly wormSinkFor?: (binding: TenantBinding) => (event: AuditEvent) => Promise<AppendReceipt>;
 }
 
 /** A console resolved for a routed tenant, or a deny when the ctx does not route (fail-closed). */
@@ -199,6 +212,10 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
   // One INDEPENDENT WORM log per partition. NEVER one shared log: a shared log would make
   // tenant-A's committed events visible to tenant-B's timeline (INDEX §3 the shared-log trap).
   const wormByPartition = new Map<string, InMemoryAppendOnlyLog>();
+  // The per-tenant WORM SINK the seam appenders commit to (SLICE-ES2b). With NO `opts.wormSinkFor` this
+  // is the per-tenant in-memory `log.append` (byte-identical to ES1/ES3); with it, the INJECTED live
+  // partitioned-kernel sink. Keyed by tenantId; resolved once below (closure-bound per tenant).
+  const wormSinkByTenant = new Map<string, (event: AuditEvent) => Promise<AppendReceipt>>();
   // One INDEPENDENT CostGate per tenant (keyed by tenantId): A exhausting its budget never affects B.
   const costByTenant = new Map<string, CostGate>();
   // One INDEPENDENT ApprovalInbox per tenant: B's inbox literally has no record of an A-issued id,
@@ -217,6 +234,7 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
   function makeAppender(
     binding: TenantBinding,
     log: InMemoryAppendOnlyLog,
+    wormSink: (event: AuditEvent) => Promise<AppendReceipt>,
   ): CommitAppender<StructuralEvent, AppendReceipt> {
     const repo = store.forTenant(binding); // closure-bound to THIS tenant's partition (R8-S2)
     let seq = 0;
@@ -235,10 +253,16 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
           policyDecision: { effect: "allow", reason: event.decisionReason },
           result: "success",
         });
-        const receipt = log.append(auditEvent);
+        // The WORM write goes to THIS tenant's sink (SLICE-ES2b): the INJECTED live partitioned-kernel
+        // sink (partition_id = binding.partitionId) when `wormSinkFor` is provided, or — by default —
+        // the per-tenant in-memory `log.append` (byte-identical to ES1). A reject (fail-closed live
+        // append) propagates, the commitgate aborts, the effect never runs.
+        const receipt = await wormSink(auditEvent);
         // Console-projectable timeline entry: key `event:<seq>`, value `{seq, summary}` — exactly the
         // shape ConsoleProjection.timeline() projects (projection.ts:65-72,102-112). Summary is
         // redacted on exit (defense in depth) though a secret never reaches here (denied@screen first).
+        // UNCHANGED in ES2b so console(ctx).timeline() keeps reflecting the governed action whether the
+        // WORM is in-memory or the live kernel partition (per-tenant readback alignment is out-of-scope).
         const entrySeq = ++seq;
         await repo.put(`event:${entrySeq}`, {
           seq: entrySeq,
@@ -259,7 +283,7 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
    */
   function makeOperatorAppender(
     binding: TenantBinding,
-    log: InMemoryAppendOnlyLog,
+    wormSink: (event: AuditEvent) => Promise<AppendReceipt>,
   ): CommitAppender<OperatorEvent, AppendReceipt> {
     return {
       append: async (event) => {
@@ -281,7 +305,10 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
           policyDecision: { effect: "allow", reason: event.decisionReason },
           result: "success",
         });
-        return log.append(auditEvent);
+        // ES2b: the operator WORM write routes through THIS tenant's sink — the INJECTED live
+        // partitioned-kernel sink (partition_id = binding.partitionId) or, by default, the per-tenant
+        // in-memory log (byte-identical to ES3). A reject => commitBeforeEffect refuses the effect.
+        return wormSink(auditEvent);
       },
     };
   }
@@ -327,7 +354,8 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
   ): GovernedToolCallDeps<GovernedCall, AppendReceipt> {
     const cost = costByTenant.get(binding.tenantId);
     const log = wormByPartition.get(binding.partitionId);
-    if (cost === undefined || log === undefined) {
+    const wormSink = wormSinkByTenant.get(binding.tenantId);
+    if (cost === undefined || log === undefined || wormSink === undefined) {
       // Unreachable for a registered tenant (the maps are populated below for each); fail-closed.
       throw new Error("unprovisioned tenant (deny-by-default)");
     }
@@ -360,7 +388,7 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
       },
       cost,
       estimateTokens: () => estimate,
-      appender: makeAppender(binding, log),
+      appender: makeAppender(binding, log, wormSink),
       effect: async (tc) => {
         const res = await fake.createSandbox(tc.context, { image: tc.tool });
         return { ok: res.status === "ok", detail: res.status };
@@ -373,10 +401,20 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
   // against T's cost/log only.
   for (const binding of bindings.values()) {
     // A fresh Ed25519 keypair per partition — per-tenant independent signing material (honest
-    // enterprise posture; ES1 generates in-process, real per-tenant key provision is ES4/P4).
+    // enterprise posture; ES1 generates in-process, real per-tenant key provision is ES4/P4). When the
+    // LIVE partitioned sink is injected, the kernel holds the real signing key per partition; this
+    // in-memory key still backs the default (no-wormSinkFor) byte-identical-to-ES1 path + `wormLogFor`.
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const log = new InMemoryAppendOnlyLog({ publicKey, privateKey });
     wormByPartition.set(binding.partitionId, log);
+    // Resolve THIS tenant's WORM sink ONCE (closure-bound). Injected live sink => kernel partition;
+    // ABSENT => the per-tenant in-memory `log.append` (byte-identical to ES1/ES3). NEVER one shared
+    // sink: the default closes over THIS binding's own `log`.
+    const injected = opts.wormSinkFor?.(binding);
+    wormSinkByTenant.set(
+      binding.tenantId,
+      injected ?? ((auditEvent: AuditEvent) => Promise.resolve(log.append(auditEvent))),
+    );
     costByTenant.set(binding.tenantId, new InMemoryCostGate(budget));
     inboxByTenant.set(
       binding.tenantId,
@@ -442,8 +480,8 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         return { status: "denied", reason: routed.reason, event };
       }
       const binding = routed.binding;
-      const log = wormByPartition.get(binding.partitionId);
-      if (log === undefined) {
+      const wormSink = wormSinkByTenant.get(binding.tenantId);
+      if (wormSink === undefined) {
         // Unreachable for a registered tenant; fail-closed.
         return { status: "denied", reason: "unprovisioned tenant (deny-by-default)", event };
       }
@@ -462,7 +500,7 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
       //    An append failure ⇒ the effect is REFUSED (fail-closed); we surface that as denied.
       const auditedEvent: OperatorEvent = { ...event, decisionReason: decision.reason };
       const outcome = await commitBeforeEffect({
-        appender: makeOperatorAppender(binding, log),
+        appender: makeOperatorAppender(binding, wormSink),
         event: auditedEvent,
         // 4. The tenant-scoped suspend-agent effect: write THIS tenant's repo `agent:<sandboxId>` in the
         //    EXACT shape ConsoleProjection.fleet() projects, so console(ctx).fleet() shows phase
