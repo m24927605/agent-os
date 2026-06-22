@@ -4,7 +4,20 @@
 - **Branch**: slice/p2r-r11-s9-spendguard-live-e2e-decision
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day（不含 docker build）；net LOC <~190（`scripts/e2e-live-spendguard.sh` + `src/cost/adapters/spendguard/live-spendguard.e2e.test.ts` + package.json 一行）、新增依賴 = 0
-- **狀態**: **DRAFT**（**需 Docker — 已確認 OrbStack `unix:///var/run/docker.sock` 活著**;`make demo-up` 從源碼 build ~8 Rust 服務,opt-in、不入 `verify`）
+- **狀態**: **PARTIAL-LIVE / 待設計裁決**（live 整合已**實際對真實 sidecar 跑過**並推進到下述 ground-truth;完整 CONTINUE 待一個設計決定，見「Live ground-truth」）
+
+> ## ✅/⏸ Live ground-truth（2026-06-22,真實對跑著的 SpendGuard demo 驗證,非偽造）
+> 真實 demo 已起(`docker compose up --build`,OrbStack:postgres+ledger+sidecar+endpoint-catalog+canonical-ingest+run-cost-projector 全 healthy,sidecar log「adapter UDS listener bound」)。在 sidecar-adjacent 容器(uid 65532、掛 UDS volume)用**我們編譯後的 `createDecisionLedgerTransport`+`SpendGuardCostGate`** 對**真實 UDS** 跑,**已證明**:
+> - **連線 + 認證成立**:peercred 通過、gRPC 線格相容、`Handshake` 被接受(送對 `tenant_id_assertion`)、`RequestDecision` 被真實 sidecar 執行。
+> - **fail-closed 對真貨成立**:transport error → `denied`(從不 allow)——多次觀測。
+> - **live 抓出 3 個 fake 遮蔽的真 bug**:(1) 編碼器漏 `tenant_id_assertion`(field 5)、(2) 缺 `idempotency.key`(field 9)——**已修並 merge**(R11-S8 fix,獨立 Opus 4.8 review PASS,mutation 非 vacuous);(3) `inputs.projected_claims must be non-empty`——**未修,即下述裁決**。
+>
+> ### ⏸ 待人工裁決(完整 CONTINUE 的前置)
+> 真實 sidecar 的 `RequestDecision` 要求**明確的 projected `BudgetClaim`**(budget_id / `UnitRef`.unit_id / amount / direction / window_instance_id),且 ledger 會對 demo seeded 預算(budget `44444444-…`、unit、window、fencing scope `33333333-…`)驗證。但我們**刻意極簡、credential-blind 的 `{route, amount}` CostGate port 不帶這些**。三選一(你定):
+> - **(a)** transport 把 `route → budget_id/unit/window` 映射(更耦合 SpendGuard 預算模型、deployment-specific;需擴 encoder 編 repeated 巢狀 BudgetClaim+UnitRef)。
+> - **(b)** 用 sidecar contract/manifest 能解析成預算的 **configured route**(讓 sidecar server-side 解析 budget;需確認 demo 是否支援空 claims + 路由解析)。
+> - **(c)** 視「連線+認證+fail-closed 已證明」為 S9 的 live 里程碑,完整 budget-backed CONTINUE 歸後續(等路由/預算映射定案)。
+> > 註(R11-S8 fix MINOR):目前每次 reserve 用 fresh `randomUUID` idempotency key,未利用 sidecar 的跨重試 replay;crash-retry 同一邏輯 reserve 會鑄新 decision。後續 resume 工作再處理。
 
 ## (1) ID + Title
 SLICE-P2R-R11-S9 — 用 SpendGuard demo topology([`deploy/demo/compose.yaml`](../../../))起真實 sidecar+ledger+Postgres,把 R11-S8 的 `createDecisionLedgerTransport` 注入 `SpendGuardCostGate`,對**真實跑著的 SpendGuard sidecar**(經已實作的 `RequestDecision`/`ConfirmPublishOutcome`)做 reserve/commit,證明成本閘在真實 vendor runtime 上 CONTINUE→放行、STOP→hard-cap deny、fail-closed、credential-blind。鏡像 R2-S8(kernel live e2e)。
