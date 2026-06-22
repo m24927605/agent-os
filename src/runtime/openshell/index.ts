@@ -40,6 +40,7 @@ export {
 export {
   type OpenShellGrpcTransportOpts,
   type ExecStreamHandle,
+  type WatchStreamHandle,
   type UnaryRequestFn,
   createOpenShellGrpcTransport,
 } from "./grpc-transport.js";
@@ -48,6 +49,7 @@ export {
   CREATE_SANDBOX_METHOD,
   GET_SANDBOX_METHOD,
   DELETE_SANDBOX_METHOD,
+  WATCH_SANDBOX_METHOD,
   type ExecSandboxRequestWire,
   type ExecSandboxEvent as ExecSandboxEventWire,
   type CreateSandboxRequestWire,
@@ -55,6 +57,8 @@ export {
   type GetSandboxRequestWire,
   type DeleteSandboxRequestWire,
   type DeleteSandboxResponseWire,
+  type WatchSandboxRequestWire,
+  type SandboxStreamEventWire,
   encodeExecSandboxRequest,
   decodeExecSandboxEvent,
   encodeCreateSandboxRequest,
@@ -62,4 +66,6 @@ export {
   encodeDeleteSandboxRequest,
   decodeSandboxResponse,
   decodeDeleteSandboxResponse,
+  encodeWatchSandboxRequest,
+  decodeSandboxStreamEvent,
 } from "./proto/openshell.subset.codec.js";

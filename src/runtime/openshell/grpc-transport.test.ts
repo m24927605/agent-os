@@ -15,14 +15,16 @@
  *   - execSandbox(req, signal) yields ALL injected events IN ORDER (the stream IS an AsyncIterable).
  *   - an aborted `signal` CANCELS the underlying stream (no leaked gRPC stream).
  * The unary lifecycle (createSandbox / getSandbox / deleteSandbox) is now REAL — covered by
- * grpc-transport.lifecycle.test.ts; watchSandbox stays a fail-closed stub (OS-S2b), asserted there.
- * A fail-closed reason carries NO endpoint / cert content (credential-blind).
+ * grpc-transport.lifecycle.test.ts; watchSandbox is now the REAL WatchSandbox server-stream (OS-S2b) —
+ * covered exhaustively by grpc-transport.watch.test.ts. A fail-closed reason carries NO endpoint / cert
+ * content (credential-blind).
  */
 import { describe, expect, it } from "vitest";
 import type { ExecSandboxRequest } from "./client.js";
 import {
   type ExecStreamHandle,
   type UnaryRequestFn,
+  type WatchStreamHandle,
   createOpenShellGrpcTransport,
 } from "./grpc-transport.js";
 import type { ExecSandboxEvent } from "./proto/openshell.subset.codec.js";
@@ -184,31 +186,37 @@ describe("createOpenShellGrpcTransport — execSandbox abort cancels the underly
   });
 });
 
-describe("createOpenShellGrpcTransport — watchSandbox STILL a fail-closed stub (OS-S2b)", () => {
-  it("watchSandbox iteration throws deny-by-default (not implemented until OS-S2b)", async () => {
-    const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
-    await expect(
-      (async () => {
-        for await (const _ of transport.watchSandbox({ id: "x", followStatus: true })) {
-          // unreachable — the stub throws before yielding.
-        }
-      })(),
-    ).rejects.toThrow(/OS-S2b|not implemented|fail-closed/i);
-  });
-
-  it("does NOT leak the endpoint / cert paths into the watch-stub rejection (credential-blind)", async () => {
-    const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
-    let caught: unknown;
-    try {
-      for await (const _ of transport.watchSandbox({ id: "x" })) {
-        // unreachable
-      }
-    } catch (e) {
-      caught = e;
+describe("createOpenShellGrpcTransport — watchSandbox is now REAL (OS-S2b; no fail-closed stub)", () => {
+  it("watchSandbox no longer throws on iteration — it is wired to a real WatchSandbox stream", async () => {
+    // Inject a watch stream seam so iteration is exercised WITHOUT a real grpc-js Client. The OS-S2b
+    // real watch (yields / abort / error) is covered exhaustively in grpc-transport.watch.test.ts; here
+    // we only prove the OS-S2a "throws on iteration" stub is GONE.
+    const transport = createOpenShellGrpcTransport({
+      endpoint: "127.0.0.1:17670",
+      caCertPath: "/dev/null",
+      clientCertPath: "/dev/null",
+      clientKeyPath: "/dev/null",
+      makeUnary: () => Promise.reject(new Error("unary not used (fail-closed)")),
+      // A watch stream that immediately ends with no events.
+      openWatchStream: (): WatchStreamHandle => {
+        const endCbs: Array<() => void> = [];
+        const handle: WatchStreamHandle = {
+          on(event, cb): WatchStreamHandle {
+            if (event === "end") endCbs.push(cb as () => void);
+            return handle;
+          },
+          cancel(): void {},
+        };
+        setImmediate(() => {
+          for (const cb of endCbs) cb();
+        });
+        return handle;
+      },
+    });
+    const events: unknown[] = [];
+    for await (const ev of transport.watchSandbox({ id: "x", followStatus: true })) {
+      events.push(ev);
     }
-    const msg = caught instanceof Error ? caught.message : String(caught);
-    expect(msg).not.toContain("127.0.0.1");
-    expect(msg).not.toContain("17670");
-    expect(msg).not.toContain("/dev/null");
+    expect(events).toEqual([]); // a clean (empty) stream end — no throw, no fabricated READY.
   });
 });

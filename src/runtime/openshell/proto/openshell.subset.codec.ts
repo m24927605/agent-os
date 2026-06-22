@@ -29,6 +29,9 @@ export const CREATE_SANDBOX_METHOD = "/openshell.v1.OpenShell/CreateSandbox";
 export const GET_SANDBOX_METHOD = "/openshell.v1.OpenShell/GetSandbox";
 export const DELETE_SANDBOX_METHOD = "/openshell.v1.OpenShell/DeleteSandbox";
 
+/** Fully-qualified WatchSandbox server-streaming method id (slice SLICE-OS-S2b). */
+export const WATCH_SANDBOX_METHOD = "/openshell.v1.OpenShell/WatchSandbox";
+
 // --- TS face of the pinned lifecycle messages (slice SLICE-OS-S2a; the codec owns the wire) ----------
 //
 // PARTIAL by design: only the fields we encode/decode are typed. The decoders SKIP every unknown field
@@ -87,6 +90,31 @@ export interface DeleteSandboxRequestWire {
 /** `DeleteSandboxResponse` — deleted=1 bool. */
 export interface DeleteSandboxResponseWire {
   readonly deleted?: boolean;
+}
+
+// --- TS face of the pinned WatchSandbox messages (slice SLICE-OS-S2b; the codec owns the wire) -------
+
+/**
+ * `WatchSandboxRequest` subset — we ENCODE ONLY the 3 readiness-relevant fields (id=1, follow_status=2,
+ * stop_on_terminal=7). The log/event-following fields are out of scope and never emitted.
+ */
+export interface WatchSandboxRequestWire {
+  /** id = 1 (string). */
+  readonly id: string;
+  /** follow_status = 2 (bool, optional; omitted as the proto3 zero when false/absent). */
+  readonly followStatus?: boolean;
+  /** stop_on_terminal = 7 (bool, optional; omitted as the proto3 zero when false/absent). */
+  readonly stopOnTerminal?: boolean;
+}
+
+/**
+ * `SandboxStreamEvent` subset — we DECODE ONLY the `sandbox` (=1) snapshot (reusing the OS-S2a
+ * Sandbox/ObjectMeta/SandboxStatus decode). A non-sandbox oneof variant (log=2 / event=3 / warning=4 /
+ * draft_policy_update=5) OR any unknown field is SKIPPED, yielding `{ sandbox: undefined }`
+ * (forward-compatible — never a fabricated READY).
+ */
+export interface SandboxStreamEventWire {
+  readonly sandbox?: SandboxWire;
 }
 
 // --- TS face of the pinned ExecSandbox messages (mirrors client.ts 1:1; the codec owns the wire) -----
@@ -450,4 +478,58 @@ export function decodeDeleteSandboxResponse(bytes: Uint8Array): DeleteSandboxRes
     else skipField(r, wireType);
   }
   return { deleted };
+}
+
+// --- WatchSandbox codec (slice SLICE-OS-S2b) --------------------------------------------------------
+
+/**
+ * Encode a `WatchSandboxRequest` to its proto3 message bytes — ONLY the 3 readiness-relevant fields:
+ *   id (=1, string; omitted when empty — proto3 zero),
+ *   follow_status (=2, bool varint; omitted when false/absent — proto3 zero),
+ *   stop_on_terminal (=7, bool varint; omitted when false/absent — proto3 zero).
+ * The adapter's `WatchSandboxRequest` always sets follow_status=true + stop_on_terminal=true, so a
+ * live watch faithfully tells the gateway to stream status snapshots and close on a terminal phase.
+ * The log/event-following fields (3/4/5/6/8/9/10) are out of scope and never emitted.
+ */
+export function encodeWatchSandboxRequest(req: WatchSandboxRequestWire): Buffer {
+  const out: number[] = [];
+  if (req.id.length > 0) writeString(out, 1, req.id); // id = 1
+  if (req.followStatus === true) {
+    writeTag(out, 2, 0); // follow_status = 2 (bool varint)
+    writeVarint(out, 1);
+  }
+  if (req.stopOnTerminal === true) {
+    writeTag(out, 7, 0); // stop_on_terminal = 7 (bool varint)
+    writeVarint(out, 1);
+  }
+  return Buffer.from(out);
+}
+
+/**
+ * Decode one `SandboxStreamEvent` from its proto3 message bytes (the `oneof payload`). We read ONLY the
+ * `sandbox` (=1) snapshot, REUSING {@link decodeSandbox} (the OS-S2a Sandbox/ObjectMeta/SandboxStatus
+ * decode) so a watch snapshot yields the SAME `{ metadata?, status?:{phase?} }` shape as GetSandbox.
+ * The other oneof variants — log (=2), event (=3), warning (=4), draft_policy_update (=5) — and ANY
+ * unknown future field are SKIPPED (forward-compatible): a non-sandbox event yields `{ sandbox:
+ * undefined }`, which the adapter treats as no readiness signal (NEVER a fabricated READY). proto3
+ * oneof semantics: the LAST-set variant wins, so a later `sandbox` overrides an earlier non-sandbox
+ * variant (and vice versa).
+ */
+export function decodeSandboxStreamEvent(bytes: Uint8Array): SandboxStreamEventWire {
+  const r: Reader = { buf: bytes, pos: 0 };
+  let sandbox: SandboxWire | undefined;
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 0x7;
+    if (field === 1 && wireType === 2) {
+      sandbox = decodeSandbox(readLenDelim(r)); // oneof payload.sandbox = 1 (REUSE the Sandbox decode).
+    } else {
+      // A non-sandbox oneof variant (log/event/warning/draft_policy) OR an unknown field. proto3 oneof:
+      // a non-sandbox variant CLEARS the oneof, so a prior sandbox snapshot must be dropped (last wins).
+      if (field >= 2 && field <= 5 && wireType === 2) sandbox = undefined;
+      skipField(r, wireType);
+    }
+  }
+  return sandbox !== undefined ? { sandbox } : {};
 }

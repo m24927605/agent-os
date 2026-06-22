@@ -11,7 +11,7 @@
  *   - getSandbox(req)    decodes the phase off the SandboxResponse.
  *   - deleteSandbox(req) decodes { deleted }.
  *   - a unary RPC rejection propagates (the adapter fails closed on it).
- *   - watchSandbox is STILL a fail-closed stub (OS-S2b).
+ *   - watchSandbox is now REAL (OS-S2b) — its stream coverage lives in grpc-transport.watch.test.ts.
  * A fail-closed reason carries NO endpoint / cert content (credential-blind).
  */
 import { describe, expect, it } from "vitest";
@@ -169,17 +169,13 @@ describe("createOpenShellGrpcTransport — deleteSandbox (real unary)", () => {
   });
 });
 
-describe("createOpenShellGrpcTransport — watchSandbox STILL a fail-closed stub (OS-S2b)", () => {
-  it("watchSandbox iteration throws (deny-by-default until OS-S2b)", async () => {
+describe("createOpenShellGrpcTransport — watchSandbox is now REAL (OS-S2b)", () => {
+  it("watchSandbox is wired (no OS-S2a throw-on-iteration stub); the real stream is in watch.test.ts", () => {
+    // The OS-S2a stub THREW on iteration; OS-S2b replaces it with the real WatchSandbox server-stream.
+    // The exhaustive yield/abort/error/decode coverage lives in grpc-transport.watch.test.ts; here we
+    // only assert the method exists on the COMPLETE OpenShellReadinessTransport surface.
     const { transport } = transportWith(() => deleteResponseBytes(true));
-    const stream = transport.watchSandbox({ id: "id-123", followStatus: true });
-    await expect(
-      (async () => {
-        for await (const _ of stream) {
-          // should never yield — the stub fails closed.
-        }
-      })(),
-    ).rejects.toThrow(/OS-S2b|not implemented|fail-closed/i);
+    expect(typeof transport.watchSandbox).toBe("function");
   });
 });
 
@@ -194,25 +190,8 @@ describe("createOpenShellGrpcTransport — credential-blind lifecycle errors", (
     }
     // The transport propagates the underlying rejection AS-IS for the adapter to fail closed on; what
     // matters for credential-blindness is the transport NEVER constructs a reason embedding the
-    // endpoint/cert. Assert the static stub paths (watchSandbox) and the round-trip do not synthesize
-    // endpoint detail. (The adapter's deny() is the credential-blind boundary; tested in adapter.*.)
+    // endpoint/cert. (The adapter's deny() is the credential-blind boundary; tested in adapter.*.)
     expect(caught).toBeInstanceOf(Error);
-  });
-
-  it("the watch stub reason carries no endpoint / cert content", async () => {
-    const { transport } = transportWith(() => deleteResponseBytes(true));
-    let caught: unknown;
-    try {
-      for await (const _ of transport.watchSandbox({ id: "x" })) {
-        // unreachable
-      }
-    } catch (e) {
-      caught = e;
-    }
-    const msg = caught instanceof Error ? caught.message : String(caught);
-    expect(msg).not.toContain("127.0.0.1");
-    expect(msg).not.toContain("17670");
-    expect(msg).not.toContain("/dev/null");
   });
 });
 

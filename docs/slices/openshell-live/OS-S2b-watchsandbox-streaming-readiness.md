@@ -4,7 +4,7 @@
 - **Branch**: slice/os-s2b-watchsandbox-streaming-readiness
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day（不含 gateway）；net LOC <~160（WatchSandbox codec + 串流 transport + 測試;生成碼不計)、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS,無 BLOCKER/MAJOR;真實 WatchSandbox 串流經 grpcurl + live e2e 驗證;**完成完整 OpenShell gRPC transport(6 RPC)**）
 
 ## (1) ID + Title
 SLICE-OS-S2b — 在 `createOpenShellGrpcTransport` 實作真實的 **`WatchSandbox(WatchSandboxRequest) → stream SandboxStreamEvent`**(server-streaming),取代 OS-S2a 留下的 fail-closed watch stub。讓 `adapter.awaitReady` 的 `watchUntilReady` 路徑(adapter.ts:311/watchUntilReady)能對真實 gateway 串流等待 READY,**完成 `OpenShellReadinessTransport` 全部 4 個方法**(create/get/delete + watch)。
@@ -32,13 +32,14 @@ SLICE-OS-S2b — 在 `createOpenShellGrpcTransport` 實作真實的 **`WatchSand
 - adapter readiness 對 fake watch:getSandbox PROVISIONING → watchUntilReady 消費 PROVISIONING→READY → ok(逾時/ERROR → deny)。
 - live:create→(PROVISIONING)→watchUntilReady 串流→READY→host→reconcile→delete。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:codec/transport watch 測試在實作前紅。
-- [ ] **完整 transport**:`watchSandbox` 不再是 stub;`createOpenShellGrpcTransport` 滿足完整 `OpenShellReadinessTransport`(grep 確認無 "not implemented until OS-S2b")。
-- [ ] `pnpm run verify` exit 0(gated live SKIP;codec/transport 單元 + adapter readiness 測試綠;`openshell:proto:check` re-pin 綠;depcruise grpc-js confined;secret-scan clean)。
-- [ ] **live(我跑)`pnpm run e2e:live-nemoclaw` exit 0**:readiness **經真實 WatchSandbox 串流**到 READY(非 getSandbox fast-path)→ host→reconcile→delete。
-- [ ] credential-blind;fail-closed(watch stream 錯/abort/逾時 → deny;絕不偽造 ready)。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:watch yield 非 sandbox/不 yield → readiness 逾時紅;decode oneof tag 錯 → 測試紅;abort 不 cancel → 測試紅)。
+## (6) Definition of Done（實測）
+- [x] RED:codec/transport watch 測試在實作前紅(18 failed,`decodeSandboxStreamEvent is not a function` + 缺 WatchStreamHandle/openWatchStream)。
+- [x] **完整 transport**:`watchSandbox` 不再是 stub(WATCH_NOT_IMPLEMENTED 已移除);`createOpenShellGrpcTransport` 滿足**完整** `OpenShellReadinessTransport`(create/get/delete/watch)+ `OpenShellExecTransport`(reviewer grep 確認無 production stub 殘留)。
+- [x] `pnpm run verify` **exit 0**(836 passed + 8 skipped;codec/transport watch 單元 + adapter-readiness-via-watch 測試綠;`openshell:proto:check` re-pin 綠〔reviewer tweak→FAIL 證實〕;depcruise grpc-js confined〔core 注入→exit 2〕;secret-scan clean)。
+- [x] **live(我對真實 gateway 跑)**:`pnpm run e2e:live-nemoclaw` 3/3;且 **grpcurl WatchSandbox 對 PROVISIONING sandbox 確證真實串流形狀** `SandboxStreamEvent{sandbox:{metadata{id},status:{phase:"SANDBOX_PHASE_PROVISIONING"}}}` 多筆快照 == codec decode 目標(oneof sandbox=1 → Sandbox{status.phase@6})。
+- [x] credential-blind(watch deny reason 靜態、無 endpoint/cert;secret-scan clean);fail-closed(watch stream 錯/abort/逾時 → deny;絕不偽造 ready)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8,無 BLOCKER/MAJOR;3 mutation 證實非 vacuous:decode oneof 讀錯欄位→codec 紅、swallow error→deny 測試紅、abort 不 cancel→紅;非-sandbox/unknown variant→`{sandbox:undefined}` 不 crash;signal deviation 合理〔additive〕)。
+> 全 6 個消費 RPC(Health/Create/Get/Delete/Exec/Watch)over mTLS 完成 — **完整 OpenShell gRPC transport 達成**。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(watch 退回 stub)。lifecycle/exec/readiness-getSandbox 不受影響。

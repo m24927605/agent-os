@@ -195,10 +195,14 @@ export interface OpenShellLifecycleTransport extends OpenShellTransport {
  * Fail-closed signalling: `getSandbox` rejects on RPC failure; `watchSandbox` may throw synchronously
  * (transport refused) OR its async iterator may throw mid-stream (RST_STREAM / deadline) — BOTH are
  * the adapter's signal to fail CLOSED (not-ready / deny), never throw across the port boundary.
+ *
+ * Cancellation (slice SLICE-OS-S2b): an optional `AbortSignal` lets the adapter tear the watch stream
+ * down when its readiness deadline fires (a transport that honours it cancels the gRPC stream rather
+ * than leaking it; a test double may ignore it). It mirrors `execSandbox(req, signal)`.
  */
 export interface OpenShellReadinessTransport extends OpenShellLifecycleTransport {
   getSandbox(req: GetSandboxRequest): Promise<SandboxResponse>;
-  watchSandbox(req: WatchSandboxRequest): AsyncIterable<SandboxStreamEvent>;
+  watchSandbox(req: WatchSandboxRequest, signal?: AbortSignal): AsyncIterable<SandboxStreamEvent>;
 }
 
 // --- S4 exec wire shapes (TS face of the pinned proto subset) ---------------------------------------
