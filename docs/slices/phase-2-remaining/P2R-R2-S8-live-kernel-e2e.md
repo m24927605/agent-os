@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r2-s8-live-kernel-e2e
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~160（`src/audit/ingest/live-kernel.e2e.test.ts` + `scripts/e2e-live-kernel.sh` + package.json 一個 script + barrel 不動）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merge；writer=main-loop Opus4.8;reviewer=獨立 Opus4.8 Code Reviewer = PASS,零 BLOCKER/MAJOR,3 mutation probe 皆非 vacuous）
 
 ## (1) ID + Title
 SLICE-P2R-R2-S8 — 用**真實的** `@grpc/grpc-js` transport，讓 R2 的 `createIngestAppender` 對一個**真的跑著的 Go kernel 進程**（`kernel/cmd/kernel` 的 `AppendService` gRPC server,`127.0.0.1:<port>`）端到端 append 真實 `AuditEvent`,取得真實 `AppendReceipt`,證明跨進程、跨語言（TS↔Go）的 commit 路徑成立、雜湊鏈正確、且 kernel 的 durable WAL 通過**離線 verifier** 驗證。
@@ -36,13 +36,13 @@ SLICE-P2R-R2-S8 — 用**真實的** `@grpc/grpc-js` transport，讓 R2 的 `cre
 - 啟動真實 kernel 後同測試 → GREEN。
 - 首次 RED 證據(貼 exit≠0):endpoint 設了但 kernel 沒起 → grpc UNAVAILABLE/ECONNREFUSED → reject。
 
-## (6) Definition of Done（每條附指令證據）
-- [ ] RED:endpoint 指向未啟動 kernel → e2e FAIL(exit≠0,連線 refused)。
-- [ ] `pnpm run e2e:live-kernel` **exit 0**:真實 spawn kernel → append 2 事件 → 鏈正確(prevHash 串接)→ replay 被 deny 且 appender throw → credential canary 不在 WAL → 離線 verifier exit 0 → 清理。
-- [ ] `pnpm run verify` **仍 exit 0**(gated e2e 在 verify 下 skip,gate 保持 hermetic)。
-- [ ] secret-scan clean(canary runtime 組裝)。
-- [ ] depcruise exit 0(無新違規)。
-- [ ] Adversarial review = PASS(fresh-context 獨立 Opus 4.8;mutation:把 redact 拿掉 → canary 出現在 WAL 測試紅;把 replay 當成功 → fail-closed 測試紅;確認測試真的對真 kernel、非注入 double)。
+## (6) Definition of Done（實測）
+- [x] **RED**:`AGENTOS_LIVE_KERNEL_ENDPOINT=127.0.0.1:7799 vitest run …` 對未啟動 kernel → 3 tests FAIL、`14 UNAVAILABLE: ECONNREFUSED`(exit 1)——證明真打網路、非 always-green。
+- [x] `pnpm run e2e:live-kernel` **exit 0**:真實 build+spawn kernel(log「listening」)→ 3 tests pass → append 2 事件鏈正確(prevHash 串接、seq 0/1)→ **TS 端 `computeEntryHash`/`contentAddress` 逐位元重算 == Go kernel 回傳的 receipt**(跨語言一致)→ replay 被 deny 且 appender throw(SEQUENCE_REPLAY)→ credential canary 不在 WAL(WAL 內為 `reason:"[REDACTED]"`)→ trap 清理(無殘留進程/temp)。
+- [x] `pnpm run verify` **仍 exit 0**(gated e2e 在 verify 下 SKIP:`live-kernel.e2e.test.ts (3 skipped)`,gate 保持 hermetic、不 build/spawn)。
+- [x] secret-scan clean(canary runtime 組裝);depcruise exit 0(無新違規;e2e 檔屬 *.test.ts 排除,vendor 仍封閉於 `src/runtime/ingest/grpc-client.ts`)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8 Code Reviewer;3 mutation probe 皆精準轉紅且非 vacuous:(a) neuter redact→canary 進 WAL→credential 測試紅、(b) 改期望 entryHash→happy 測試紅(重算非 tautology)、(c) replay 改用 fresh source→fail-closed 測試紅;trap 清理在強制失敗下仍生效)。
+> **誠實取代(MINOR,已記)**:離線 verifier binary（`kernel/cmd/verifier`）刻意**不**用於本刀——它吃的是 `SignedChain JSON + --pubkey`,**非** kernel 的 append WAL,且 checkpoint/signed-export 路徑未接(R10-S3)。鏈完整性改由**更強的 in-test 跨語言逐位元重算**證明(reviewer probe b 確認非 tautology)。WAL↔SignedChain export 的真實 verifier 驗證留待 **R10-S3**。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 e2e 測試 + harness + package.json 一行)。純測試/harness,無 runtime 影響、可逆。
