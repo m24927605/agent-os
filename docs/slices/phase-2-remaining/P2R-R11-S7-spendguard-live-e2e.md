@@ -4,7 +4,26 @@
 - **Branch**: slice/p2r-r11-s7-spendguard-live-e2e
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day（**不含** docker build 時間）；net LOC <~180（`scripts/e2e-live-spendguard.sh` + `src/cost/adapters/spendguard/live-spendguard.e2e.test.ts` + package.json 一行）、新增依賴 = 0
-- **狀態**: **DRAFT**（**BUILD-GATED:需 Docker daemon 運行**;`make demo-up` 從源碼 build ~8 個 Rust 服務 + Postgres + sidecar,屬重 infra,故 e2e opt-in、絕不入 `verify`）
+- **狀態**: **BLOCKED**（**非 Docker 問題——Docker 經 OrbStack 是活的**;真實 blocker 已 ground-truth 證實:見下「BLOCKED 裁決」）
+
+> ## ⛔ BLOCKED 裁決（2026-06-22,已 ground-truth 證實,非偽造）
+> 起 demo 跑 e2e 物理上不可能達成本刀的 green DoD,**且禁止造假/弱化/stub**(looping-engineering §4 + §6 DoD)。已驗證:
+> - **Docker 活著**(OrbStack `unix:///var/run/docker.sock` 可達;`DOCKER_HOST` env 原指向一個已死的 Docker Desktop socket)。
+> - **真實被服務的 sidecar 把 session RPC stub 成 unimplemented**:`services/sidecar/src/server/adapter_uds.rs` 的
+>   `ReserveSession`(:148)/`CommitSessionDelta`/`ReleaseSession`(:137)全是 `Err(Status::unimplemented(...))`——註解
+>   「D41…sidecar bridge **deferred to voice adapter bridge slice**」;`main.rs:398-418` 確實把此 impl 接上 `SidecarAdapterServer`。
+> - **真正實作的閘是另一個 RPC `RequestDecision`**(`DecisionRequest`→`DecisionResponse`,adapter.proto:46;`request_decision_inner:312`
+>   → `transaction::run_through_reserve:370`);真實 ledger reserve/commit 在 `session_reservations.rs` 後、走 **mTLS `Ledger`
+>   service(ledger:50051)+ 完整 budget metadata**(budget_id/window/unit/pricing),**非**我們 transport 送的 credential-blind tenant+route+amount。
+> - **後果**:S6 的 transport 走 `ReserveSession/CommitSessionDelta`,對真實 demo 每次都會拿到 UNIMPLEMENTED → fail-closed deny,
+>   spec line「in-budget reserve → ok」對真實 build **不可能成立**。S6 的單元測試之所以綠,是因為它的 **fake UDS server 實作了那三個
+>   RPC**(proto 宣告了)——**fake 遮蔽了 vendor 的缺口,live 整合才抓到**(這正是 live e2e 的價值)。
+>
+> **S5/S6 並非缺陷**:它們忠實實作了 vendor *宣告* 的 `SidecarAdapter` 契約、單元綠、vendor-confined;缺口在 vendor 端(session RPC 未實作)。
+> **需人工裁決(三選一,因牽動已 merge 的 S6 契約 + credential-blind 不變量):**
+> - **(a)** 另建一刀,把 live e2e 接到 demo *已實作* 的 `RequestDecision` 路徑(S6 的 session adapter 保留待 vendor 實作);需確認 DecisionRequest 能否維持 credential-blind 並映成 reserve/commit。
+> - **(b)** 接受 **S7 deferred-on-upstream**:S5/S6 視為「對宣告契約已完成」,live e2e 等 vendor 的 voice-adapter-bridge slice 實作 session RPC 後再做。
+> - **(c)** 直接打 mTLS `Ledger` service + 完整 budget metadata(**放棄 S6 的 credential-blind UDS 形狀**;最不推薦)。
 
 ## (1) ID + Title
 SLICE-P2R-R11-S7 — 用 SpendGuard 自帶的 demo topology([`deploy/demo/compose.yaml`](../../../):`docker compose up -d --build` 起 postgres:16 + ledger + sidecar + canonical_ingest + tokenizer + … ~8 Rust 服務),把 R11-S6 的真實 `createSidecarLedgerTransport` 注入 `SpendGuardCostGate`,對**真實跑著的 SpendGuard sidecar**(UDS)做 reserve/commit,證明成本閘在真實 vendor runtime 上 fail-closed + credential-blind + hard-cap。鏡像 R2-S8(kernel)的 build-spawn-run-teardown harness。
