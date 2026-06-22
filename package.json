@@ -23,6 +23,8 @@
     "proto:gen": "bash scripts/proto-gen.sh",
     "proto:check": "bash scripts/proto-check.sh",
     "openshell:proto:check": "bash scripts/openshell-proto-check.sh",
+    "spendguard:proto:gen": "bash scripts/spendguard-proto-gen.sh",
+    "spendguard:proto:check": "bash scripts/spendguard-proto-check.sh",
     "verify:p1-exit": "bash scripts/verify-p1-exit.sh",
     "verify:go": "env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local bash scripts/verify-go.sh",
     "verifier:release": "env -u GOROOT GOTOOLCHAIN=local bash scripts/build-verifier-release.sh",
@@ -31,7 +33,7 @@
     "secret-scan": "bash scripts/scan_secrets.sh",
     "launcher:check": "node scripts/launcher-check.mjs",
     "e2e:live-kernel": "bash scripts/e2e-live-kernel.sh",
-    "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && pnpm run secret-scan"
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run spendguard:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && pnpm run secret-scan"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",

@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-r11-s5-spendguard-proto-codegen
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 0.5 day；net LOC <~80（codegen/drift script 擴充;生成的 TS stub 為 **generated**,不計）、files <~4、**新增依賴 = TS proto codegen devDependency（已於 R2-S5 在 repo;若沿用則 0 新增）**
-- **狀態**: **DRAFT**（build-gated:不需 Docker;只需 SpendGuard proto 來源）
+- **狀態**: **DONE**（build-gated:不需 Docker;只需 SpendGuard proto 來源;DoD 實測 exit code 見 §6）
 
 ## (1) ID + Title
 SLICE-P2R-R11-S5 — 把 SpendGuard 的 **client-facing** `SidecarAdapter` gRPC 契約([`proto/spendguard/sidecar_adapter/v1/adapter.proto:34`](../../../) 的 `service SidecarAdapter`,含 `ReserveSession` :124 / `CommitSessionDelta` :129 / `ReleaseSession` :134 / `ReleaseReservation` :116 + `common/v1/common.proto`)生成 **types-only TS stub**,並加 `proto:check`-式 drift gate,作為 R11-S6 真實 transport 的唯一線格契約來源。
@@ -32,12 +32,19 @@ SLICE-P2R-R11-S5 — 把 SpendGuard 的 **client-facing** `SidecarAdapter` gRPC 
 - 生成 + pin 後 → 綠。
 - 首次 RED 證據(貼 exit≠0):check 在無生成碼時報缺檔 / drift。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:`pnpm run spendguard:proto:check` 在無/漂移 stub 時 exit≠0。
-- [ ] 生成 types-only stub + pin manifest;`spendguard:proto:check` exit 0;併入 `verify` cascade。
-- [ ] `pnpm run verify` exit 0;depcruise exit 0(generated 不在 core、無 vendor 進 core)。
-- [ ] secret-scan clean。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:改一個 proto 欄位 → drift gate 轉紅)。
+## (6) Definition of Done（實測 exit code）
+- [x] RED:`spendguard:proto:check` 在無 stub/subset/manifest 時 exit≠0 —
+  `SPENDGUARD_PROTO_DIR=<empty> bash scripts/spendguard-proto-check.sh` → **exit 1**
+  (`FAIL — vendored subset missing`)。
+- [x] 生成 types-only stub + pin manifest;`pnpm run spendguard:proto:check` → **exit 0**
+  (`pin ok` → `stub ok`(protoc+ts-proto regen+diff)→ `ok`);已併入 `verify` cascade
+  (package.json `verify` 含 `spendguard:proto:check`，test 斷言之)。
+- [x] `pnpm run verify` → **exit 0**(全綠;typecheck/lint/build/test/deps/proto×3/go/py/cross-tenant/launcher/secret-scan)。
+- [x] `pnpm run deps:check` → **exit 0**(depcruise:114 modules / 267 deps,no violations;generated 在 runtime/、非 core,無 vendor 進 core)。
+- [x] `pnpm run secret-scan` → **exit 0**(`secret-scan: clean`)。
+- [x] Adversarial review = PASS(R11-S5 獨立審查通過);mutation 實證:對
+  `sidecar_adapter.subset.proto` 追加一行 → `spendguard:proto:check` **exit 1**
+  (`FAIL — vendored proto subset drifted from pin`,expected≠actual sha256);還原後 → exit 0。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 generated 目錄 + script + pin)。純契約,無 runtime 影響。
