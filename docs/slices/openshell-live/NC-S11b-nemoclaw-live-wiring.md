@@ -4,7 +4,7 @@
 - **Branch**: slice/nc-s11b-nemoclaw-live-wiring
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1–2 day（不含 sandbox/gateway 啟動）；net LOC <~280、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8 + 2 個 live-caught 修正=main-loop/Opus4.8;獨立 Opus4.8 reviewer = PASS;**NemoClaw hosting 對真實 OpenShell gateway LIVE 驗證**;一個 MAJOR-with-tracking〔composition root / OS-S2 same-instance〕見 §6）
 - **取代**:`docs/slices/nemoclaw-live/R11-NC-S11-live-e2e-harness.md`(寫於 transport gap 發現前;本刀為精確版)。
 
 ## (1) ID + Title
@@ -34,14 +34,18 @@ SLICE-NC-S11b — 讓 `NemoClawAgentHosting` 經真實 OpenShell gateway host/pr
 - (C) live e2e:對未起 gateway/sandbox → host denied / exec reject → 測試 FAIL(RED:真打真);起真 sandbox 後綠。
 - 我對真 gateway 跑 `pnpm run e2e:live-nemoclaw` 驗證。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:seam/binding/live 測試在實作前紅。
-- [ ] **收斂完成**:grpc-transport 實作 `OpenShellExecTransport`;`consumeExecStream`/`ExecResult` 等已刪;**全 repo 僅一份 exec stream 累積(adapter.streamExec)**;OS-S1 既有累積行為由 adapter 測試保住。
-- [ ] `pnpm run verify` exit 0(gated live SKIP;單元測試綠;depcruise grpc-js confined;secret-scan clean)。
-- [ ] **live(我跑)`pnpm run e2e:live-nemoclaw` exit 0**:真 sandbox → hostAgent ok + GATEWAY_PID → status running(探 :18789)→ reconcile ok → 清理;harness preflight 無 openshell → BLOCKED-diagnostic 非 hang。
-- [ ] credential-blind:HostSpec/event/reason 無憑證;trivial gateway/probe 不含 secret;secret-scan clean。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:binding 不包 sh-c → exec 行為變/測試紅;收斂後仍留第二份累積 → 收斂測試紅;probe 探錯埠 → status 非 running 紅)。
-- [ ] **誠實回報**:live surface 的任何 shape 落差(gateway_user/HERMES_HOME/launch)逐一修 + 加 hardening。
+## (6) Definition of Done（實測）
+- [x] RED:seam/binding/live 測試在實作前紅(13 failed | 2 passed:`deleteSandbox is not a function`、舊 execSandbox 累積非 yield、binding import 缺)。
+- [x] **收斂完成**:grpc-transport 實作 `OpenShellExecTransport`(yield,不累積);`consumeExecStream`/`ExecResult`/`ExecOpts`/`OpenShellGrpcExecTransport` 已刪;**全 repo 僅一份 exec stream 累積 = `adapter.streamExec`**(reviewer grep + mutation 證實);`adapter.exec.test.ts` 39 案不變綠;`createSandbox`/`deleteSandbox` 為 fail-closed stub(reject,OS-S2 換真)。
+- [x] `pnpm run verify` **exit 0**(785 passed + 8 skipped;gated live SKIP hermetic;depcruise 125 modules grpc-js confined,reviewer 以 core 注入 → not-to-internal+no-vendor-in-core 實證;openshell:proto:check ok;secret-scan clean canary-tested)。
+- [x] **live(我對真實 gateway 跑)**:`nemoclaw.live.test.ts` PASS(5.1s)——hostAgent(經真實 mTLS gRPC exec 啟動 trivial python3 /health:18789 gateway)→ ok + agentProcessId → getAgentStatus running(curl :18789=200)→ reconcile('health-probe') ok。`grpc-transport.live.test.ts` PASS(adapter.execSandbox 經收斂 seam:exitCode0+OS_S1_LIVE;deadline→denied)。
+- [x] **harness 一鍵端到端 live 驗證**:`pnpm run e2e:live-nemoclaw`(無 env)→ 自建 `agentos-nc-live`(從 `get` human 輸出解析 gateway id)→ 兩個 live test 3 passed → 自動 `delete` → 乾淨。3 個 harness CLI 修正(我做、live 驗證):`destroy`→`delete`(且 by name)、`get` 無 json flag 改剝-ANSI 解析 `Id:`、create 加 `-- sh -c 'true'`(否則 CLI 互動 attach 在非 tty 下失敗)。
+- [x] credential-blind + 無回歸(reviewer canary 測試;8 攻擊面 HELD/N/A)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;seam/binding/launchCommand/proto-drift/depcruise-邊界 皆 mutation 證實非 vacuous;launchCommand 對真 `/bin/dash` 驗證)。
+- [x] **誠實回報 — 2 個 live-surfaced bug 修正(fake 單元測試遮蔽,live 抓到)**:(1) **launchCommand dash 語法錯**——`HERMES_HOME=val if`(賦值前綴接複合指令)在 dash 為 `Syntax error: "then" unexpected` → 非零 exit → hostAgent denied;修:env prefix 移到每個 `nohup`(simple command,合法+子程序繼承,比照 runtime.ts:170)+ hardening 測試。(2) sandbox 由 CLI 外部建 → adapter `refById` 無它 → exec denied "unknown sandbox";live e2e seed refById(test seam)。
+
+### ⚠️ MAJOR-with-tracking(交 OS-S2 + composition root)
+production **尚無** composition root 把 create+exec 接在同一個 `OpenShellSandboxAdapter` 實例(`createNemoClawOpenShellExec` 目前只有測試呼叫)。live e2e seed `refById` 代替尚未建的 OS-S2 CreateSandbox。**same-instance invariant**(exec 經創 sandbox 的同一 adapter → refById 共享)目前僅測試成立。**OS-S2 接真 CreateSandbox 並建/斷言單一 composition root(同實例 create+exec,production 不需 seed)。** 本刀 scope(收斂+binding+gated live 證明)健全,故 PASS;CreateSandbox 設計上屬 OS-S2,非本刀阻斷。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(還原收斂〔回 OS-S1 的 Promise<ExecResult> transport〕+ 移除 binding/e2e/harness)。

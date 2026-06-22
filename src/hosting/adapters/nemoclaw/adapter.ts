@@ -194,10 +194,15 @@ const CROSS_TENANT = "cross-tenant: sandbox is hosted by another tenant (deny-by
 const UNKNOWN_SANDBOX = "unknown sandbox (deny-by-default)";
 const DEFAULT_GATEWAY_COMMAND = '"$OPENCLAW" gateway run';
 
-/** NemoClaw launch shape: `nohup [gosu <user>] <command> &`, prefixed with non-secret env. */
+/**
+ * NemoClaw launch shape: `<non-secret env> nohup [gosu <user>] <command> &`. The env prefix is applied
+ * to each `nohup` (a simple command — so children inherit HERMES_HOME), NOT to the `if` compound
+ * command: `VAR=val if ...` is a SYNTAX ERROR in POSIX sh / dash ("then unexpected"), which is what
+ * `/bin/sh` is in the OpenShell sandbox. This mirrors real NemoClaw (runtime.ts:170 prefixes nohup).
+ */
 function launchCommand(gatewayCommand: string | undefined): string {
   const cmd = gatewayCommand ?? DEFAULT_GATEWAY_COMMAND;
-  return `${HERMES_ENV_PREFIX} if command -v gosu >/dev/null 2>&1; then nohup gosu ${GATEWAY_USER} ${cmd} & else nohup ${cmd} & fi; GPID=$!; sleep 2; if kill -0 "$GPID" 2>/dev/null; then echo "GATEWAY_PID=$GPID"; else echo GATEWAY_FAILED; fi`;
+  return `if command -v gosu >/dev/null 2>&1; then ${HERMES_ENV_PREFIX} nohup gosu ${GATEWAY_USER} ${cmd} & else ${HERMES_ENV_PREFIX} nohup ${cmd} & fi; GPID=$!; sleep 2; if kill -0 "$GPID" 2>/dev/null; then echo "GATEWAY_PID=$GPID"; else echo GATEWAY_FAILED; fi`;
 }
 
 /**

@@ -1,19 +1,24 @@
 /**
- * RED-first unit tests for the mTLS gRPC ExecSandbox transport (slice SLICE-OS-S1).
+ * Unit tests for the CONVERGED mTLS gRPC ExecSandbox transport (slice SLICE-NC-S11b,收斂 OS-S1).
+ *
+ * OS-S1 left a DUPLICATE stream accumulator here (`consumeExecStream` -> `Promise<ExecResult>`); this
+ * slice converges the transport onto the adapter's seam: `createOpenShellGrpcTransport` now returns a
+ * thin `OpenShellExecTransport` whose `execSandbox(req, signal)` opens the `ExecSandbox` server-stream
+ * and YIELDS the raw `ExecSandboxEvent`s — NO accumulation, NO deadline, NO maxOutputBytes here (the
+ * SINGLE accumulator is `OpenShellSandboxAdapter.streamExec`, covered by adapter.exec.test.ts).
  *
  * NO live gateway, NO mTLS handshake, NO docker: every test injects a FAKE server-stream source
- * (mirroring how the ingest transport test injects an in-process `AppendService`). The real grpc-js
- * `makeServerStreamRequest` against the gateway is exercised only by the main loop's live validation.
+ * (mirroring how the ingest transport test injects an in-process double). The real grpc-js
+ * `makeServerStreamRequest` against the gateway is exercised only by the live harness.
  *
- * Load-bearing fail-closed probes (deny-by-default; NEVER fabricate success):
- *   - stdout chunks + exit(0)               => { exitCode: 0, stdout, stderr } (faithful convergence)
- *   - a NON-ZERO exit code                  => resolved with that code (a command result, not a deny)
- *   - only stdout, NO terminal exit + short deadline => DENY (stream ended / timed out before exit)
- *   - total output exceeding maxOutputBytes => DENY + the underlying stream is cancelled (abort)
- *   - a stream `error` event / synchronous throw => REJECT
- * A denied/rejected reason carries NO endpoint / cert content (credential-blind).
+ * Load-bearing seam probes:
+ *   - execSandbox(req, signal) yields ALL injected events IN ORDER (the stream IS an AsyncIterable).
+ *   - an aborted `signal` CANCELS the underlying stream (no leaked gRPC stream).
+ *   - createSandbox / deleteSandbox FAIL CLOSED (reject, deny-by-default) until OS-S2 makes them real.
+ * A fail-closed reason carries NO endpoint / cert content (credential-blind).
  */
 import { describe, expect, it } from "vitest";
+import type { ExecSandboxRequest } from "./client.js";
 import { type ExecStreamHandle, createOpenShellGrpcTransport } from "./grpc-transport.js";
 import type { ExecSandboxEvent } from "./proto/openshell.subset.codec.js";
 
@@ -24,16 +29,16 @@ const stdoutEvent = (data: string): ExecSandboxEvent => ({ stdout: { data: enc(d
 const stderrEvent = (data: string): ExecSandboxEvent => ({ stderr: { data: enc(data) } });
 const exitEvent = (code: number): ExecSandboxEvent => ({ exit: { exitCode: code } });
 
+const REQ: ExecSandboxRequest = { sandboxId: "sbx-1", command: ["sh", "-c", "echo OS_S1_LIVE"] };
+
 /**
  * A fake `ExecStreamHandle`: an EventEmitter-shaped server stream that replays a script of `data`
- * events then either `end` (no terminal close beyond the scripted events) or an `error`. It records
- * cancellation so a test can assert the transport aborts the stream on overflow/deadline.
+ * events then either `end` or an `error`. It records cancellation so a test can assert the transport
+ * cancels the stream on abort. The transport adapts this handle into an `AsyncIterable<ExecSandboxEvent>`.
  */
 interface FakeScript {
   /** Events to emit (in order). An Error entry emits an `error` event and stops. */
   events: Array<ExecSandboxEvent | Error>;
-  /** Delay (ms) before emitting each event (default 0 — flush on next tick). */
-  delayMs?: number;
   /** When true, the stream never emits `end` after the events (simulates a hung stream). */
   noEnd?: boolean;
 }
@@ -59,8 +64,7 @@ function fakeStream(script: FakeScript): {
     },
   };
 
-  // Drive the script asynchronously (next tick) so the transport has wired its listeners.
-  const delay = script.delayMs ?? 0;
+  // Drive the script asynchronously (next tick) so the consumer has wired its listeners.
   let i = 0;
   const pump = (): void => {
     if (cancelled) return;
@@ -74,22 +78,20 @@ function fakeStream(script: FakeScript): {
       return;
     }
     for (const cb of dataCbs) cb(ev as ExecSandboxEvent);
-    if (delay > 0) setTimeout(pump, delay);
-    else setImmediate(pump);
+    setImmediate(pump);
   };
-  if (delay > 0) setTimeout(pump, delay);
-  else setImmediate(pump);
+  setImmediate(pump);
 
   return { handle, cancelled: () => cancelled };
 }
 
-/** Build a transport whose stream source is the injected fake (no real grpc-js Client / no certs). */
+/** Build a converged transport whose stream source is the injected fake (no real grpc-js Client). */
 function transportWith(makeStream: () => { handle: ExecStreamHandle; cancelled: () => boolean }): {
-  exec: ReturnType<typeof createOpenShellGrpcTransport>["execSandbox"];
+  transport: ReturnType<typeof createOpenShellGrpcTransport>;
   lastCancelled: () => boolean;
 } {
   let last: () => boolean = () => false;
-  const t = createOpenShellGrpcTransport({
+  const transport = createOpenShellGrpcTransport({
     endpoint: "127.0.0.1:17670",
     caCertPath: "/dev/null",
     clientCertPath: "/dev/null",
@@ -102,67 +104,96 @@ function transportWith(makeStream: () => { handle: ExecStreamHandle; cancelled: 
       return s.handle;
     },
   });
-  return { exec: t.execSandbox.bind(t), lastCancelled: () => last() };
+  return { transport, lastCancelled: () => last() };
 }
 
-describe("createOpenShellGrpcTransport.execSandbox — happy path", () => {
-  it("converges stdout chunks + exit(0) into { exitCode: 0, stdout, stderr }", async () => {
-    const { exec } = transportWith(() =>
+/** Drain an `AsyncIterable<ExecSandboxEvent>` into an array (in arrival order). */
+async function drain(stream: AsyncIterable<ExecSandboxEvent>): Promise<ExecSandboxEvent[]> {
+  const out: ExecSandboxEvent[] = [];
+  for await (const ev of stream) out.push(ev);
+  return out;
+}
+
+describe("createOpenShellGrpcTransport — execSandbox seam (yields events; no accumulation)", () => {
+  it("yields ALL injected events IN ORDER (stdout chunks then a terminal exit)", async () => {
+    const { transport } = transportWith(() =>
       fakeStream({ events: [stdoutEvent("OS_S1_"), stdoutEvent("LIVE\n"), exitEvent(0)] }),
     );
-    const result = await exec("sbx-1", ["sh", "-c", "echo OS_S1_LIVE"]);
-    expect(result.exitCode).toBe(0);
-    expect(dec(result.stdout)).toBe("OS_S1_LIVE\n");
-    expect(result.stderr.length).toBe(0);
+    const events = await drain(transport.execSandbox(REQ));
+    expect(events).toHaveLength(3);
+    expect(dec(events[0]?.stdout?.data ?? new Uint8Array())).toBe("OS_S1_");
+    expect(dec(events[1]?.stdout?.data ?? new Uint8Array())).toBe("LIVE\n");
+    expect(events[2]?.exit?.exitCode).toBe(0);
   });
 
-  it("joins stderr chunks and reports a NON-ZERO exit code as a faithful result (not a deny)", async () => {
-    const { exec } = transportWith(() =>
+  it("yields a stderr chunk + a NON-ZERO exit as raw events (it does NOT interpret them)", async () => {
+    const { transport } = transportWith(() =>
       fakeStream({ events: [stderrEvent("boom"), exitEvent(7)] }),
     );
-    const result = await exec("sbx-1", ["false"]);
-    expect(result.exitCode).toBe(7);
-    expect(dec(result.stderr)).toBe("boom");
-    expect(result.stdout.length).toBe(0);
+    const events = await drain(transport.execSandbox(REQ));
+    expect(dec(events[0]?.stderr?.data ?? new Uint8Array())).toBe("boom");
+    expect(events[1]?.exit?.exitCode).toBe(7);
+  });
+
+  it("surfaces a mid-stream stream `error` as an iterator throw (the adapter fails closed on it)", async () => {
+    const { transport } = transportWith(() =>
+      fakeStream({ events: [stdoutEvent("x"), new Error("RST_STREAM")] }),
+    );
+    await expect(drain(transport.execSandbox(REQ))).rejects.toThrow();
   });
 });
 
-describe("createOpenShellGrpcTransport.execSandbox — fail-closed (no fabricated success)", () => {
-  it("DENIES (rejects) when the stream ends with NO terminal exit event", async () => {
-    const { exec } = transportWith(() => fakeStream({ events: [stdoutEvent("partial")] }));
-    await expect(exec("sbx-1", ["sh"])).rejects.toThrow();
-  });
-
-  it("DENIES (rejects) when the deadline elapses before a terminal exit (hung stream)", async () => {
-    const { exec, lastCancelled } = transportWith(() =>
-      // Emits one stdout then NEVER ends and NEVER exits — must trip the wall-clock deadline.
+describe("createOpenShellGrpcTransport — execSandbox abort cancels the underlying stream", () => {
+  it("cancels the stream when the supplied AbortSignal aborts (no leaked gRPC stream)", async () => {
+    const { transport, lastCancelled } = transportWith(() =>
+      // Emits one stdout then NEVER ends and NEVER exits — the consumer abandons it via abort.
       fakeStream({ events: [stdoutEvent("hang")], noEnd: true }),
     );
-    await expect(exec("sbx-1", ["sleep", "999"], { deadlineMs: 20 })).rejects.toThrow();
+    const abort = new AbortController();
+    const stream = transport.execSandbox(REQ, abort.signal);
+    const it = stream[Symbol.asyncIterator]();
+    // Pull the first event so the stream is open, then abort.
+    const first = await it.next();
+    expect(dec(first.value?.stdout?.data ?? new Uint8Array())).toBe("hang");
+    abort.abort();
+    // The abort must cancel the underlying stream (deterministically — give the listener a tick).
+    await new Promise((r) => setImmediate(r));
     expect(lastCancelled()).toBe(true);
   });
 
-  it("DENIES (rejects) + cancels the stream when output exceeds maxOutputBytes", async () => {
-    const big = "x".repeat(64);
-    const { exec, lastCancelled } = transportWith(() =>
-      fakeStream({ events: [stdoutEvent(big), stdoutEvent(big), exitEvent(0)] }),
+  it("an ALREADY-aborted signal cancels the stream and yields nothing once iteration starts", async () => {
+    const { transport, lastCancelled } = transportWith(() =>
+      fakeStream({ events: [stdoutEvent("hang")], noEnd: true }),
     );
-    await expect(exec("sbx-1", ["yes"], { maxOutputBytes: 100 })).rejects.toThrow();
+    const abort = new AbortController();
+    abort.abort();
+    // The adapter always drives the iterator; the generator opens the stream then cancels it and ends.
+    const events = await drain(transport.execSandbox(REQ, abort.signal));
+    expect(events).toEqual([]);
     expect(lastCancelled()).toBe(true);
   });
+});
 
-  it("REJECTS on a stream `error` event before exit", async () => {
-    const { exec } = transportWith(() =>
-      fakeStream({ events: [stdoutEvent("x"), new Error("RST_STREAM")] }),
-    );
-    await expect(exec("sbx-1", ["sh"])).rejects.toThrow();
+describe("createOpenShellGrpcTransport — lifecycle stubs FAIL CLOSED until OS-S2", () => {
+  it("createSandbox rejects deny-by-default (not implemented until OS-S2)", async () => {
+    const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
+    await expect(
+      transport.createSandbox({ spec: { template: { image: "sha256:" } } }),
+    ).rejects.toThrow(/OS-S2|not implemented|fail-closed/i);
   });
 
-  it("REJECTS without leaking the endpoint or cert paths into the error message", async () => {
-    const { exec } = transportWith(() => fakeStream({ events: [stdoutEvent("x")] }));
+  it("deleteSandbox rejects deny-by-default (not implemented until OS-S2)", async () => {
+    const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
+    await expect(transport.deleteSandbox({ name: "anything" })).rejects.toThrow(
+      /OS-S2|not implemented|fail-closed/i,
+    );
+  });
+
+  it("does NOT leak the endpoint / cert paths into a lifecycle-stub rejection (credential-blind)", async () => {
+    const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
     let caught: unknown;
     try {
-      await exec("sbx-1", ["sh"]);
+      await transport.createSandbox({ spec: { template: { image: "sha256:" } } });
     } catch (e) {
       caught = e;
     }

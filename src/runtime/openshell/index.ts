@@ -39,9 +39,6 @@ export {
 } from "./adapter.js";
 export {
   type OpenShellGrpcTransportOpts,
-  type OpenShellGrpcExecTransport,
-  type ExecOpts as OpenShellGrpcExecOpts,
-  type ExecResult as OpenShellGrpcExecResult,
   type ExecStreamHandle,
   createOpenShellGrpcTransport,
 } from "./grpc-transport.js";

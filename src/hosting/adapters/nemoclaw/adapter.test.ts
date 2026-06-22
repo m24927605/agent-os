@@ -228,4 +228,17 @@ describe("NemoClawAgentHosting — credential-blind dispatched command", () => {
       false,
     );
   });
+
+  it("applies the env prefix to nohup, not to the `if` (POSIX/dash valid — live-surfaced)", async () => {
+    // `VAR=val if ...` is a syntax error in dash (the OpenShell sandbox /bin/sh): "then unexpected".
+    // The env prefix must sit on the simple `nohup` command so children inherit it AND the script
+    // parses. Guard against a regression to the broken `HERMES_HOME=... if` ordering without needing
+    // a live sandbox.
+    const sink = new RecordingSink();
+    const h = new NemoClawAgentHosting(sink);
+    await h.hostAgent(ctxA, spec);
+    const launch = sink.commands[0] ?? "";
+    expect(launch).not.toMatch(/HERMES_HOME=\S+\s+if\b/); // the broken dash form
+    expect(launch).toMatch(/HERMES_HOME=\S+\s+nohup\b/); // env prefixes nohup (valid)
+  });
 });
