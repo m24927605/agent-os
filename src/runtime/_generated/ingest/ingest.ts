@@ -15,6 +15,8 @@ export interface AppendRequest {
   sequence: number;
   /** ALREADY-redacted S0.2 canonical bytes (kernel never holds the raw secret) */
   canonicalEvent: Uint8Array;
+  /** P3 tenant partition routing; empty => single-chain servers ignore it, the partitioned server fail-closed denies */
+  partitionId: string;
 }
 
 /** Receipt — the server computes prev_hash/entry_hash/content_hash; the client cannot set them. */

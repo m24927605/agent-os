@@ -27,6 +27,7 @@ message AppendRequest {
   string source_id = 1;       // per-source monotonic sequence key (P3 binds tenant identity)
   uint64 sequence = 2;        // the expected next sequence for this source (kernel enforces monotonic)
   bytes canonical_event = 3;  // ALREADY-redacted S0.2 canonical bytes (kernel never holds the raw secret)
+  string partition_id = 4;    // P3 tenant partition routing; empty => single-chain servers ignore it, the partitioned server fail-closed denies
 }
 
 // Receipt — the server computes prev_hash/entry_hash/content_hash; the client cannot set them.
