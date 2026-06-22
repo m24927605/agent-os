@@ -15,9 +15,11 @@
 // copied VERBATIM (field numbers/types) from the v0.0.66 upstream proto (openshell.proto +
 // datamodel.proto). We vendor ONLY the fields we encode/decode (SandboxSpec.template, ObjectMeta
 // id/name, SandboxStatus.phase); the other fields exist upstream but are intentionally OUT OF SCOPE
-// (the codec skips them, forward-compatible). The full service, WatchSandbox (streaming readiness ->
-// OS-S2b), and the interactive/tty exec fields are out of scope. Drift against this committed subset
-// is guarded by `pnpm run openshell:proto:check` (hash manifest in proto/openshell.subset.sha256).
+// (the codec skips them, forward-compatible). Slice SLICE-OS-S2b adds the WatchSandbox server-streaming
+// RPC + its WatchSandboxRequest (id=1, follow_status=2, stop_on_terminal=7) / SandboxStreamEvent
+// (oneof payload, we decode ONLY sandbox=1) messages — completing the readiness transport. The rest of
+// the full service and the interactive/tty exec fields stay out of scope. Drift against this committed
+// subset is guarded by `pnpm run openshell:proto:check` (hash manifest in proto/openshell.subset.sha256).
 //
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
@@ -44,6 +46,9 @@ service OpenShell {
 
   // Execute a command in a ready sandbox and stream output.
   rpc ExecSandbox(ExecSandboxRequest) returns (stream ExecSandboxEvent);
+
+  // Watch a sandbox: stream status snapshots / logs / events (server-streaming readiness).
+  rpc WatchSandbox(WatchSandboxRequest) returns (stream SandboxStreamEvent);
 }
 
 // Health check request (openshell.proto:277).
@@ -203,5 +208,38 @@ message ExecSandboxEvent {
     ExecSandboxStdout stdout = 1;
     ExecSandboxStderr stderr = 2;
     ExecSandboxExit exit = 3;
+  }
+}
+
+// --- WatchSandbox streaming readiness (slice SLICE-OS-S2b) — copied VERBATIM from v0.0.66. ----------
+// We ENCODE only the 3 readiness-relevant fields (id=1, follow_status=2, stop_on_terminal=7); the log/
+// event-following fields (follow_logs=3, follow_events=4, log_tail_lines=5, event_tail=6, log_since_ms=8,
+// log_sources=9, log_min_level=10) are OUT OF SCOPE — their numbers are reserved so we never reuse them.
+
+// Watch sandbox request (openshell.proto:761-792). Copied VERBATIM (field numbers/types) from v0.0.66.
+message WatchSandboxRequest {
+  // Sandbox id.
+  string id = 1;
+
+  // Stream sandbox status snapshots.
+  bool follow_status = 2;
+
+  // Stop streaming once the sandbox reaches a terminal phase (READY or ERROR).
+  bool stop_on_terminal = 7;
+
+  reserved 3, 4, 5, 6, 8, 9, 10; // follow_logs, follow_events, log_tail_lines, event_tail, log_since_ms, log_sources, log_min_level (out of scope).
+  reserved "follow_logs", "follow_events", "log_tail_lines", "event_tail", "log_since_ms", "log_sources", "log_min_level";
+}
+
+// One event in a sandbox watch stream (openshell.proto:795-810). We DECODE only the `sandbox` (=1)
+// snapshot (reusing the Sandbox/ObjectMeta/SandboxStatus decode); the log (=2) / event (=3) /
+// warning (=4) / draft_policy_update (=5) variants carry no readiness signal and are SKIPPED (their
+// message types are intentionally NOT vendored — forward-compatible: an unknown oneof variant decodes
+// to an absent sandbox, NEVER a fabricated READY).
+message SandboxStreamEvent {
+  oneof payload {
+    // Latest sandbox snapshot.
+    Sandbox sandbox = 1;
+    // log (=2), event (=3), warning (=4), draft_policy_update (=5) — out of scope; skipped on decode.
   }
 }

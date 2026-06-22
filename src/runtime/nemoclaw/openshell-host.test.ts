@@ -82,11 +82,13 @@ function fakeTransport(opts: FakeOpts): FakeTransport {
       deleteCalls.push(req);
       return Promise.resolve({ deleted: true });
     },
-    // watchSandbox is the OS-S2b stub on the real transport; OS-S2a readiness uses getSandbox polling
-    // ONLY. This fake's watch always fail-closed throws so a test that relied on it would go red.
-    // biome-ignore lint/correctness/useYield: a fail-closed stub never yields.
+    // This fake's watch ALWAYS fail-closed throws: these composition-root tests reach READY via the
+    // getSandbox fast-path (phases include READY=2), so readiness must NOT depend on the watch stream.
+    // A throwing watch proves the host wires readiness correctly even when WatchSandbox is unavailable
+    // (the real OS-S2b watch stream itself is covered in grpc-transport.watch.test.ts).
+    // biome-ignore lint/correctness/useYield: this fail-closed double never yields.
     async *watchSandbox(_req: WatchSandboxRequest): AsyncIterable<SandboxStreamEvent> {
-      throw new Error("watch not implemented until OS-S2b (fail-closed)");
+      throw new Error("watch unavailable in this composition-root test (fail-closed)");
     },
   };
   return transport;

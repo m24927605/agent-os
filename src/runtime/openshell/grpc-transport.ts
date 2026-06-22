@@ -23,16 +23,17 @@
  * SAME channel via `makeUnaryRequest` (encode request -> decode the unary reply).
  *
  * CONVERGENCE (OS-S2a): the NC-S11b fail-closed `createSandbox` / `deleteSandbox` stubs are REPLACED by
- * real unary impls and a unary `getSandbox` is added, so `createOpenShellGrpcTransport` now returns a
- * transport satisfying `OpenShellReadinessTransport` EXCEPT `watchSandbox` — which stays a fail-closed
- * stub until OS-S2b (streaming readiness). OS-S2a readiness is the adapter's getSandbox polling path.
+ * real unary impls and a unary `getSandbox` is added. CONVERGENCE (OS-S2b): the OS-S2a fail-closed
+ * `watchSandbox` stub is REPLACED by a REAL `WatchSandbox` server-stream (encode WatchSandboxRequest ->
+ * stream<SandboxStreamEvent>) over the SAME channel, so `createOpenShellGrpcTransport` now returns a
+ * COMPLETE `OpenShellReadinessTransport` (create / get / delete / watch all real). The adapter's
+ * `watchUntilReady` consumes the watch stream to observe PROVISIONING -> READY.
  *
  * FAIL-CLOSED INVARIANT (deny-by-default): a unary RPC error (refused / DEADLINE_EXCEEDED / malformed
  * reply) surfaces as a REJECTED promise — the adapter's signal to fail closed (deny), never a silent
- * fake success. `watchSandbox` is NOT yet implemented (OS-S2b): its iterator THROWS a static reason
- * rather than yielding. The exec stream itself never fabricates a result: a stream `error`, a stream
- * `end` before exit, an abort, etc. surface to the adapter (the single accumulator), which converges
- * them deny-by-default.
+ * fake success. The exec AND watch streams never fabricate a result: a stream `error`, a stream `end`
+ * before the awaited terminal (exit / READY), an abort, etc. surface to the adapter (the single
+ * consumer), which converges them deny-by-default.
  *
  * CREDENTIAL-BLIND: the mTLS materials are read from PATHS (never inlined); NO cert/key/endpoint
  * content is ever placed in an error message, a reason, or a log (mirrors the adapter's discipline —
@@ -60,13 +61,18 @@ import {
   type ExecSandboxEvent,
   type ExecSandboxRequestWire,
   GET_SANDBOX_METHOD,
+  type SandboxStreamEventWire,
+  WATCH_SANDBOX_METHOD,
+  type WatchSandboxRequestWire,
   decodeDeleteSandboxResponse,
   decodeExecSandboxEvent,
   decodeSandboxResponse,
+  decodeSandboxStreamEvent,
   encodeCreateSandboxRequest,
   encodeDeleteSandboxRequest,
   encodeExecSandboxRequest,
   encodeGetSandboxRequest,
+  encodeWatchSandboxRequest,
 } from "./proto/openshell.subset.codec.js";
 
 /**
@@ -80,6 +86,21 @@ export interface ExecStreamHandle {
   on(event: "data", cb: (ev: ExecSandboxEvent) => void): ExecStreamHandle;
   on(event: "end", cb: () => void): ExecStreamHandle;
   on(event: "error", cb: (err: Error) => void): ExecStreamHandle;
+  cancel(): void;
+}
+
+/**
+ * The minimal EventEmitter-shaped server-stream handle the transport adapts into an
+ * `AsyncIterable<SandboxStreamEvent>` for WatchSandbox (slice SLICE-OS-S2b). Identical SHAPE to
+ * {@link ExecStreamHandle} but typed for the decoded `SandboxStreamEventWire` frames. The real grpc-js
+ * `ClientReadableStream<SandboxStreamEventWire>` (a Node `Readable` exposing `cancel()`) and the unit-
+ * test fake both satisfy it. Decoding from wire bytes happens in the grpc-js `deserialize` callback
+ * BEFORE this seam (so the fake supplies pre-decoded events).
+ */
+export interface WatchStreamHandle {
+  on(event: "data", cb: (ev: SandboxStreamEventWire) => void): WatchStreamHandle;
+  on(event: "end", cb: () => void): WatchStreamHandle;
+  on(event: "error", cb: (err: Error) => void): WatchStreamHandle;
   cancel(): void;
 }
 
@@ -133,11 +154,14 @@ export interface OpenShellGrpcTransportOpts {
    * stay network-free, certless, and hermetic). Tests inject a fake unary fn. Mirrors `openExecStream`.
    */
   readonly makeUnary?: UnaryRequestFn;
+  /**
+   * Test seam (slice SLICE-OS-S2b): open the `WatchSandbox` server-stream for `request`. Production
+   * omits it and a real grpc-js mTLS Client + `makeServerStreamRequest` is built lazily from the cert
+   * PATHS (so tests stay network-free, certless, and hermetic). Tests inject a fake stream. Mirrors
+   * `openExecStream`.
+   */
+  readonly openWatchStream?: (request: WatchSandboxRequestWire) => WatchStreamHandle;
 }
-
-/** Static deny reason for WatchSandbox (streaming readiness — OS-S2b; credential-blind; deny-by-default). */
-const WATCH_NOT_IMPLEMENTED =
-  "openshell grpc transport: watch not implemented until OS-S2b (fail-closed)";
 
 /**
  * Build an `OpenShellExecTransport` over an mTLS gRPC channel to the gateway — the transport
@@ -151,8 +175,8 @@ const WATCH_NOT_IMPLEMENTED =
  * `health()` reports `{ ok: true }` (the live exec path does not depend on a Health RPC here; S1's
  * health client wraps Health). `createSandbox` / `getSandbox` / `deleteSandbox` are REAL unary RPCs
  * over the SAME mTLS channel (OS-S2a); `execSandbox` is the converged server-stream (NC-S11b);
- * `watchSandbox` FAILS CLOSED (its iterator throws) until OS-S2b. The returned object therefore
- * satisfies BOTH `OpenShellReadinessTransport` (minus a real watch) AND `OpenShellExecTransport`.
+ * `watchSandbox` is the REAL `WatchSandbox` server-stream (OS-S2b). The returned object therefore
+ * satisfies the COMPLETE `OpenShellReadinessTransport` AND `OpenShellExecTransport`.
  */
 export function createOpenShellGrpcTransport(
   opts: OpenShellGrpcTransportOpts,
@@ -170,6 +194,8 @@ export function createOpenShellGrpcTransport(
     opts.openExecStream ?? ((req: ExecSandboxRequestWire) => lazyGrpc().openExecStream(req));
   const makeUnary: UnaryRequestFn =
     opts.makeUnary ?? ((method: string, bytes: Buffer) => lazyGrpc().makeUnary(method, bytes));
+  const openWatchStream =
+    opts.openWatchStream ?? ((req: WatchSandboxRequestWire) => lazyGrpc().openWatchStream(req));
 
   return {
     health(): Promise<{ ok: boolean }> {
@@ -199,12 +225,22 @@ export function createOpenShellGrpcTransport(
       return decodeDeleteSandboxResponse(reply);
     },
 
-    // Deny-by-default: OS-S2b wires the real WatchSandbox server-stream. Until then the iterator THROWS
-    // (never yields) so the adapter's watch path fails closed. The reason is static and credential-blind
-    // (no endpoint / cert).
-    // biome-ignore lint/correctness/useYield: a fail-closed stub never yields (it throws on iteration).
-    async *watchSandbox(_req: WatchSandboxRequest): AsyncIterable<SandboxStreamEvent> {
-      throw new Error(WATCH_NOT_IMPLEMENTED);
+    watchSandbox(
+      req: WatchSandboxRequest,
+      signal?: AbortSignal,
+    ): AsyncIterable<SandboxStreamEvent> {
+      // OS-S2b: REAL WatchSandbox server-stream. Build the wire request from the adapter's curated
+      // {id, followStatus, stopOnTerminal} (the codec omits proto3 zero/false fields). The stream
+      // yields each decoded SandboxStreamEvent (only `sandbox` snapshots carry a readiness signal; a
+      // non-sandbox variant decodes to `{ sandbox: undefined }`). NO accumulation / phase decision here
+      // — the adapter's `watchUntilReady` consumes + decides. A stream error throws (the adapter fails
+      // closed); an abort cancels the underlying stream (no leak).
+      const wire: WatchSandboxRequestWire = {
+        id: req.id,
+        ...(req.followStatus !== undefined ? { followStatus: req.followStatus } : {}),
+        ...(req.stopOnTerminal !== undefined ? { stopOnTerminal: req.stopOnTerminal } : {}),
+      };
+      return streamWatchSandbox(openWatchStream, wire, signal);
     },
 
     execSandbox(req: ExecSandboxRequest, signal?: AbortSignal): AsyncIterable<ExecSandboxEvent> {
@@ -307,6 +343,82 @@ async function* streamExecSandbox(
 }
 
 /**
+ * Adapt the EventEmitter-shaped `WatchStreamHandle` into an `AsyncIterable<SandboxStreamEventWire>` that
+ * yields each decoded snapshot in arrival order, completes on `end`, and throws on a stream `error`
+ * (mirrors {@link streamExecSandbox} exactly). The caller's `AbortSignal` (the adapter's deadline /
+ * cancellation) is wired to `handle.cancel()` so a deny / READY observation tears the underlying gRPC
+ * stream down (no leaked stream). NO accumulation, NO phase decision here — the adapter's
+ * `watchUntilReady` is the SINGLE consumer that decides READY / ERROR / pending. A stream `error` is
+ * propagated as-is so the adapter can fail closed on it (the adapter NEVER places it in a reason / log
+ * — credential-blind there).
+ */
+async function* streamWatchSandbox(
+  openWatchStream: (request: WatchSandboxRequestWire) => WatchStreamHandle,
+  request: WatchSandboxRequestWire,
+  signal?: AbortSignal,
+): AsyncIterable<SandboxStreamEventWire> {
+  const handle = openWatchStream(request);
+
+  const cancel = (): void => {
+    try {
+      handle.cancel();
+    } catch {
+      // a cancel on an already-closed stream is harmless; never surface it.
+    }
+  };
+  if (signal?.aborted === true) {
+    cancel();
+    return;
+  }
+  const onAbort = (): void => cancel();
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  const queue: SandboxStreamEventWire[] = [];
+  let ended = false;
+  let error: Error | undefined;
+  let wake: (() => void) | undefined;
+  const notify = (): void => {
+    if (wake !== undefined) {
+      const w = wake;
+      wake = undefined;
+      w();
+    }
+  };
+
+  handle
+    .on("data", (ev: SandboxStreamEventWire) => {
+      queue.push(ev);
+      notify();
+    })
+    .on("end", () => {
+      ended = true;
+      notify();
+    })
+    .on("error", (err: Error) => {
+      error = err;
+      ended = true;
+      notify();
+    });
+
+  try {
+    for (;;) {
+      while (queue.length > 0) {
+        const ev = queue.shift();
+        if (ev !== undefined) yield ev;
+      }
+      if (error !== undefined) throw error;
+      if (ended) return;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    cancel();
+  }
+}
+
+/**
  * Build the production mTLS grpc-js sources (lazy; exercised by the live harness, never by the
  * hermetic unit tests). Reads the cert PATHS, constructs ONE mTLS channel with the grpc-js
  * `createSsl(rootCerts, privateKey, certChain)` arg order, and returns BOTH:
@@ -317,11 +429,15 @@ async function* streamExecSandbox(
  *   - `makeUnary`: drives a unary RPC via `makeUnaryRequest` (identity serialize: we already hold the
  *     encoded request bytes; identity deserialize: we return the raw reply bytes and decode in the
  *     caller). A gRPC status error surfaces as a rejected promise.
- * Both share the SAME Client so a single mTLS handshake backs exec + lifecycle.
+ *   - `openWatchStream` (slice SLICE-OS-S2b): opens a `WatchSandbox` server-stream via
+ *     `makeServerStreamRequest` (encode WatchSandboxRequest -> decode each SandboxStreamEvent frame),
+ *     mirroring `openExecStream`. The returned `ClientReadableStream` satisfies {@link WatchStreamHandle}.
+ * All three share the SAME Client so a single mTLS handshake backs exec + lifecycle + watch.
  */
 function buildGrpc(opts: OpenShellGrpcTransportOpts): {
   openExecStream: (request: ExecSandboxRequestWire) => ExecStreamHandle;
   makeUnary: UnaryRequestFn;
+  openWatchStream: (request: WatchSandboxRequestWire) => WatchStreamHandle;
 } {
   // Read the mTLS materials from PATHS (never inlined). grpc-js createSsl arg order:
   // rootCerts (CA), privateKey (client key), certChain (client cert).
@@ -373,5 +489,18 @@ function buildGrpc(opts: OpenShellGrpcTransportOpts): {
       );
     });
 
-  return { openExecStream, makeUnary };
+  const openWatchStream = (request: WatchSandboxRequestWire): WatchStreamHandle => {
+    const call = client.makeServerStreamRequest<WatchSandboxRequestWire, SandboxStreamEventWire>(
+      WATCH_SANDBOX_METHOD,
+      encodeWatchSandboxRequest,
+      (bytes: Buffer) => decodeSandboxStreamEvent(bytes),
+      request,
+      new Metadata(),
+    );
+    // The grpc-js ClientReadableStream already exposes on('data'|'end'|'error') + cancel(); narrow it
+    // to the vendor-neutral handle the consumer expects.
+    return call as unknown as WatchStreamHandle;
+  };
+
+  return { openExecStream, makeUnary, openWatchStream };
 }
