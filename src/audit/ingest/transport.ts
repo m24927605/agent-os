@@ -20,6 +20,14 @@ export type AppendRequestShape = {
   readonly sourceId: string;
   readonly sequence: number;
   readonly canonicalEvent: Uint8Array;
+  /**
+   * OPTIONAL kernel tenant-partition routing (proto AppendRequest.partition_id, field 4; SLICE-ES2b).
+   * ABSENT/empty => the single-chain (Personal) path: the RPC adapter sends the proto3 default "" so a
+   * single-chain server ignores it and the wire stays byte-identical. SET (the Enterprise per-tenant
+   * path) => the partitioned kernel routes the append to that tenant's independent WORM chain. Optional
+   * so existing 3-field (Personal) callers are unaffected.
+   */
+  readonly partitionId?: string;
 };
 
 /**
