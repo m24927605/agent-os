@@ -19,12 +19,14 @@ import type {
   AppendService,
   CheckpointRequest,
   CheckpointResponse,
+  Entry,
   ListEntriesRequest,
   ListEntriesResponse,
   Receipt,
 } from "../_generated/ingest/ingest.js";
 
 const METHOD = "/agentos.kernel.ingest.v1.AppendService/Append";
+const LIST_ENTRIES_METHOD = "/agentos.kernel.ingest.v1.AppendService/ListEntries";
 
 /** Build a typed `AppendService` over a grpc-js channel to `endpoint` (insecure; TLS is an S7 concern). */
 export function grpcAppendService(endpoint: string): AppendService {
@@ -59,15 +61,31 @@ export function grpcAppendService(endpoint: string): AppendService {
         new Error("Checkpoint RPC client not wired yet (R10-S3 composition root; fail-closed)"),
       );
     },
-    // ListEntries is part of the AppendService contract (P2R-PV-S3a: read-only WORM chain read-back).
-    // Its client wire codecs + composition-root wiring are S3b (out of scope here). Until that slice
-    // wires it, fail CLOSED: never return a faked/empty entry set that a caller might trust.
-    ListEntries(_request: ListEntriesRequest): Promise<ListEntriesResponse> {
-      return Promise.reject(
-        new Error(
-          "ListEntries RPC client not wired yet (P2R-PV-S3b composition root; fail-closed)",
-        ),
-      );
+    // ListEntries is the read-only WORM chain read-back (P2R-PV-S3a contract): a unary RPC over the
+    // SAME AppendService channel. It returns a CONSISTENT snapshot of entries (sequence >= from_sequence)
+    // so a client can re-derive entryHash and reconstruct a timeline. Mirrors Append's fail-closed shape:
+    // an RPC error or a missing response surfaces as a rejected promise (reader.ts treats it as
+    // fail-closed — never a partial/faked entry set).
+    ListEntries(request: ListEntriesRequest): Promise<ListEntriesResponse> {
+      return new Promise<ListEntriesResponse>((resolve, reject) => {
+        client.makeUnaryRequest(
+          LIST_ENTRIES_METHOD,
+          encodeListEntriesRequest,
+          decodeListEntriesResponse,
+          request,
+          (err: ServiceError | null, value?: ListEntriesResponse) => {
+            if (err !== null) {
+              reject(err);
+              return;
+            }
+            if (value === undefined) {
+              reject(new Error("listEntries: missing RPC response (fail-closed)"));
+              return;
+            }
+            resolve(value);
+          },
+        );
+      });
     },
   };
 }
@@ -173,4 +191,55 @@ function decodeAppendResponse(bytes: Buffer): AppendResponse {
     else throw new Error("append: unexpected field in AppendResponse (fail-closed)");
   }
   return { result };
+}
+
+// --- ListEntries codecs (P2R-PV-S3b: read-only WORM chain read-back; same hand-written proto3 path) -
+
+/**
+ * Encode a `ListEntriesRequest` { from_sequence = 1 : uint64 }. The proto3 zero value is omitted on
+ * the wire (an absent from_sequence => the whole log), matching the kernel's `0 => whole chain` rule.
+ * Exported for the S3b decoder/encoder unit fixture test (no kernel needed).
+ */
+export function encodeListEntriesRequest(req: ListEntriesRequest): Buffer {
+  const out: number[] = [];
+  if (req.fromSequence !== 0) {
+    writeTag(out, 1, 0);
+    writeVarint(out, req.fromSequence);
+  }
+  return Buffer.from(out);
+}
+
+/** Decode one `Entry` { sequence=1:uint64, canonical_event=2:bytes, prev_hash=3:string, entry_hash=4:string }. */
+function decodeEntry(bytes: Uint8Array): Entry {
+  const r: Reader = { buf: bytes, pos: 0 };
+  const out: Entry = { sequence: 0, canonicalEvent: new Uint8Array(), prevHash: "", entryHash: "" };
+  const dec = new TextDecoder();
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    if (field === 1) out.sequence = readVarint(r);
+    // copy the canonical bytes out of the shared buffer so the Entry owns an independent slice.
+    else if (field === 2) out.canonicalEvent = Uint8Array.from(readLenDelim(r));
+    else if (field === 3) out.prevHash = dec.decode(readLenDelim(r));
+    else if (field === 4) out.entryHash = dec.decode(readLenDelim(r));
+    else throw new Error("listEntries: unexpected field in Entry (fail-closed)");
+  }
+  return out;
+}
+
+/**
+ * Decode a `ListEntriesResponse` { repeated Entry = 1 (len-delimited) } in chain order. Exported for
+ * the S3b byte-fixture unit test. A malformed frame throws (fail-closed; the reader rejects rather than
+ * surfacing a partial entry set).
+ */
+export function decodeListEntriesResponse(bytes: Buffer): ListEntriesResponse {
+  const r: Reader = { buf: bytes, pos: 0 };
+  const entries: Entry[] = [];
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    if (field === 1) entries.push(decodeEntry(readLenDelim(r)));
+    else throw new Error("listEntries: unexpected field in ListEntriesResponse (fail-closed)");
+  }
+  return { entries };
 }

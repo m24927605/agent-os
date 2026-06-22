@@ -4,3 +4,4 @@
  */
 export { createRpcAppendTransport, type RpcAppendTransportOpts } from "./transport.js";
 export { grpcAppendService } from "./grpc-client.js";
+export { createEntriesReader, type EntriesReaderOpts } from "./read-transport.js";

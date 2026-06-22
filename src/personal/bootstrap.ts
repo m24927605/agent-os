@@ -83,10 +83,18 @@ export interface PersonalShellOpts {
    * The WORM write-sink the synthesized `AuditEvent` is committed to (SLICE-P2R-PV-S2). Injecting the
    * REAL grpc-js ingest appender (`createIngestAppender(...).append`) makes the Personal governed event
    * land in the running Go kernel's WORM. ABSENT => the S1-identical default: write the shared in-memory
-   * `InMemoryAppendOnlyLog` (which `timeline()` reads). With an injected live sink, `timeline()` reads
-   * the (empty) in-memory log — live read-back of the timeline is P2R-PV-S3.
+   * `InMemoryAppendOnlyLog` (which `timeline()` reads by default).
    */
   readonly wormSink?: (event: AuditEvent) => Promise<AppendReceipt>;
+  /**
+   * The WORM read-back source `timeline()` reconstructs from (SLICE-P2R-PV-S3b; mirrors `wormSink`).
+   * Injecting the REAL `ListEntries` reader (`createEntriesReader({endpoint})`) makes `timeline()`
+   * read back the live Go kernel's WORM over a real RPC — so "the WORM we WROTE == the WORM we READ".
+   * ABSENT => the S1/S2-identical default: read the shared in-memory `InMemoryAppendOnlyLog`
+   * (byte-identical to S1/S2 behavior, only awaited). FAIL-CLOSED is the reader's own contract: a real
+   * read failure rejects, so `timeline()` rejects rather than returning a partial/empty reconstruction.
+   */
+  readonly readEntries?: () => Promise<readonly LogEntry[]>;
 }
 
 /** The composed Personal-surface facade a human (or a test) can drive end-to-end. */
@@ -97,7 +105,7 @@ export interface PersonalShell {
   preview(intent: StructuredIntent): PlanPreview;
   previewAndSubmit(intent: StructuredIntent): SubmitOutcome;
   approve(id: string): Promise<DecideOutcome<AppendReceipt>>;
-  timeline(taskId?: string): TimelineEvent[];
+  timeline(taskId?: string): Promise<TimelineEvent[]>;
   /** Test probe: is the last sandbox the effect created startable (ok) or was none created (denied)? */
   probeLastSandbox(): Promise<AdapterResult>;
 }
@@ -145,6 +153,12 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
   // that `timeline()` reads. With NO `opts.wormSink`, behavior is byte-identical to S1.
   const defaultInMemorySink = (ae: AuditEvent): Promise<AppendReceipt> =>
     Promise.resolve(sharedLog.append(ae));
+
+  // The S1/S2-identical default WORM reader: read the shared in-memory log `timeline()` folds. With NO
+  // `opts.readEntries`, the reconstruction is byte-identical to S1/S2 (the same `sharedLog.entries()`),
+  // only awaited. An injected reader (`createEntriesReader`) instead reads back the live kernel WORM.
+  const defaultInMemoryReader = (): Promise<readonly LogEntry[]> =>
+    Promise.resolve(sharedLog.entries() as LogEntry[]);
 
   /**
    * The seam appender: synthesize a REAL AuditEvent from the structural event, then COMMIT it to the
@@ -212,8 +226,12 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
     preview: (intent) => renderPlanPreview(intent),
     previewAndSubmit: (intent) => inbox.submit(renderPlanPreview(intent), buildToolCall(intent)),
     approve: (id) => inbox.approve(id),
-    timeline: (taskId) =>
-      buildTaskTimeline(sharedLog.entries() as LogEntry[], { taskId, redact: redactSecrets }),
+    timeline: async (taskId) => {
+      // Read from the injected WORM read-back (live kernel via ListEntries) or, by default, the shared
+      // in-memory log — then fold to plain-language events. A reader reject (fail-closed) propagates.
+      const entries = await (opts.readEntries ?? defaultInMemoryReader)();
+      return buildTaskTimeline(entries, { taskId, redact: redactSecrets });
+    },
     probeLastSandbox: async () => {
       if (lastSandboxId === undefined) {
         // Surface the "no effect ran" case as a denied transition (no sandbox to start).
