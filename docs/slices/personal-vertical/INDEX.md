@@ -35,7 +35,8 @@ action/resource/policyDecision/result/taskId/timestamp,timeline.ts:38-50)。**`p
 |---|---|---|---|
 | **P2R-PV-S1** | 最薄可執行主幹:純記憶體 composition root `createPersonalShell(deps)`(`src/personal/bootstrap.ts`)+ 6-case e2e(happy + screen/policy/cost deny + approve-once + clarify-cap) | InMemoryCostGate · FakeSandboxAdapter effect · **共享 InMemoryAppendOnlyLog 的 AuditEvent appender** · screenBrainEvent · evaluatePolicy(allow tool:invoke) | ✅ **DONE**(verify exit 0、740 tests;獨立 Opus4.8 review PASS;shared-log seam mutation 證實)|
 | **P2R-PV-S2** | 把 appender 換成 **live ingest**(`createIngestAppender`+`createRpcAppendTransport`)→ 真 kernel WAL append;gated on `AGENTOS_LIVE_KERNEL_ENDPOINT`;讀回仍走 WAL 檔斷言(沿用 live-kernel.e2e 模式)| 同 S1 + live `createIngestAppender`(wormSink 注入,sourceId='personal')| ✅ **DONE**(`pnpm run e2e:live-kernel` 對真實 kernel 綠;Personal approve 落進真實 WAL;獨立 Opus4.8 review PASS,零 finding)|
-| **P2R-PV-S3** | live 讀回時間軸:需 kernel 新增 list/read-back RPC(目前只有 AppendService;Checkpoint 只回 head anchor、grpc-client Checkpoint fail-closed)→ timeline 吃 live kernel entries。**最重、可能再拆** | live kernel read-back | DRAFT(capability-gated)|
+| **P2R-PV-S3a** | kernel 唯讀 `ListEntries(from_sequence)` RPC(Entry{sequence,canonical_event,prev_hash,entry_hash};append-only 安全、**unsigned**——線上 kernel 無 Ed25519 私鑰;verifier 可驗鏈結+entryHash)| Go:proto+list.go+regen Go/TS stub | DRAFT |
+| **P2R-PV-S3b** | TS `ListEntries` codec + `createEntriesReader` + `createPersonalShell` 加 `readEntries` 注入(比照 wormSink)+ `timeline()` 改 async + live e2e | TS:grpc-client codec + reader + bootstrap | DRAFT |
 
 ## 4. 風險（誠實）
 - **live 讀回不存在**:kernel 只暴露 AppendService(main.go),無 list/read RPC;`TaskTimeline 讀 == appender 寫`的同一份 WORM 這個 invariant **只在 in-memory(S1)成立**;live(S3)要先補 kernel 讀回路徑(風險最高,可能依 R10-S3 Checkpoint 接線)。
