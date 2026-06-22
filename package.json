@@ -34,6 +34,7 @@
     "launcher:check": "node scripts/launcher-check.mjs",
     "e2e:live-kernel": "bash scripts/e2e-live-kernel.sh",
     "e2e:live-spendguard": "bash scripts/e2e-live-spendguard.sh",
+    "e2e:live-nemoclaw": "bash scripts/e2e-live-nemoclaw.sh",
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run spendguard:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && pnpm run secret-scan"
   },
   "dependencies": {

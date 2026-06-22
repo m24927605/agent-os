@@ -1,5 +1,5 @@
 /**
- * The mTLS gRPC `ExecSandbox` transport — slice SLICE-OS-S1 (the FIRST real OpenShell gRPC transport).
+ * The mTLS gRPC `ExecSandbox` transport — slice SLICE-OS-S1, CONVERGED in SLICE-NC-S11b.
  *
  * This is a SINGLE chokepoint where the runtime RPC vendor (@grpc/grpc-js) + the OpenShell wire codec
  * are named for exec. It lives under src/runtime/openshell/ (an adapter sub-tree, NOT core), so the
@@ -8,16 +8,24 @@
  * test-injectable construction of the OpenShell health client (client.ts) / ingest transport
  * (transport.ts): production builds the real grpc-js Client; tests inject a fake stream.
  *
- * Responsibility (and ONLY this): build an mTLS channel to the gateway, drive the `ExecSandbox`
- * server-stream (encodeExecSandboxRequest -> stream<ExecSandboxEvent>), accumulate stdout/stderr bytes,
- * and converge on the terminal `ExecSandboxExit` into an {@link ExecResult}.
+ * CONVERGENCE (NC-S11b — resolves the OS-S1 §6 MAJOR-with-tracking): this transport now implements the
+ * adapter-consumed `OpenShellExecTransport` (client.ts) — `execSandbox(req, signal)` opens the
+ * `ExecSandbox` server-stream and YIELDS the raw `ExecSandboxEvent`s as an `AsyncIterable`. It does NOT
+ * accumulate, deadline, or cap output — the SINGLE stream accumulator (deadline via AbortController,
+ * maxOutputBytes cap, oneof validation, redaction -> ExecOutcome) lives ONLY in
+ * `OpenShellSandboxAdapter.streamExec` (adapter.ts). The old `consumeExecStream` / `ExecResult` /
+ * `ExecOpts` / `OpenShellGrpcExecTransport` (the DUPLICATE accumulator) are deleted.
  *
- * FAIL-CLOSED INVARIANT (deny-by-default; NEVER fabricate success): a stream that closes WITHOUT a
- * terminal exit event, a wall-clock deadline that elapses before exit, a total output size that would
- * exceed `maxOutputBytes`, a stream `error`, OR a synchronous throw ALL REJECT — the transport NEVER
- * invents an exit code 0. A NON-ZERO exit code is a faithful command result (resolved as-is), NOT a
- * deny condition. On overflow / deadline the underlying gRPC stream is CANCELLED so the gateway stops
- * producing (no leaked stream).
+ * Responsibility (and ONLY this): build an mTLS channel to the gateway, open the `ExecSandbox`
+ * server-stream (encodeExecSandboxRequest -> stream<ExecSandboxEvent>), wire the caller's `AbortSignal`
+ * to `call.cancel()`, and expose the stream as an `AsyncIterable<ExecSandboxEvent>`.
+ *
+ * FAIL-CLOSED INVARIANT (deny-by-default): the lifecycle primitives `createSandbox` / `deleteSandbox`
+ * are NOT yet implemented (they land in OS-S2). They REJECT with a static reason rather than silently
+ * claiming success — so `new OpenShellSandboxAdapter(this)` has a valid `OpenShellLifecycleTransport`
+ * while a caller that tries to create/delete fails closed. The exec stream itself never fabricates a
+ * result: a stream `error`, a stream `end` before exit, an abort, etc. surface to the adapter (the
+ * single accumulator), which converges them deny-by-default.
  *
  * CREDENTIAL-BLIND: the mTLS materials are read from PATHS (never inlined); NO cert/key/endpoint
  * content is ever placed in an error message, a reason, or a log (mirrors the adapter's discipline —
@@ -26,6 +34,14 @@
  */
 import { readFileSync } from "node:fs";
 import { Client, Metadata, credentials } from "@grpc/grpc-js";
+import type {
+  CreateSandboxRequest,
+  DeleteSandboxRequest,
+  DeleteSandboxResponse,
+  ExecSandboxRequest,
+  OpenShellExecTransport,
+  SandboxResponse,
+} from "./client.js";
 import {
   EXEC_SANDBOX_METHOD,
   type ExecSandboxEvent,
@@ -34,51 +50,12 @@ import {
   encodeExecSandboxRequest,
 } from "./proto/openshell.subset.codec.js";
 
-/** Converged result of a sandbox exec: the command exit code + the full stdout/stderr byte streams. */
-export interface ExecResult {
-  readonly exitCode: number;
-  readonly stdout: Uint8Array;
-  readonly stderr: Uint8Array;
-}
-
-/** Per-call options for {@link OpenShellGrpcExecTransport.execSandbox}. */
-export interface ExecOpts {
-  /** Working directory inside the sandbox (ExecSandboxRequest.workdir). */
-  readonly workdir?: string;
-  /** Env overrides (ExecSandboxRequest.environment). Caller is responsible for placeholder-only values. */
-  readonly environment?: Readonly<Record<string, string>>;
-  /** Command timeout in seconds (ExecSandboxRequest.timeout_seconds); 0 = no timeout. */
-  readonly timeoutSeconds?: number;
-  /** stdin payload (ExecSandboxRequest.stdin). */
-  readonly stdin?: Uint8Array;
-  /**
-   * Wall-clock budget for consuming the whole exec stream. Expiry BEFORE a terminal exit => REJECT
-   * (never fabricate success) + the stream is cancelled. Defaults to {@link DEFAULT_DEADLINE_MS}.
-   */
-  readonly deadlineMs?: number;
-  /**
-   * Hard cap on the TOTAL buffered stdout+stderr bytes. Once the accumulated size would exceed this cap
-   * the stream is cancelled and the call REJECTS (never OOMs the host, never returns a truncated
-   * success). Defaults to {@link DEFAULT_MAX_OUTPUT_BYTES}.
-   */
-  readonly maxOutputBytes?: number;
-}
-
 /**
- * The exec capability of the OpenShell gRPC transport. `execSandbox` resolves an {@link ExecResult} on
- * an observed terminal exit (any code) and REJECTS on every fail-closed path. This is the grpc
- * transport's public exec shape (distinct from the adapter-internal `OpenShellExecTransport` event
- * stream seam in client.ts, which leaves accumulation to the adapter).
- */
-export interface OpenShellGrpcExecTransport {
-  execSandbox(sandboxId: string, command: readonly string[], opts?: ExecOpts): Promise<ExecResult>;
-}
-
-/**
- * The minimal EventEmitter-shaped server-stream handle the transport consumes. Both the real grpc-js
- * `ClientReadableStream<ExecSandboxEvent>` (returned by `makeServerStreamRequest`) and the unit-test
- * fake satisfy it: `data`/`end`/`error` events + a `cancel()` to tear the stream down on deadline /
- * overflow. Decoding from wire bytes happens in the grpc-js `deserialize` callback BEFORE this seam.
+ * The minimal EventEmitter-shaped server-stream handle the transport adapts into an `AsyncIterable`.
+ * Both the real grpc-js `ClientReadableStream<ExecSandboxEvent>` (returned by `makeServerStreamRequest`,
+ * a Node `Readable` so it already satisfies this) and the unit-test fake satisfy it: `data`/`end`/`error`
+ * events + a `cancel()` to tear the stream down on abort. Decoding from wire bytes happens in the
+ * grpc-js `deserialize` callback BEFORE this seam.
  */
 export interface ExecStreamHandle {
   on(event: "data", cb: (ev: ExecSandboxEvent) => void): ExecStreamHandle;
@@ -96,9 +73,16 @@ export interface OpenShellGrpcTransportOpts {
   readonly clientCertPath: string;
   /** Path to the client key (privateKey) — read from disk, never inlined. */
   readonly clientKeyPath: string;
-  /** Default wall-clock budget for an exec stream (per call override via {@link ExecOpts.deadlineMs}). */
+  /**
+   * Default wall-clock budget for an exec stream. Retained for API compatibility with OS-S1 callers /
+   * the live harness; the deadline is ENFORCED by the adapter's single accumulator (`streamExec`), not
+   * here. Passing it through `OpenShellSandboxAdapter.execSandbox(…, { deadlineMs })` is how it bites.
+   */
   readonly deadlineMs?: number;
-  /** Default hard cap on total buffered output bytes (per call override via {@link ExecOpts.maxOutputBytes}). */
+  /**
+   * Default hard cap on total buffered output bytes. Like `deadlineMs`, the CAP is enforced by the
+   * adapter's accumulator, not by this thin transport. Retained for API compatibility.
+   */
   readonly maxOutputBytes?: number;
   /**
    * TLS server name to verify against / send as SNI. The OpenShell gateway listens on an IP
@@ -117,181 +101,153 @@ export interface OpenShellGrpcTransportOpts {
   readonly openExecStream?: (request: ExecSandboxRequestWire) => ExecStreamHandle;
 }
 
-/** Default wall-clock budget for an exec stream when the caller supplies none (60s). */
-const DEFAULT_DEADLINE_MS = 60_000;
-
-/** Default hard cap on total buffered stdout+stderr bytes (8 MiB) — overflow => reject (never OOM). */
-const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
-
-/** Concatenate accumulated byte chunks into one contiguous Uint8Array (preserving order). */
-function concatChunks(chunks: readonly Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.length;
-  }
-  return out;
-}
+/** Static deny reason for the not-yet-implemented lifecycle primitives (credential-blind; deny-by-default). */
+const LIFECYCLE_NOT_IMPLEMENTED =
+  "openshell grpc transport: lifecycle not implemented until OS-S2 (fail-closed)";
 
 /**
- * Build an `OpenShellGrpcExecTransport` over an mTLS gRPC channel to the gateway.
+ * Build an `OpenShellExecTransport` over an mTLS gRPC channel to the gateway — the transport
+ * `OpenShellSandboxAdapter` consumes directly.
  *
  * mTLS channel construction (grpc-js `createSsl` arg order: rootCerts, privateKey, certChain):
  *   credentials.createSsl(readFileSync(caCertPath), readFileSync(clientKeyPath), readFileSync(clientCertPath))
  * The certs are read from the supplied PATHS lazily, ONLY when no `openExecStream` test seam is given,
  * so the unit tests never read a cert nor open a socket.
+ *
+ * `health()` reports `{ ok: true }` (the live exec path does not depend on a Health RPC here; readiness
+ * is OS-S2 / out of scope). `createSandbox` / `deleteSandbox` FAIL CLOSED (reject) until OS-S2 makes
+ * them real — they exist only so the returned object is a valid `OpenShellLifecycleTransport`.
  */
 export function createOpenShellGrpcTransport(
   opts: OpenShellGrpcTransportOpts,
-): OpenShellGrpcExecTransport {
-  const defaultDeadlineMs = opts.deadlineMs ?? DEFAULT_DEADLINE_MS;
-  const defaultMaxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+): OpenShellExecTransport {
   // Build the real mTLS grpc-js stream source lazily ONLY when no test seam is injected.
   const openExecStream = opts.openExecStream ?? buildGrpcExecStreamSource(opts);
 
   return {
-    execSandbox(
-      sandboxId: string,
-      command: readonly string[],
-      execOpts?: ExecOpts,
-    ): Promise<ExecResult> {
-      const deadlineMs = execOpts?.deadlineMs ?? defaultDeadlineMs;
-      const maxOutputBytes = execOpts?.maxOutputBytes ?? defaultMaxOutputBytes;
-      const request: ExecSandboxRequestWire = {
-        sandboxId,
-        command,
-        ...(execOpts?.workdir !== undefined ? { workdir: execOpts.workdir } : {}),
-        ...(execOpts?.environment !== undefined ? { environment: execOpts.environment } : {}),
-        ...(execOpts?.timeoutSeconds !== undefined
-          ? { timeoutSeconds: execOpts.timeoutSeconds }
-          : {}),
-        ...(execOpts?.stdin !== undefined ? { stdin: execOpts.stdin } : {}),
+    health(): Promise<{ ok: boolean }> {
+      // The exec transport does not wrap a Health RPC (S1's health client does); exec health is proven
+      // by an actual exec. Report ok so the lifecycle seam is satisfied; readiness lands in OS-S2.
+      return Promise.resolve({ ok: true });
+    },
+
+    createSandbox(_req: CreateSandboxRequest): Promise<SandboxResponse> {
+      // Deny-by-default: OS-S2 wires the real CreateSandbox RPC. Until then a create attempt fails
+      // closed (never a silent fake success). No endpoint / cert detail in the reason.
+      return Promise.reject(new Error(LIFECYCLE_NOT_IMPLEMENTED));
+    },
+
+    deleteSandbox(_req: DeleteSandboxRequest): Promise<DeleteSandboxResponse> {
+      // Deny-by-default: OS-S2 wires the real DeleteSandbox RPC. Until then a delete attempt fails closed.
+      return Promise.reject(new Error(LIFECYCLE_NOT_IMPLEMENTED));
+    },
+
+    execSandbox(req: ExecSandboxRequest, signal?: AbortSignal): AsyncIterable<ExecSandboxEvent> {
+      // Build the wire request from the adapter's neutral ExecSandboxRequest. proto3 zero/empty values
+      // are omitted by the codec; only set fields the caller supplied.
+      const wire: ExecSandboxRequestWire = {
+        sandboxId: req.sandboxId,
+        command: req.command,
+        ...(req.workdir !== undefined ? { workdir: req.workdir } : {}),
+        ...(req.environment !== undefined ? { environment: req.environment } : {}),
+        ...(req.timeoutSeconds !== undefined ? { timeoutSeconds: req.timeoutSeconds } : {}),
+        ...(req.stdin !== undefined ? { stdin: req.stdin } : {}),
       };
-      return consumeExecStream(openExecStream, request, deadlineMs, maxOutputBytes);
+      return streamExecSandbox(openExecStream, wire, signal);
     },
   };
 }
 
 /**
- * Consume the `ExecSandbox` server-stream until the terminal `ExecSandboxExit` or a fail-closed event.
- * Accumulates stdout/stderr chunks in arrival order; resolves `ok` ONLY on an observed exit event (any
- * exit code). REJECTS — never fabricating success — on: a stream that ends before exit, a wall-clock
- * deadline expiry, a total output size that would exceed `maxOutputBytes`, a malformed oneof frame, a
- * stream `error`, OR a synchronous throw. On deadline / overflow the underlying stream is cancelled.
+ * Adapt the EventEmitter-shaped `ExecStreamHandle` into an `AsyncIterable<ExecSandboxEvent>` that yields
+ * each frame in arrival order, completes on `end`, and throws on a stream `error`. The caller's
+ * `AbortSignal` (if any) is wired to `handle.cancel()` so the adapter's deadline / overflow abort tears
+ * the underlying gRPC stream down (no leaked stream). NO accumulation, NO deadline, NO output cap here
+ * — the adapter's `streamExec` is the SINGLE accumulator that owns all of that.
  *
- * NO endpoint / cert content is ever placed in a rejection message (credential-blind).
+ * A synchronous throw from opening the stream (transport refused) is re-thrown from the iterator (the
+ * adapter's `streamExec` try/catch converges it deny-by-default). We never surface the underlying error
+ * detail verbatim across this seam — but a stream `error` is propagated as-is so the adapter can fail
+ * closed on it; the adapter NEVER places it in a reason / log (credential-blind there).
  */
-function consumeExecStream(
+async function* streamExecSandbox(
   openExecStream: (request: ExecSandboxRequestWire) => ExecStreamHandle,
   request: ExecSandboxRequestWire,
-  deadlineMs: number,
-  maxOutputBytes: number,
-): Promise<ExecResult> {
-  return new Promise<ExecResult>((resolve, reject) => {
-    const stdout: Uint8Array[] = [];
-    const stderr: Uint8Array[] = [];
-    let buffered = 0;
-    let settled = false;
-    let stream: ExecStreamHandle | undefined;
+  signal?: AbortSignal,
+): AsyncIterable<ExecSandboxEvent> {
+  const handle = openExecStream(request);
 
-    // Wall-clock deadline: a never-settling stream can never hang the caller. The callback runs LATER
-    // (after `settle` below is defined), so referencing `settle` here is safe. Fail closed (no exit).
-    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
-      settle({ err: new Error("openshell exec: deadline exceeded before exit (fail-closed)") });
-    }, deadlineMs);
-
-    /** Resolve/reject exactly once; always cancel the stream + clear the timer (no leak). */
-    const settle = (outcome: { ok: ExecResult } | { err: Error }): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      // Best-effort cancel so a real gateway stops producing (overflow/deadline/early settle).
-      if (stream !== undefined) {
-        try {
-          stream.cancel();
-        } catch {
-          // a cancel on an already-closed stream is harmless; never surface it.
-        }
-      }
-      if ("ok" in outcome) resolve(outcome.ok);
-      else reject(outcome.err);
-    };
-
-    // A synchronous throw from opening the stream (transport refused) fails closed.
+  // Wire the abort -> cancel. If the signal is ALREADY aborted, cancel immediately (and never start
+  // consuming). Otherwise listen once; cancelling a closed stream is harmless.
+  const cancel = (): void => {
     try {
-      stream = openExecStream(request);
+      handle.cancel();
     } catch {
-      // NEVER surface the underlying error (it may carry endpoint / cert detail). Fail closed.
-      settle({ err: new Error("openshell exec: stream open failed (fail-closed)") });
-      return;
+      // a cancel on an already-closed stream is harmless; never surface it.
     }
+  };
+  if (signal?.aborted === true) {
+    cancel();
+    return;
+  }
+  const onAbort = (): void => cancel();
+  signal?.addEventListener("abort", onAbort, { once: true });
 
-    stream
-      .on("data", (ev: ExecSandboxEvent) => {
-        if (settled) return;
-        // Validate the oneof shape (untrusted wire frame): EXACTLY one variant must be present. A frame
-        // with none or more than one is garbled and fails closed — never a (possibly truncated) success.
-        const present =
-          (ev.stdout !== undefined ? 1 : 0) +
-          (ev.stderr !== undefined ? 1 : 0) +
-          (ev.exit !== undefined ? 1 : 0);
-        if (present !== 1) {
-          settle({ err: new Error("openshell exec: malformed event oneof (fail-closed)") });
-          return;
-        }
+  // Bridge the event emitter into a pull queue so the async generator can `yield` each frame.
+  const queue: ExecSandboxEvent[] = [];
+  let ended = false;
+  let error: Error | undefined;
+  let wake: (() => void) | undefined;
+  const notify = (): void => {
+    if (wake !== undefined) {
+      const w = wake;
+      wake = undefined;
+      w();
+    }
+  };
 
-        if (ev.exit !== undefined) {
-          // Terminal: converge. A missing / non-integer exit_code fails closed (no fabricated 0).
-          const code = ev.exit.exitCode;
-          if (typeof code !== "number" || !Number.isInteger(code)) {
-            settle({
-              err: new Error("openshell exec: exit event missing exit_code (fail-closed)"),
-            });
-            return;
-          }
-          settle({
-            ok: { exitCode: code, stdout: concatChunks(stdout), stderr: concatChunks(stderr) },
-          });
-          return;
-        }
+  handle
+    .on("data", (ev: ExecSandboxEvent) => {
+      queue.push(ev);
+      notify();
+    })
+    .on("end", () => {
+      ended = true;
+      notify();
+    })
+    .on("error", (err: Error) => {
+      error = err;
+      ended = true;
+      notify();
+    });
 
-        // stdout or stderr chunk: the data field MUST be a Uint8Array (a garbled frame fails closed).
-        const chunk = ev.stdout?.data ?? ev.stderr?.data;
-        if (!(chunk instanceof Uint8Array)) {
-          settle({ err: new Error("openshell exec: malformed chunk (fail-closed)") });
-          return;
-        }
-        // Resource bound: reject (never OOM, never return a truncated success) once the total buffered
-        // stdout+stderr would exceed the cap. settle() cancels the stream so the gateway stops producing.
-        buffered += chunk.length;
-        if (buffered > maxOutputBytes) {
-          settle({ err: new Error("openshell exec: output exceeded max bytes (fail-closed)") });
-          return;
-        }
-        if (ev.stdout !== undefined) stdout.push(chunk);
-        else stderr.push(chunk);
-      })
-      .on("end", () => {
-        // Stream closed WITHOUT a terminal exit event => fail closed (never fabricate success).
-        settle({ err: new Error("openshell exec: stream ended before exit event (fail-closed)") });
-      })
-      .on("error", () => {
-        // gRPC status error / RST_STREAM / decode error. NEVER surface it (it may carry endpoint /
-        // cert detail). Fail closed.
-        settle({ err: new Error("openshell exec: stream error before exit (fail-closed)") });
+  try {
+    for (;;) {
+      while (queue.length > 0) {
+        const ev = queue.shift();
+        if (ev !== undefined) yield ev;
+      }
+      if (error !== undefined) throw error;
+      if (ended) return;
+      // Wait for the next emitter event (data/end/error). Re-loop to drain the queue when woken.
+      await new Promise<void>((resolve) => {
+        wake = resolve;
       });
-  });
+    }
+  } finally {
+    // The consumer stopped iterating (return / throw / abort): tear the stream down + drop the listener.
+    signal?.removeEventListener("abort", onAbort);
+    cancel();
+  }
 }
 
 /**
- * Build the production mTLS grpc-js stream source (lazy; exercised by the main loop's live validation,
- * never by the hermetic unit tests). Reads the cert PATHS, constructs an mTLS channel with the grpc-js
+ * Build the production mTLS grpc-js stream source (lazy; exercised by the live harness, never by the
+ * hermetic unit tests). Reads the cert PATHS, constructs an mTLS channel with the grpc-js
  * `createSsl(rootCerts, privateKey, certChain)` arg order, and opens an `ExecSandbox` server-stream via
- * `makeServerStreamRequest` (encode request -> decode each ExecSandboxEvent frame). The returned handle
- * adapts the grpc-js `ClientReadableStream` to the vendor-neutral {@link ExecStreamHandle}.
+ * `makeServerStreamRequest` (encode request -> decode each ExecSandboxEvent frame). The returned
+ * `ClientReadableStream` is a Node `Readable` (already an `AsyncIterable`) AND exposes `cancel()`, so it
+ * satisfies the vendor-neutral {@link ExecStreamHandle}.
  */
 function buildGrpcExecStreamSource(
   opts: OpenShellGrpcTransportOpts,
