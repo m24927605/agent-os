@@ -41,6 +41,7 @@
  * fake UDS server in decision-transport.test.ts exercises a real round-trip; the live e2e against a
  * real SpendGuard sidecar is R11-S9.
  */
+import { randomUUID } from "node:crypto";
 import { type ChannelCredentials, Client, type ServiceError, credentials } from "@grpc/grpc-js";
 import type {
   LedgerCommitReq,
@@ -91,6 +92,13 @@ export interface DecisionLedgerTransportOpts {
   readonly udsPath: string;
   /** Per-call deadline; on expiry the call REJECTS (fail-closed). Defaults to {@link DEFAULT_TIMEOUT_MS}. */
   readonly timeoutMs?: number;
+  /**
+   * Tenant the workload asserts at handshake (HandshakeRequest.tenant_id_assertion, adapter.proto:206).
+   * The sidecar fails closed with PERMISSION_DENIED unless this matches its configured tenant. A tenant
+   * identifier, NOT a credential — credential-blindness is preserved. Empty (default) asserts no tenant
+   * and is rejected by a tenant-scoped sidecar; a real deployment passes the workload's tenant.
+   */
+  readonly tenantIdAssertion?: string;
 }
 
 /**
@@ -103,6 +111,10 @@ export function createDecisionLedgerTransport(opts: DecisionLedgerTransportOpts)
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const insecure: ChannelCredentials = credentials.createInsecure();
   const client = new Client(`unix://${opts.udsPath}`, insecure);
+  const handshakeRequest: HandshakeRequest = {
+    ...HANDSHAKE_REQUEST,
+    tenantIdAssertion: opts.tenantIdAssertion ?? "",
+  };
 
   function unary<Resp>(
     method: string,
@@ -149,7 +161,7 @@ export function createDecisionLedgerTransport(opts: DecisionLedgerTransportOpts)
       handshake = unary(
         HANDSHAKE_METHOD,
         decodeHandshakeResponse,
-        encodeHandshakeRequest(HANDSHAKE_REQUEST),
+        encodeHandshakeRequest(handshakeRequest),
       ).then((resp) => {
         if (resp.sessionId.length === 0) {
           // A handshake with no session id is unusable — fail CLOSED, and let the next call retry.
@@ -172,21 +184,24 @@ export function createDecisionLedgerTransport(opts: DecisionLedgerTransportOpts)
     ): Promise<{ reservationId: string } | { overBudget: true }> {
       const session = await sessionId();
       const projected = atomicToWire(req.estimated_amount_atomic);
-      const wire = encodeDecisionRequest({
-        sessionId: session,
-        trigger: DecisionRequest_Trigger.LLM_CALL_PRE,
-        trace: undefined,
-        ids: undefined,
-        route: req.route,
-        inputs: {
-          projectedClaims: [],
-          projectedP50Atomic: projected,
-          projectedP90Atomic: projected,
-          projectedP95Atomic: projected,
-          projectedP99Atomic: projected,
-          projectedUnit: undefined,
+      const wire = encodeDecisionRequest(
+        {
+          sessionId: session,
+          trigger: DecisionRequest_Trigger.LLM_CALL_PRE,
+          trace: undefined,
+          ids: undefined,
+          route: req.route,
+          inputs: {
+            projectedClaims: [],
+            projectedP50Atomic: projected,
+            projectedP90Atomic: projected,
+            projectedP95Atomic: projected,
+            projectedP99Atomic: projected,
+            projectedUnit: undefined,
+          },
         },
-      });
+        randomUUID(),
+      );
       const resp = await unary(DECISION_METHOD, decodeDecisionResponse, wire);
       if (resp.decision === DecisionResponse_Decision.CONTINUE) {
         if (resp.decisionId.length === 0) {
@@ -284,7 +299,9 @@ function encodeHandshakeRequest(req: HandshakeRequest): Buffer {
   writeString(out, 1, req.sdkVersion);
   writeString(out, 2, req.runtimeKind);
   writeString(out, 3, req.runtimeVersion);
-  // tenant_id_assertion (5) intentionally left empty — no credential on the wire.
+  // tenant_id_assertion (5): a TENANT IDENTITY assertion (NOT a credential — no secret); the sidecar
+  // fails closed (PERMISSION_DENIED) unless it matches its configured tenant. proto3-omit when empty.
+  if (req.tenantIdAssertion.length > 0) writeString(out, 5, req.tenantIdAssertion);
   writeUint32(out, 7, req.protocolVersion);
   return Buffer.from(out);
 }
@@ -301,7 +318,7 @@ function encodeDecisionRequestInputs(inputs: DecisionRequest["inputs"]): Buffer 
   return Buffer.from(out);
 }
 
-function encodeDecisionRequest(req: DecisionRequest): Buffer {
+function encodeDecisionRequest(req: DecisionRequest, idempotencyKey: string): Buffer {
   const out: number[] = [];
   writeString(out, 1, req.sessionId);
   writeEnum(out, 2, req.trigger);
@@ -309,6 +326,12 @@ function encodeDecisionRequest(req: DecisionRequest): Buffer {
   writeString(out, 5, req.route);
   const inputs = encodeDecisionRequestInputs(req.inputs);
   if (inputs.length > 0) writeLenDelim(out, 6, inputs);
+  // idempotency (9): the sidecar REQUIRES a non-empty Idempotency.key (adapter_uds.rs request_decision
+  // validation) — same key + same request fingerprint collapses to one decision. Idempotency.key = field 1.
+  // A correlation token, NOT a credential.
+  const idem: number[] = [];
+  writeString(idem, 1, idempotencyKey);
+  writeLenDelim(out, 9, Buffer.from(idem));
   return Buffer.from(out);
 }
 
@@ -461,6 +484,51 @@ export function decodeDecisionRequestForTest(bytes: Buffer): DecisionRequest {
     else skipField(r, wireType);
   }
   return out;
+}
+
+/**
+ * TEST-ONLY: extract HandshakeRequest.tenant_id_assertion (field 5) from the wire bytes. Guards the
+ * live-discovered bug where the encoder silently dropped field 5 (the fake never checked it).
+ */
+export function decodeHandshakeTenantAssertionForTest(bytes: Buffer): string {
+  const r: Reader = { buf: bytes, pos: 0 };
+  const dec = new TextDecoder();
+  let assertion = "";
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 7;
+    if (field === 5 && wireType === 2) assertion = dec.decode(readLenDelim(r));
+    else skipField(r, wireType);
+  }
+  return assertion;
+}
+
+/**
+ * TEST-ONLY: extract DecisionRequest.idempotency.key (field 9 -> nested Idempotency.key field 1) from
+ * the wire bytes. Guards the live-discovered bug where the encoder omitted the required idempotency key.
+ */
+export function decodeDecisionIdempotencyKeyForTest(bytes: Buffer): string {
+  const r: Reader = { buf: bytes, pos: 0 };
+  const dec = new TextDecoder();
+  let key = "";
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 7;
+    if (field === 9 && wireType === 2) {
+      const inner = readLenDelim(r);
+      const ir: Reader = { buf: inner, pos: 0 };
+      while (ir.pos < inner.length) {
+        const itag = readVarint(ir);
+        const ifield = Math.floor(itag / 8);
+        const iwt = itag & 7;
+        if (ifield === 1 && iwt === 2) key = dec.decode(readLenDelim(ir));
+        else skipField(ir, iwt);
+      }
+    } else skipField(r, wireType);
+  }
+  return key;
 }
 
 function decodeDecisionRequestInputsForTest(bytes: Uint8Array): DecisionRequest_Inputs {
