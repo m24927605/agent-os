@@ -14,6 +14,7 @@
  * RED-first: `./bootstrap.js` does not exist yet, so the import below fails and the suite cannot run.
  */
 import { describe, expect, it } from "vitest";
+import type { AppendReceipt, AuditEvent } from "../audit/index.js";
 import type { AgentContext } from "../iam/ids.js";
 import { createPersonalShell } from "./bootstrap.js";
 import { CLARIFY_MAX_QUESTIONS } from "./intent/index.js";
@@ -65,6 +66,58 @@ describe("createPersonalShell — end-to-end Personal vertical over the real in-
     // Exit redaction holds even on a clean run: no secret canary anywhere in the timeline text.
     const text = JSON.stringify(events);
     expect(text).not.toContain(CANARY);
+  });
+
+  it("INJECTED wormSink (S2 seam): approve routes the SYNTHESIZED AuditEvent to the sink, not the in-memory log", async () => {
+    // A RECORDING sink standing in for the live ingest appender (no kernel here). It captures every
+    // AuditEvent the composition root synthesizes and returns a plausible AppendReceipt so the
+    // commit-before-effect gate sees a durable commit and the effect proceeds.
+    const captured: AuditEvent[] = [];
+    const recordingSink = (ae: AuditEvent): Promise<AppendReceipt> => {
+      captured.push(ae);
+      return Promise.resolve({
+        sequence: captured.length - 1,
+        contentHash: `sha256:${"0".repeat(64)}`,
+        prevHash: `sha256:${"0".repeat(64)}`,
+        entryHash: `sha256:${"0".repeat(64)}`,
+      });
+    };
+
+    const shell = createPersonalShell({
+      budget: 1000,
+      allowToolInvoke: true,
+      wormSink: recordingSink,
+    });
+
+    const received = shell.receive(LEGAL_TEXT, ctx);
+    expect(received.status).toBe("intent");
+    if (received.status !== "intent") return;
+    const action = received.intent.action;
+
+    const submitted = shell.previewAndSubmit(received.intent);
+    expect(submitted.status).toBe("pending");
+    if (submitted.status !== "pending") return;
+
+    const decided = await shell.approve(submitted.id);
+    expect(decided.status).toBe("executed");
+
+    // The injected sink received EXACTLY ONE synthesized AuditEvent (the root used the sink, not the
+    // default in-memory log). Assert the synthesis is correct: action/resource/decision/result + ctx.
+    expect(captured.length).toBe(1);
+    const ae = captured[0];
+    if (ae === undefined) return;
+    expect(ae.action).toBe("tool:invoke");
+    expect(ae.resource).toBe(`personal:${action}`);
+    expect(ae.policyDecision.effect).toBe("allow");
+    expect(ae.result).toBe("success");
+    expect(ae.actorId).toBe(ctx.actorId);
+    expect(ae.tenantId).toBe(ctx.tenantId);
+    expect(ae.projectId).toBe(ctx.projectId);
+    expect(ae.taskId).toBe(ctx.taskId);
+    expect(ae.requestId).toBe(ctx.requestId);
+
+    // With the sink injected, timeline() reads the (empty) in-memory log — live read-back is S3.
+    expect(shell.timeline(ctx.taskId).length).toBe(0);
   });
 
   it("SCREEN short-circuit: a secret canary in a target -> denied@screen, NO effect, canary absent from timeline", async () => {

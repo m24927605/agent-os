@@ -29,6 +29,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import {
   type AppendReceipt,
+  type AuditEvent,
   InMemoryAppendOnlyLog,
   type LogEntry,
   createAuditEvent,
@@ -78,6 +79,14 @@ export interface PersonalShellOpts {
   readonly allowToolInvoke?: boolean;
   /** Fixed token estimate per call (mirrors the pipeline.e2e `() => 10`). */
   readonly estimateTokens?: number;
+  /**
+   * The WORM write-sink the synthesized `AuditEvent` is committed to (SLICE-P2R-PV-S2). Injecting the
+   * REAL grpc-js ingest appender (`createIngestAppender(...).append`) makes the Personal governed event
+   * land in the running Go kernel's WORM. ABSENT => the S1-identical default: write the shared in-memory
+   * `InMemoryAppendOnlyLog` (which `timeline()` reads). With an injected live sink, `timeline()` reads
+   * the (empty) in-memory log — live read-back of the timeline is P2R-PV-S3.
+   */
+  readonly wormSink?: (event: AuditEvent) => Promise<AppendReceipt>;
 }
 
 /** The composed Personal-surface facade a human (or a test) can drive end-to-end. */
@@ -132,11 +141,18 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
     readonly decisionReason: string;
   }
 
+  // The S1-identical default WORM sink: append the synthesized AuditEvent to the shared in-memory log
+  // that `timeline()` reads. With NO `opts.wormSink`, behavior is byte-identical to S1.
+  const defaultInMemorySink = (ae: AuditEvent): Promise<AppendReceipt> =>
+    Promise.resolve(sharedLog.append(ae));
+
   /**
-   * The seam appender: synthesize a REAL AuditEvent from the structural event, append it to the shared
-   * WORM, and return its receipt. `result:"success"` + `policyDecision.effect:"allow"` because the
-   * pipeline only commits AFTER screen+PDP+cost pass — the append marks the committed (about-to-run)
-   * effect, which the timeline then renders as 「已完成」.
+   * The seam appender: synthesize a REAL AuditEvent from the structural event, then COMMIT it to the
+   * injectable WORM sink (SLICE-P2R-PV-S2). `result:"success"` + `policyDecision.effect:"allow"` because
+   * the pipeline only commits AFTER screen+PDP+cost pass — the append marks the committed (about-to-run)
+   * effect, which the timeline then renders as 「已完成」. The AuditEvent SYNTHESIS is unchanged from S1
+   * and stays the single source here; only the FINAL write is routed through `opts.wormSink` (the live
+   * Go-kernel ingest appender) or, by default, the shared in-memory log.
    */
   const appender: CommitAppender<StructuralEvent, AppendReceipt> = {
     append: (event) => {
@@ -153,7 +169,7 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
         policyDecision: { effect: "allow", reason: event.decisionReason },
         result: "success",
       });
-      return Promise.resolve(sharedLog.append(auditEvent));
+      return (opts.wormSink ?? defaultInMemorySink)(auditEvent);
     },
   };
 

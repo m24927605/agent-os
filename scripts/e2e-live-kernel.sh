@@ -42,7 +42,7 @@ echo "e2e:live-kernel: kernel ready ($(grep listening "$LOG" | tail -1))"
 # (the client exposes no close()): a hang becomes a failure, never an infinite block.
 export AGENTOS_LIVE_KERNEL_ENDPOINT="127.0.0.1:$PORT"
 export AGENTOS_LIVE_KERNEL_CHAIN="$CHAIN"
-( cd "$ROOT" && node_modules/.bin/vitest run src/audit/ingest/live-kernel.e2e.test.ts ) &
+( cd "$ROOT" && node_modules/.bin/vitest run src/audit/ingest/live-kernel.e2e.test.ts src/personal/bootstrap.live-kernel.e2e.test.ts ) &
 VPID=$!
 ( sleep 120; kill -9 "$VPID" 2>/dev/null ) &
 WPID=$!
