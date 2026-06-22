@@ -37,3 +37,18 @@ export {
   type ProviderEnvOutcome,
   OpenShellSandboxAdapter,
 } from "./adapter.js";
+export {
+  type OpenShellGrpcTransportOpts,
+  type OpenShellGrpcExecTransport,
+  type ExecOpts as OpenShellGrpcExecOpts,
+  type ExecResult as OpenShellGrpcExecResult,
+  type ExecStreamHandle,
+  createOpenShellGrpcTransport,
+} from "./grpc-transport.js";
+export {
+  EXEC_SANDBOX_METHOD,
+  type ExecSandboxRequestWire,
+  type ExecSandboxEvent as ExecSandboxEventWire,
+  encodeExecSandboxRequest,
+  decodeExecSandboxEvent,
+} from "./proto/openshell.subset.codec.js";

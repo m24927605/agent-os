@@ -3,12 +3,16 @@
 //   upstream file : proto/openshell.proto
 //   upstream repo : NVIDIA OpenShell
 //   pinned rev    : f23c2c8e84193beac5c35af8cd80276b60b8dbd4
+//   pinned tag    : v0.0.66 (the running gateway version; ExecSandbox messages added by SLICE-OS-S1)
 //
-// This file vendors ONLY the subset of `openshell.v1` that slice P2R-R1-S1 consumes: the `Health`
-// RPC and its request/response messages plus the `ServiceStatus` enum. The full service, the
-// sandbox lifecycle RPCs, and their datamodel/sandbox imports are intentionally OUT OF SCOPE here
-// (added subset-by-subset in S2..S5). Drift against this committed subset is guarded by
-// `pnpm run openshell:proto:check` (hash manifest in proto/openshell.subset.sha256).
+// This file vendors ONLY the subset of `openshell.v1` that we consume: the `Health` RPC and its
+// request/response messages + the `ServiceStatus` enum (slice P2R-R1-S1), and the `ExecSandbox`
+// server-streaming RPC + its ExecSandboxRequest / ExecSandboxEvent / ExecSandboxStdout /
+// ExecSandboxStderr / ExecSandboxExit messages (slice SLICE-OS-S1), copied VERBATIM (field
+// numbers/types) from the v0.0.66 upstream proto. The full service, the sandbox lifecycle RPCs,
+// the interactive/tty exec fields, and their datamodel/sandbox imports are intentionally OUT OF
+// SCOPE here. Drift against this committed subset is guarded by `pnpm run openshell:proto:check`
+// (hash manifest in proto/openshell.subset.sha256).
 //
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
@@ -17,10 +21,13 @@ syntax = "proto3";
 
 package openshell.v1;
 
-// OpenShell service — SUBSET. Only the Health RPC is pinned in this slice (openshell.proto:22).
+// OpenShell service — SUBSET. Health (openshell.proto:22) + ExecSandbox (openshell.proto:67).
 service OpenShell {
   // Check the health of the service.
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Execute a command in a ready sandbox and stream output.
+  rpc ExecSandbox(ExecSandboxRequest) returns (stream ExecSandboxEvent);
 }
 
 // Health check request (openshell.proto:277).
@@ -41,4 +48,54 @@ enum ServiceStatus {
   SERVICE_STATUS_HEALTHY = 1;
   SERVICE_STATUS_DEGRADED = 2;
   SERVICE_STATUS_UNHEALTHY = 3;
+}
+
+// Execute command request (openshell.proto:645-672). Copied VERBATIM from v0.0.66. The tty fields
+// (tty=7, cols=8, rows=9) are part of the upstream message but OUT OF SCOPE for this slice (we never
+// request a pty); their field numbers are reserved here so we never reuse them in a future subset.
+message ExecSandboxRequest {
+  // Sandbox id.
+  string sandbox_id = 1;
+
+  // Command and arguments.
+  repeated string command = 2;
+
+  // Optional working directory.
+  string workdir = 3;
+
+  // Optional environment overrides.
+  map<string, string> environment = 4;
+
+  // Optional timeout in seconds. 0 means no timeout.
+  uint32 timeout_seconds = 5;
+
+  // Optional stdin payload passed to the command.
+  bytes stdin = 6;
+
+  reserved 7, 8, 9; // tty, cols, rows (interactive/pty — out of scope).
+  reserved "tty", "cols", "rows";
+}
+
+// One stdout chunk from a sandbox exec (openshell.proto:675-677).
+message ExecSandboxStdout {
+  bytes data = 1;
+}
+
+// One stderr chunk from a sandbox exec (openshell.proto:680-682).
+message ExecSandboxStderr {
+  bytes data = 1;
+}
+
+// Final exit status for a sandbox exec (openshell.proto:685-687).
+message ExecSandboxExit {
+  int32 exit_code = 1;
+}
+
+// One event in a sandbox exec stream (openshell.proto:690-696).
+message ExecSandboxEvent {
+  oneof payload {
+    ExecSandboxStdout stdout = 1;
+    ExecSandboxStderr stderr = 2;
+    ExecSandboxExit exit = 3;
+  }
 }
