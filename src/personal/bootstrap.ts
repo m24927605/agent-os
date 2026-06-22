@@ -1,0 +1,216 @@
+/**
+ * createPersonalShell — the Personal-vertical COMPOSITION ROOT (SLICE-P2R-PV-S1).
+ *
+ * This is the first place the already-built Personal-surface modules are wired into one runnable,
+ * end-to-end spine — `文字 → 澄清 → 白話計畫 → 核可 → 治理管線 → effect → 時間軸` — over a PURELY
+ * in-memory backbone (no kernel process, no docker, no vendor). It changes no existing module; it
+ * only COMPOSES their public barrels by dependency injection (same DI pattern as P2-I / commitgate).
+ *
+ *   receive(text, ctx)            -> ReceiveOutcome      (personal/intent `receiveText`)
+ *   clarify(text, ctx)/answer(..) -> ClarifyStep         (personal/intent `startClarify`/`answerClarify`)
+ *   preview(intent)               -> PlanPreview         (personal/plan `renderPlanPreview`)
+ *   previewAndSubmit(intent)      -> SubmitOutcome        (build a GovernedCall + inbox.submit)
+ *   approve(id)                   -> DecideOutcome        (inbox.approve -> runGovernedToolCall)
+ *   timeline(taskId?)             -> TimelineEvent[]      (buildTaskTimeline over the SHARED WORM)
+ *
+ * ── THE CRITICAL SEAM (INDEX §2) ──────────────────────────────────────────────────────────────────
+ * The pipeline's injected appender is handed a STRUCTURAL event `{kind,tool,context,decisionReason}`
+ * and the timeline reads a FULL `AuditEvent` off `LogEntry.event`. So the appender here is NOT the
+ * `okAppender` (which returns only `{sequence}` and the timeline cannot read). Instead it SYNTHESIZES a
+ * real `AuditEvent` via `createAuditEvent(...)` from the structural event's `context`/`tool`/reason,
+ * APPENDS it to a SHARED `InMemoryAppendOnlyLog`, and returns that `AppendReceipt`. `timeline()` then
+ * folds the SAME shared log's `entries()`. This is the only way "what the appender wrote" equals
+ * "what the timeline reads".
+ *
+ * Low coupling: imports cross-module ONLY through public barrels (orchestration / cost / audit /
+ * runtime-substrate / runtime-brain / policy / personal-{intent,plan,approval,timeline}); `iam/ids` is
+ * the existing interim pre-barrel exception. Names no vendor.
+ */
+import { generateKeyPairSync } from "node:crypto";
+import {
+  type AppendReceipt,
+  InMemoryAppendOnlyLog,
+  type LogEntry,
+  createAuditEvent,
+  redactSecrets,
+} from "../audit/index.js";
+import type { CommitAppender } from "../commitgate/index.js";
+import { type CostGate, InMemoryCostGate } from "../cost/index.js";
+import type { AgentContext } from "../iam/ids.js";
+import {
+  type GovernedCall,
+  type GovernedToolCallDeps,
+  runGovernedToolCall,
+} from "../orchestration/index.js";
+import {
+  type AllowRule,
+  type PolicyRequest,
+  combineDecisions,
+  evaluatePolicy,
+} from "../policy/index.js";
+import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
+import { type AdapterResult, FakeSandboxAdapter } from "../runtime/substrate/index.js";
+import { ApprovalInbox, type DecideOutcome, type SubmitOutcome } from "./approval/index.js";
+import {
+  type ClarifyStep,
+  type ReceiveOutcome,
+  type StructuredIntent,
+  answerClarify,
+  receiveText,
+  startClarify,
+} from "./intent/index.js";
+import { type PlanPreview, renderPlanPreview } from "./plan/index.js";
+import { type TimelineEvent, buildTaskTimeline } from "./timeline/index.js";
+
+/** A GovernedCall enriched with the intent payload the screen guard inspects for secret egress. */
+export interface PersonalToolCall extends GovernedCall {
+  readonly tool: string;
+  readonly context: AgentContext;
+  /** Carries the intent's targets so the credential screen can catch a secret that slipped a target. */
+  readonly args: Record<string, unknown>;
+}
+
+/** Options for the in-memory Personal shell. Defaults give a runnable happy-path backbone. */
+export interface PersonalShellOpts {
+  /** Token budget for the in-memory CostGate. */
+  readonly budget?: number;
+  /** Inject the `allow tool:invoke` rule (true) or run with an empty allow set -> denied@policy. */
+  readonly allowToolInvoke?: boolean;
+  /** Fixed token estimate per call (mirrors the pipeline.e2e `() => 10`). */
+  readonly estimateTokens?: number;
+}
+
+/** The composed Personal-surface facade a human (or a test) can drive end-to-end. */
+export interface PersonalShell {
+  receive(text: string, ctx: AgentContext): ReceiveOutcome;
+  clarify(text: string, ctx: AgentContext): ClarifyStep;
+  answer(step: ClarifyStep & { status: "asking" }, answer: string): ClarifyStep;
+  preview(intent: StructuredIntent): PlanPreview;
+  previewAndSubmit(intent: StructuredIntent): SubmitOutcome;
+  approve(id: string): Promise<DecideOutcome<AppendReceipt>>;
+  timeline(taskId?: string): TimelineEvent[];
+  /** Test probe: is the last sandbox the effect created startable (ok) or was none created (denied)? */
+  probeLastSandbox(): Promise<AdapterResult>;
+}
+
+/** The repo's real secret detector: redaction-changed-anything ⇒ a secret was present (pipeline.e2e:31). */
+const detectSecret: SecretDetector = (v) => JSON.stringify(redactSecrets(v)) !== JSON.stringify(v);
+
+/**
+ * Deterministic `GovernedCall` from a StructuredIntent. The tool string is derived purely from the
+ * intent's action (vendor-free, stable); the intent's targets ride in `args` so the credential screen
+ * can catch a secret that slipped past rawText validation into a target (defense in depth).
+ */
+export function buildToolCall(intent: StructuredIntent): PersonalToolCall {
+  return {
+    tool: `personal:${intent.action}`,
+    context: intent.context,
+    args: { targets: intent.targets },
+  };
+}
+
+export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell {
+  const budget = opts.budget ?? 1000;
+  const estimate = opts.estimateTokens ?? 10;
+  // The injected allow rule (INDEX §4): `personal:*` matches every `personal:<action>` tool within the
+  // segment; absent (allowToolInvoke=false) the allow set is empty -> evaluatePolicy denies@policy.
+  const allow: AllowRule[] = opts.allowToolInvoke
+    ? [{ id: "pv-s1", action: "tool:invoke", resource: "personal:*" }]
+    : [];
+
+  // ── The shared WORM the appender writes and the timeline reads (the critical seam) ──
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const sharedLog = new InMemoryAppendOnlyLog({ publicKey, privateKey });
+  const fake = new FakeSandboxAdapter();
+  const cost: CostGate = new InMemoryCostGate(budget);
+
+  // The structural event the pipeline hands the appender (pipeline.ts:79-84).
+  interface StructuralEvent {
+    readonly kind: string;
+    readonly tool: string;
+    readonly context: unknown;
+    readonly decisionReason: string;
+  }
+
+  /**
+   * The seam appender: synthesize a REAL AuditEvent from the structural event, append it to the shared
+   * WORM, and return its receipt. `result:"success"` + `policyDecision.effect:"allow"` because the
+   * pipeline only commits AFTER screen+PDP+cost pass — the append marks the committed (about-to-run)
+   * effect, which the timeline then renders as 「已完成」.
+   */
+  const appender: CommitAppender<StructuralEvent, AppendReceipt> = {
+    append: (event) => {
+      const ctx = event.context as AgentContext;
+      const auditEvent = createAuditEvent({
+        actorId: ctx.actorId,
+        tenantId: ctx.tenantId,
+        projectId: ctx.projectId,
+        taskId: ctx.taskId,
+        requestId: ctx.requestId,
+        sandboxId: ctx.sandboxId,
+        action: "tool:invoke",
+        resource: event.tool,
+        policyDecision: { effect: "allow", reason: event.decisionReason },
+        result: "success",
+      });
+      return Promise.resolve(sharedLog.append(auditEvent));
+    },
+  };
+
+  // The id the FakeSandbox created during the last effect (for the test probe). undefined => the
+  // effect never ran (a gate short-circuited) so there is no sandbox to start.
+  let lastSandboxId: string | undefined;
+
+  // The five injected ports (pipeline.e2e makeDeps template, but with the SEAM appender above).
+  const deps: GovernedToolCallDeps<PersonalToolCall, AppendReceipt> = {
+    screen: (tc) => {
+      // screenBrainEvent only forwards the value to the detector + reads status; the structural call
+      // is a superset of what it inspects, so a secret anywhere in tool/context/args is caught.
+      const r = screenBrainEvent(tc as never, detectSecret);
+      return r.status === "ok" ? { ok: true as const } : { ok: false as const, reason: r.reason };
+    },
+    authorize: (tc) => {
+      const req = { ...tc.context, action: "tool:invoke", resource: tc.tool } as PolicyRequest;
+      const combined = combineDecisions(evaluatePolicy(req, allow), []);
+      return { effect: combined.effect, reason: combined.reason };
+    },
+    cost,
+    estimateTokens: () => estimate,
+    appender,
+    effect: async (tc) => {
+      const res = await fake.createSandbox(tc.context, { image: tc.tool });
+      lastSandboxId = res.status === "ok" ? res.sandboxId : undefined;
+      return { ok: res.status === "ok", detail: res.status };
+    },
+  };
+
+  // The inbox's injected runner is the SOLE effect entry: approve(id) -> runGovernedToolCall(deps, tc).
+  const inbox: ApprovalInbox<PersonalToolCall, AppendReceipt> = new ApprovalInbox(
+    (tc: PersonalToolCall) => runGovernedToolCall(deps, tc),
+  );
+
+  return {
+    receive: (text, ctx) => receiveText(text, ctx),
+    clarify: (text, ctx) => startClarify(text, ctx),
+    answer: (step, answer) => answerClarify(step, answer),
+    preview: (intent) => renderPlanPreview(intent),
+    previewAndSubmit: (intent) => inbox.submit(renderPlanPreview(intent), buildToolCall(intent)),
+    approve: (id) => inbox.approve(id),
+    timeline: (taskId) =>
+      buildTaskTimeline(sharedLog.entries() as LogEntry[], { taskId, redact: redactSecrets }),
+    probeLastSandbox: async () => {
+      if (lastSandboxId === undefined) {
+        // Surface the "no effect ran" case as a denied transition (no sandbox to start).
+        return fake.startSandbox(
+          { actorId: "x", tenantId: "x", projectId: "x", taskId: "x", requestId: "x" },
+          "sbx-none",
+        );
+      }
+      return fake.startSandbox(
+        // Identity is re-validated by the adapter; reuse a minimal valid context shape.
+        { actorId: "agent:probe", tenantId: "t", projectId: "p", taskId: "t", requestId: "r" },
+        lastSandboxId,
+      );
+    },
+  };
+}
