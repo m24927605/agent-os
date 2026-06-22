@@ -4,7 +4,7 @@
 - **Branch**: slice/es3-operator-action-maker-checker
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~190（`createEnterpriseFleet` 加 `operatorAction` + 測試）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;maker-checker 閘 + commit-before-effect 各經 mutation 證實;verify:cross-tenant 綠;採納 reviewer MINOR〔移除死 import〕）
 
 ## (0) 動機
 R8-S5 已建 `enforceMakerChecker`(maker-checker.ts:66,五檢查),R8-S4 console 只交付**唯讀投影**——**動作端是 stub**(無 suspend/budget/policy)。ES3 補上 operator 敏感動作端:一條 **maker-checker 閘 + commit-before-effect 審計 + tenant-scoped effect** 的特權動作路徑。
@@ -42,14 +42,16 @@ SLICE-ES3 — 在 `createEnterpriseFleet`(`src/enterprise/bootstrap.ts`)加 `ope
 - **fail-closed**:未註冊 tenant 的 ctx → route deny。
 - 首次 RED:operatorAction 不存在 → import/型別錯。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:operatorAction 測試在實作前紅。
-- [ ] `pnpm run verify` exit 0(含 `verify:cross-tenant` 綠;operator e2e 全綠;ES1 既有 e2e 不變)。
-- [ ] **maker-checker 閘非 vacuous**:mutation(略過 enforceMakerChecker / 忽略其 deny)→ cross-tenant/maker==checker/TOCTOU 測試紅。
-- [ ] **commit-before-effect**:operator AuditEvent **先**落該租戶 WORM 才 effect(mutation:effect 先於 append → 序列測試紅,或 failing appender 下 effect 仍跑 → 紅)。
-- [ ] tenant-scoped + 跨租戶隔離(operatorAction 不滲入別租戶);depcruise/secret-scan clean(cap/reason 不洩值)。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:略過 maker-checker、effect-before-audit、跨租 effect)。
-- [ ] **誠實標記**:capability **issuance out-of-band**(ES3 只建 enforce 端);真 operator auth 後續。
+## (6) Definition of Done（實測）
+- [x] RED:`TypeError: fleet.operatorAction is not a function` + TS2339(operatorAction 不存在)→ 5 cases 全紅。
+- [x] `pnpm run verify` **exit 0**(859 passed + 10 skipped;operator e2e 5/5;**ES1 e2e 4/4 不變**;`verify:cross-tenant: ok`〔TS 11 + Go partition Conformance〕)。
+- [x] **maker-checker 閘非 vacuous(reused,不重寫 5 檢查)**:reviewer mutation 把 `if(decision.effect==="deny")`→`if(false)` → cross-tenant/maker==checker/TOCTOU/malformed **4 deny 全紅**;且各 deny case 斷言 `status==="denied"` **且** WORM/fleet 不變(effect 未跑)。
+- [x] **commit-before-effect(reused,不重造 ordering)**:operator AuditEvent **先**落該租戶 WORM(action="suspend-agent"、result="success")才 effect;reviewer mutation 把 effect 移到 commitBeforeEffect 前 → failing-appender case 紅(append 失敗仍 suspend = 漏記)。
+- [x] tenant-scoped 隔離(operatorAction 不改別租戶 fleet/WORM;wrong-tenant mutation → 隔離斷言紅);depcruise exit 0(barrel-only);secret-scan clean(deny reason 靜態、cap 不入 event/log)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;skip-deny / effect-before-audit / wrong-tenant 三 mutation 皆翻紅;8 攻擊面 HELD/N/A)。
+- [x] **誠實標記**:capability **issuance out-of-band**(grep 無 issuer;測試自建 cap,**不假裝 issuance 已解**);真 operator auth 後續。
+> **採納 reviewer MINOR**:移除 bootstrap.ts 死 import `deriveActionIdentity`(lint 未抓 unused import)。
+> **追蹤 reviewer MINOR(後續,非阻斷)**:`failWormAppendFor` 測試-fault-injection 鉤子目前在 production `EnterpriseFleetOpts`(已 `TEST FAULT INJECTION ONLY` 註解、default never-fault、construction-time、**只能強制 fail-closed deny 不能 bypass**);後續移到 test-only seam(注入 faulting `CommitAppender`)使 opts 不含測試旋鈕。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 `operatorAction` + 測試)。route/submit/approve/console 不受影響、可逆。

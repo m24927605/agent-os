@@ -36,7 +36,7 @@ R8 已交付**六個隔離原語**(各有 RED 測試)+ 治理核(runGovernedTool
 |---|---|---|
 | **ES1** | 最薄 in-memory 可跑企業脊椎:`createEnterpriseFleet(opts)`(`src/enterprise/bootstrap.ts`)組 router + per-tenant{store,CostGate,WORM log,PDP rules,inbox} + governed pipeline;**+ 組合後整體跨租戶 deny 證明**(tenant-A submission 不落 tenant-B partition/timeline、tenant-A inbox 不核准 tenant-B、route(ctxB) 永不達 binding-A) | ✅ **DONE**(verify exit 0、854 tests、verify:cross-tenant 綠;tenant-sealed 3 mutation 證實;獨立 Opus4.8 review PASS)|
 | **ES2** | live 每租戶 WORM partition:`proto/ingest.proto` 加 `partition_id`(contract-before-consumer)+ `kernel/internal/partition` PartitionedIngest 接上 cmd/kernel AppendService + TS appender 注入 | DRAFT(較重;依 proto+kernel)|
-| **ES3** | operator 敏感動作端(suspend/budget/policy):`enforceMakerChecker` 串進 PDP+commit-before-effect 動作路徑(R8-S4 只交付唯讀投影,動作端是 stub)| DRAFT |
+| **ES3** | operator 敏感動作端:`operatorAction(ctx,action,cap)` = route → `enforceMakerChecker` 閘 → commit-before-effect 審計 → tenant-scoped suspend-agent effect(R8-S4 只交付唯讀投影,動作端原是 stub)| ✅ **DONE**(verify exit 0、859 tests、verify:cross-tenant 綠;maker-checker+commit-before-effect 各 mutation 證實;獨立 Opus4.8 review PASS)|
 | **ES4** | 租戶生命週期:動態 `registerTenant`/deprovision、partitionId 配置、per-tenant Ed25519 key provision | DRAFT |
 
 ## 5. 誠實風險（界定 P4/外部範圍）

@@ -12,4 +12,7 @@ export type {
   ConsoleResult,
   EnterpriseFleet,
   EnterpriseFleetOpts,
+  OperatorAction,
+  OperatorEvent,
+  OperatorResult,
 } from "./bootstrap.js";

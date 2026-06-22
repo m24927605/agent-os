@@ -40,7 +40,7 @@ import {
   createAuditEvent,
   redactSecrets,
 } from "../audit/index.js";
-import type { CommitAppender } from "../commitgate/index.js";
+import { type CommitAppender, commitBeforeEffect } from "../commitgate/index.js";
 import { type CostGate, InMemoryCostGate } from "../cost/index.js";
 import type { AgentContext } from "../iam/ids.js";
 import {
@@ -62,12 +62,14 @@ import {
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { FakeSandboxAdapter } from "../runtime/substrate/index.js";
 import {
+  type CheckerCapability,
   ConsoleProjection,
   InMemoryTenantStore,
   type RouteResult,
   type TenantBinding,
   type TenantConsole,
   TenantRouter,
+  enforceMakerChecker,
 } from "../tenant/index.js";
 
 /** Options for the in-memory Enterprise fleet. `tenants` are pre-registered at construction (ES1). */
@@ -84,10 +86,42 @@ export interface EnterpriseFleetOpts {
   readonly allowToolInvokePerTenant?: (tenantId: string) => boolean;
   /** Fixed token estimate per call (mirrors the pipeline.e2e `() => 10`). */
   readonly estimateTokens?: number;
+  /**
+   * TEST FAULT INJECTION ONLY (SLICE-ES3 commit-before-effect proof). When this returns true for a
+   * tenant, that tenant's OPERATOR WORM appender REJECTS its append — exercising the fail-closed
+   * guarantee that `commitBeforeEffect` refuses the effect when no durable receipt is in hand. Defaults
+   * to never-fault, so ES1's submit/approve path and production behaviour are untouched.
+   */
+  readonly failWormAppendFor?: (tenantId: string) => boolean;
 }
 
 /** A console resolved for a routed tenant, or a deny when the ctx does not route (fail-closed). */
 export type ConsoleResult = { ok: true; console: TenantConsole } | { ok: false; reason: string };
+
+/** A privileged operator action: `kind` names the action, `resource` its target (e.g. `agent:<id>`). */
+export interface OperatorAction {
+  readonly kind: string;
+  readonly resource: string;
+}
+
+/**
+ * The result of `operatorAction` (mirrors the existing facade result shape): on `ok` the operator
+ * AuditEvent committed to the tenant's WORM and the effect ran; on `denied` the gate refused — route
+ * fail-closed, a maker-checker deny, or a commit failure — and the effect did NOT run. The `event` is
+ * the STRUCTURAL operator event handed to the WORM seam (NOT the synthesized AuditEvent). `reason` on a
+ * deny is STATIC (an error code / route reason) — never an interpolated `cap`/`ctx` value (credential-blind).
+ */
+export type OperatorResult =
+  | { status: "ok"; event: OperatorEvent }
+  | { status: "denied"; reason: string; event: OperatorEvent };
+
+/** The structural event the operator seam appender synthesizes a real AuditEvent from (mirrors StructuralEvent). */
+export interface OperatorEvent {
+  readonly kind: string;
+  readonly resource: string;
+  readonly context: unknown;
+  readonly decisionReason: string;
+}
 
 /** The composed Enterprise-surface facade a fleet operator (or a test) drives end-to-end. */
 export interface EnterpriseFleet {
@@ -100,6 +134,19 @@ export interface EnterpriseFleet {
   /** Route FIRST, then return THAT tenant's read-only console (fleet()/timeline()). */
   console(ctx: unknown): ConsoleResult;
   /**
+   * Privileged operator action端 (SLICE-ES3): route(ctx) → enforceMakerChecker(ctx, action, cap) deny
+   * short-circuit → commitBeforeEffect(append operator AuditEvent → THAT tenant's WORM, await receipt,
+   * THEN run the tenant-scoped effect). ES3 delivers `suspend-agent` (resource `agent:<sandboxId>`):
+   * the effect writes that tenant's repo `agent:<sandboxId>` phase="suspended", observable via
+   * `console(ctx).fleet()`. Unrouted/unknown tenant, a maker-checker deny, or a commit failure all
+   * fail-closed (denied; effect NOT run).
+   */
+  operatorAction(
+    ctx: unknown,
+    action: OperatorAction,
+    cap: CheckerCapability,
+  ): Promise<OperatorResult>;
+  /**
    * Test/inspection probe: the WORM log INSTANCE bound to the routed tenant (undefined if unrouted).
    * Exposes the per-tenant-independence invariant to the combined-whole test (A's log !== B's log).
    */
@@ -108,6 +155,13 @@ export interface EnterpriseFleet {
 
 /** The repo's real secret detector: redaction-changed-anything ⇒ a secret was present (pipeline.e2e:31). */
 const detectSecret: SecretDetector = (v) => JSON.stringify(redactSecrets(v)) !== JSON.stringify(v);
+
+/**
+ * The repo key prefix ConsoleProjection.fleet() projects into {sandboxId, agentName, phase}
+ * (projection.ts:27,94). MUST stay byte-for-byte identical so the suspend-agent effect's repo entry
+ * surfaces in `console(ctx).fleet()`.
+ */
+const AGENT_PREFIX = "agent:";
 
 /** The structural event the pipeline hands the appender (pipeline.ts:79-84). */
 interface StructuralEvent {
@@ -121,6 +175,8 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
   const budget = opts.budgetPerTenant ?? 1000;
   const estimate = opts.estimateTokens ?? 10;
   const allowToolInvoke = opts.allowToolInvokePerTenant ?? (() => true);
+  // Defaults to never-fault: ES1's path and production behaviour are untouched (ES3 test hook only).
+  const failWormAppendFor = opts.failWormAppendFor ?? (() => false);
 
   // ── ONE router, ONE store, ONE console projection over per-tenant partitions ──
   // Per tenant: binding{tenantId, partitionId: partition-${tenantId}, storeRef: store-${tenantId}}.
@@ -191,6 +247,73 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         return receipt;
       },
     };
+  }
+
+  /**
+   * The per-tenant OPERATOR SEAM appender (SLICE-ES3; mirrors makeAppender, distinct event/action).
+   * Synthesizes a real OPERATOR AuditEvent (`action: event.kind`, `resource: event.resource`, the
+   * maker-checker `policyDecision`, `result:"success"`) and appends it to THIS partition's WORM. The
+   * `commitBeforeEffect` guard awaits this receipt BEFORE the tenant-scoped effect runs. If
+   * `failWormAppendFor(this tenant)` is set, the append REJECTS — exercising the fail-closed refusal
+   * (no receipt ⇒ no effect). Closure-bound to ONE binding/log: it can only ever write this tenant.
+   */
+  function makeOperatorAppender(
+    binding: TenantBinding,
+    log: InMemoryAppendOnlyLog,
+  ): CommitAppender<OperatorEvent, AppendReceipt> {
+    return {
+      append: async (event) => {
+        if (failWormAppendFor(binding.tenantId)) {
+          // Fail-closed test fault: signal append failure by REJECTING (never by resolving a falsy
+          // receipt — the commitgate contract). The guard then refuses the effect.
+          throw new Error("worm append rejected (deny-by-default)");
+        }
+        const ctx = event.context as AgentContext;
+        const auditEvent = createAuditEvent({
+          actorId: ctx.actorId,
+          tenantId: ctx.tenantId,
+          projectId: ctx.projectId,
+          taskId: ctx.taskId,
+          requestId: ctx.requestId,
+          sandboxId: ctx.sandboxId,
+          action: event.kind,
+          resource: event.resource,
+          policyDecision: { effect: "allow", reason: event.decisionReason },
+          result: "success",
+        });
+        return log.append(auditEvent);
+      },
+    };
+  }
+
+  /**
+   * The tenant-scoped operator EFFECT (SLICE-ES3). Generic dispatch on `action.kind`; ES3 delivers
+   * `suspend-agent`. For suspend-agent (`resource: "agent:<sandboxId>"`) it writes/updates THIS tenant's
+   * repo at `<AGENT_PREFIX><sandboxId>` with the EXACT {sandboxId, agentName, phase} shape
+   * ConsoleProjection.fleet() projects (projection.ts:53-61,94), so `console(ctx).fleet()` reflects
+   * phase "suspended". Closure-bound to ONE binding's repo — it can only ever mutate this tenant. Only
+   * reached AFTER the operator AuditEvent has a durable WORM receipt (commit-before-effect).
+   */
+  async function applyOperatorEffect(
+    binding: TenantBinding,
+    action: OperatorAction,
+  ): Promise<void> {
+    if (action.kind === "suspend-agent") {
+      // Derive sandboxId from `agent:<sandboxId>` (strip the prefix the projection keys on).
+      const sandboxId = action.resource.startsWith(AGENT_PREFIX)
+        ? action.resource.slice(AGENT_PREFIX.length)
+        : action.resource;
+      const repo = store.forTenant(binding); // closure-bound to THIS tenant's partition (R8-S2)
+      await repo.put(`${AGENT_PREFIX}${sandboxId}`, {
+        sandboxId,
+        agentName: sandboxId,
+        phase: "suspended",
+      });
+      return;
+    }
+    // Unknown action kind: fail-closed (no silent effect). ES3 only delivers suspend-agent; other
+    // privileged actions land later behind the SAME route → maker-checker → commit-before-effect path.
+    throw new Error("unsupported operator action (deny-by-default)");
   }
 
   /**
@@ -300,6 +423,60 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         return { ok: false, reason: routed.reason };
       }
       return { ok: true, console: projection.forTenant(routed.binding) };
+    },
+
+    operatorAction: async (ctx, action, cap) => {
+      // The structural operator event mirrored back in every result (ok OR denied). Built up-front so a
+      // route/maker-checker deny still returns a well-formed `event` — no value-leaking branches.
+      const event: OperatorEvent = {
+        kind: action.kind,
+        resource: action.resource,
+        context: ctx,
+        decisionReason: "", // filled with the maker-checker reason only on the allow path
+      };
+
+      // 1. Gateway route boundary FIRST (fail-closed): an unrouted/unknown tenant never reaches the gate
+      //    or the WORM. Reason is the router's static reason (no cap/ctx value).
+      const routed = router.resolve(ctx);
+      if (!routed.ok) {
+        return { status: "denied", reason: routed.reason, event };
+      }
+      const binding = routed.binding;
+      const log = wormByPartition.get(binding.partitionId);
+      if (log === undefined) {
+        // Unreachable for a registered tenant; fail-closed.
+        return { status: "denied", reason: "unprovisioned tenant (deny-by-default)", event };
+      }
+
+      // 2. Maker-checker gate (REUSE enforceMakerChecker — the 5 checks live there, NOT here): a deny
+      //    short-circuits BEFORE any audit/effect. Reasons are the primitive's STATIC error codes
+      //    (cross_tenant_capability / maker_is_checker / action_identity_mismatch / invalid_*), never an
+      //    interpolated cap/ctx value (credential-blind).
+      const decision = enforceMakerChecker(ctx, action, cap);
+      if (decision.effect === "deny") {
+        return { status: "denied", reason: decision.reason, event };
+      }
+
+      // 3. Commit-before-effect (REUSE commitBeforeEffect — ordering lives there, NOT here): append the
+      //    operator AuditEvent to THIS tenant's WORM, AWAIT the receipt, and only THEN run the effect.
+      //    An append failure ⇒ the effect is REFUSED (fail-closed); we surface that as denied.
+      const auditedEvent: OperatorEvent = { ...event, decisionReason: decision.reason };
+      const outcome = await commitBeforeEffect({
+        appender: makeOperatorAppender(binding, log),
+        event: auditedEvent,
+        // 4. The tenant-scoped suspend-agent effect: write THIS tenant's repo `agent:<sandboxId>` in the
+        //    EXACT shape ConsoleProjection.fleet() projects, so console(ctx).fleet() shows phase
+        //    "suspended". The path stays generic (dispatch on action.kind) but ES3 delivers suspend-agent.
+        effect: async () => {
+          await applyOperatorEffect(binding, action);
+        },
+      });
+
+      if (outcome.status === "aborted") {
+        // No durable receipt ⇒ the effect never ran. Static reason (the guard's own message; no cap/ctx).
+        return { status: "denied", reason: "commit_before_effect_aborted", event: auditedEvent };
+      }
+      return { status: "ok", event: auditedEvent };
     },
 
     wormLogFor: (ctx) => {
