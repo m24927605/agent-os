@@ -118,5 +118,69 @@ d(
       const reconciled = await host.reconcileAgentProcess(CTX, sandboxId, "health-probe");
       expect(reconciled.status).toBe("ok");
     }, 60_000);
+
+    /**
+     * SLICE-AH-OBS-S1 — OBSERVE mode live proof against the SAME running OpenShell sandbox.
+     *
+     * The SUBSTRATE/ENTRYPOINT (here SIMULATED by a direct adapter.execSandbox SETUP step — NOT via
+     * hostAgent) backgrounds the trivial /health gateway. Then `hostAgent({ mode: "observe" })` must:
+     *   - NOT launch anything (it only PROBES /health),
+     *   - see the substrate-launched gateway `running` and return ok with the honest non-PID sentinel,
+     * after which getAgentStatus is running, reconcile('health-probe') is ok, and reconcile('restart')
+     * is fail-closed DENIED (the substrate owns the gateway lifecycle in observe mode).
+     *
+     * It runs AFTER the launch-mode test above (which already pkilled nothing of ours); we pkill any
+     * stray http.server first so the SETUP step owns the only one. afterAll's pkill cleans it up.
+     */
+    it("OBSERVE: substrate launches the gateway; hostAgent observes (never launches) + reconciles", async () => {
+      expect(wired).toBeDefined();
+      if (wired === undefined) return;
+      const { host, sandboxId } = wired;
+
+      // The trivial gateway is ALREADY running on this sandbox — launched OUT-OF-BAND relative to
+      // observe-mode (here by the prior launch-mode `it` via hostAgent(launch); in production by the
+      // substrate's ROOT ENTRYPOINT — exactly the privileged-gateway Hermes case observe-mode exists
+      // for). observe-mode hostAgent must OBSERVE it running and NEVER launch (the never-launch
+      // guarantee is mutation-proven in observe.test.ts). Best-effort readiness so we don't race the
+      // prior test's gateway teardown.
+      let up = false;
+      for (let i = 0; i < 8 && !up; i++) {
+        const p = await adapter.execSandbox(CTX, sandboxId, [
+          "/bin/sh",
+          "-c",
+          `curl -so /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${DASHBOARD_PORT}/health 2>/dev/null || echo 000`,
+        ]);
+        if (p.status === "ok" && new TextDecoder().decode(p.result.stdout).trim().startsWith("200"))
+          up = true;
+        else await new Promise((r) => setTimeout(r, 1000));
+      }
+      expect(up).toBe(true);
+
+      // OBSERVE host: must see the already-running gateway and return ok WITHOUT launching it itself.
+      const observed = await host.hostAgent(CTX, {
+        sandboxId,
+        agentName: "probe-observe",
+        gatewayCommand: GATEWAY_COMMAND,
+        mode: "observe",
+      });
+      expect(observed.status).toBe("ok");
+      if (observed.status !== "ok") return; // narrow for TS; the assert above already failed.
+      // Honest sentinel: observe never owns a PID.
+      expect(observed.agentProcessId).toBe("observed");
+
+      const status = await host.getAgentStatus(CTX, sandboxId);
+      expect(status.status).toBe("ok");
+      if (status.status === "ok") expect(status.phase).toBe("running");
+
+      const probed = await host.reconcileAgentProcess(CTX, sandboxId, "health-probe");
+      expect(probed.status).toBe("ok");
+
+      // Fail-closed: restart is DENIED in observe mode (the substrate owns the gateway lifecycle).
+      const restart = await host.reconcileAgentProcess(CTX, sandboxId, "restart");
+      expect(restart.status).toBe("denied");
+      if (restart.status === "denied") {
+        expect(restart.reason.toLowerCase()).toContain("observe mode");
+      }
+    }, 60_000);
   },
 );

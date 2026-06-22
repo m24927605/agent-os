@@ -46,6 +46,8 @@ interface HostedAgent {
   readonly tenantId: string;
   readonly agentName: string;
   readonly gatewayCommand: string;
+  /** Lifecycle ownership at host time. `"observe"` => substrate owns launch; restart is denied. */
+  readonly mode: "launch" | "observe";
 }
 
 /** Non-secret gateway env prefix, mirroring NemoClaw's hermesGatewayEnvPrefix (runtime.ts:150-152). */
@@ -91,6 +93,29 @@ export class NemoClawAgentHosting implements AgentHosting {
       return this.denied("host", CROSS_TENANT, spec.sandboxId, ctx) as HostResult;
     }
 
+    // OBSERVE mode: the substrate/entrypoint owns the gateway launch (e.g. a root entrypoint dropping
+    // to a privileged `gateway` user — the real NemoClaw/Hermes shape). We NEVER exec-launch here; we
+    // PROBE /health and only register a running gateway. Fail-closed if it is not running.
+    if (spec.mode === "observe") {
+      const out = await this.dispatch(probeCommand(this.dashboardPort));
+      if ("error" in out) return this.denied("host", out.error, spec.sandboxId, ctx) as HostResult;
+      if (phaseFromProbe(out.stdout) !== "running") {
+        return this.denied("host", OBSERVE_NOT_RUNNING, spec.sandboxId, ctx) as HostResult;
+      }
+      this.agents.set(spec.sandboxId, {
+        tenantId: c.context.tenantId,
+        agentName: spec.agentName,
+        gatewayCommand: spec.gatewayCommand ?? DEFAULT_GATEWAY_COMMAND,
+        mode: "observe",
+      });
+      return {
+        // Honest: no PID — we observed, we did not launch. See OBSERVED_AGENT_PROCESS_ID.
+        status: "ok",
+        agentProcessId: OBSERVED_AGENT_PROCESS_ID,
+        event: { operation: "host", result: "ok", context: c.context, sandboxId: spec.sandboxId },
+      };
+    }
+
     const command = launchCommand(spec.gatewayCommand);
     const out = await this.dispatch(command);
     if ("error" in out) return this.denied("host", out.error, spec.sandboxId, ctx) as HostResult;
@@ -109,6 +134,7 @@ export class NemoClawAgentHosting implements AgentHosting {
       tenantId: c.context.tenantId,
       agentName: spec.agentName,
       gatewayCommand: spec.gatewayCommand ?? DEFAULT_GATEWAY_COMMAND,
+      mode: "launch",
     });
     return {
       status: "ok",
@@ -137,6 +163,17 @@ export class NemoClawAgentHosting implements AgentHosting {
   ): Promise<ReconcileResult> {
     const owned = this.requireOwned(ctx, "reconcile", sandboxId);
     if ("denied" in owned) return owned.denied as ReconcileResult;
+
+    // OBSERVE mode owns no process: a `restart` is fail-closed denied (no exec, no pkill/relaunch) —
+    // the substrate entrypoint owns the gateway lifecycle. `health-probe` still probes (both modes).
+    if (owned.agent.mode === "observe" && action === "restart") {
+      return this.denied(
+        "reconcile",
+        OBSERVE_RESTART_UNSUPPORTED,
+        sandboxId,
+        ctx,
+      ) as ReconcileResult;
+    }
 
     const command =
       action === "restart"
@@ -193,6 +230,18 @@ const FAIL_CLOSED = "invalid agent context (fail-closed)";
 const CROSS_TENANT = "cross-tenant: sandbox is hosted by another tenant (deny-by-default)";
 const UNKNOWN_SANDBOX = "unknown sandbox (deny-by-default)";
 const DEFAULT_GATEWAY_COMMAND = '"$OPENCLAW" gateway run';
+/**
+ * Honest, non-PID `agentProcessId` returned by an observe-mode host: we did NOT launch the process,
+ * so we own no PID — we OBSERVED an already-running gateway via /health. A sentinel (not a number)
+ * makes that explicit to every caller and to the audit trail.
+ */
+const OBSERVED_AGENT_PROCESS_ID = "observed";
+/** Observe-mode host deny reason when the substrate-launched gateway is not (yet) running. */
+const OBSERVE_NOT_RUNNING =
+  "agent not running (observe mode: substrate/entrypoint owns gateway launch, fail-closed)";
+/** Observe-mode reconcile deny reason for `restart`: we never exec-launch in observe mode. */
+const OBSERVE_RESTART_UNSUPPORTED =
+  "restart unsupported in observe mode (gateway lifecycle owned by the substrate entrypoint)";
 
 /**
  * NemoClaw launch shape: `<non-secret env> nohup [gosu <user>] <command> &`. The env prefix is applied
