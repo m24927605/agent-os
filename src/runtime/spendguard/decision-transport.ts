@@ -99,6 +99,20 @@ export interface DecisionLedgerTransportOpts {
    * and is rejected by a tenant-scoped sidecar; a real deployment passes the workload's tenant.
    */
   readonly tenantIdAssertion?: string;
+  /**
+   * The projected BudgetClaim this transport sends (DecisionRequest.inputs.projected_claims — the real
+   * sidecar fails closed with INVALID_ARGUMENT on an empty claim set). These are cost-accounting
+   * identifiers (budget/unit/window), NOT credentials — credential-blindness is preserved. The
+   * route->budget translation lives HERE in the adapter, never in the vendor-neutral CostGate port. A
+   * real deployment supplies its budget topology; absent config => reserve fails CLOSED (deny-by-default).
+   */
+  readonly budgetClaim?: {
+    readonly budgetId: string;
+    readonly unitId: string;
+    readonly windowInstanceId: string;
+    /** Defaults to DEBIT (a reserve charges the budget). */
+    readonly direction?: "DEBIT" | "CREDIT";
+  };
 }
 
 /**
@@ -184,6 +198,18 @@ export function createDecisionLedgerTransport(opts: DecisionLedgerTransportOpts)
     ): Promise<{ reservationId: string } | { overBudget: true }> {
       const session = await sessionId();
       const projected = atomicToWire(req.estimated_amount_atomic);
+      // The real sidecar requires a non-empty projected_claims set. Absent budget config => we cannot
+      // construct a valid claim => fail CLOSED (deny-by-default), never send an empty/bogus claim.
+      if (opts.budgetClaim === undefined) {
+        throw new Error("no budgetClaim configured: cannot project a reserve (fail-closed)");
+      }
+      const claim = encodeBudgetClaim({
+        budgetId: opts.budgetClaim.budgetId,
+        unitId: opts.budgetClaim.unitId,
+        amountAtomic: projected,
+        direction: opts.budgetClaim.direction ?? "DEBIT",
+        windowInstanceId: opts.budgetClaim.windowInstanceId,
+      });
       const wire = encodeDecisionRequest(
         {
           sessionId: session,
@@ -201,6 +227,7 @@ export function createDecisionLedgerTransport(opts: DecisionLedgerTransportOpts)
           },
         },
         randomUUID(),
+        claim,
       );
       const resp = await unary(DECISION_METHOD, decodeDecisionResponse, wire);
       if (resp.decision === DecisionResponse_Decision.CONTINUE) {
@@ -306,11 +333,41 @@ function encodeHandshakeRequest(req: HandshakeRequest): Buffer {
   return Buffer.from(out);
 }
 
-function encodeDecisionRequestInputs(inputs: DecisionRequest["inputs"]): Buffer {
+/** UnitRef.Kind.TOKEN (common.proto UnitRef enum); the seeded demo unit is a token unit. */
+const UNIT_KIND_TOKEN = 2;
+
+/**
+ * Encode one projected `BudgetClaim` (common.proto: budget_id=1, unit=2 UnitRef{unit_id=1, kind=2},
+ * amount_atomic=3, direction=4 enum DEBIT=1/CREDIT=2, window_instance_id=5). Cost-accounting identifiers
+ * only — NO credential. The real sidecar requires a non-empty projected_claims set to reach a decision.
+ */
+function encodeBudgetClaim(c: {
+  budgetId: string;
+  unitId: string;
+  amountAtomic: string;
+  direction: "DEBIT" | "CREDIT";
+  windowInstanceId: string;
+}): Buffer {
+  const out: number[] = [];
+  writeString(out, 1, c.budgetId);
+  const unit: number[] = [];
+  writeString(unit, 1, c.unitId);
+  writeEnum(unit, 2, UNIT_KIND_TOKEN);
+  writeLenDelim(out, 2, Buffer.from(unit));
+  writeString(out, 3, c.amountAtomic);
+  writeEnum(out, 4, c.direction === "CREDIT" ? 2 : 1);
+  writeString(out, 5, c.windowInstanceId);
+  return Buffer.from(out);
+}
+
+function encodeDecisionRequestInputs(
+  inputs: DecisionRequest["inputs"],
+  projectedClaim?: Buffer,
+): Buffer {
   const out: number[] = [];
   if (inputs === undefined) return Buffer.from(out);
-  // projected_claims (1) intentionally omitted — the credential-blind transport sends the projection
-  // only via the p* risk-band fields (a single estimate, no per-budget claim breakdown).
+  // projected_claims (1, repeated): the real sidecar fails closed (INVALID_ARGUMENT) on an empty set.
+  if (projectedClaim !== undefined) writeLenDelim(out, 1, projectedClaim);
   writeString(out, 2, inputs.projectedP50Atomic);
   writeString(out, 3, inputs.projectedP90Atomic);
   writeString(out, 4, inputs.projectedP95Atomic);
@@ -318,13 +375,17 @@ function encodeDecisionRequestInputs(inputs: DecisionRequest["inputs"]): Buffer 
   return Buffer.from(out);
 }
 
-function encodeDecisionRequest(req: DecisionRequest, idempotencyKey: string): Buffer {
+function encodeDecisionRequest(
+  req: DecisionRequest,
+  idempotencyKey: string,
+  projectedClaim?: Buffer,
+): Buffer {
   const out: number[] = [];
   writeString(out, 1, req.sessionId);
   writeEnum(out, 2, req.trigger);
   // trace (3) / ids (4) intentionally omitted — opaque, never a credential.
   writeString(out, 5, req.route);
-  const inputs = encodeDecisionRequestInputs(req.inputs);
+  const inputs = encodeDecisionRequestInputs(req.inputs, projectedClaim);
   if (inputs.length > 0) writeLenDelim(out, 6, inputs);
   // idempotency (9): the sidecar REQUIRES a non-empty Idempotency.key (adapter_uds.rs request_decision
   // validation) — same key + same request fingerprint collapses to one decision. Idempotency.key = field 1.
@@ -529,6 +590,59 @@ export function decodeDecisionIdempotencyKeyForTest(bytes: Buffer): string {
     } else skipField(r, wireType);
   }
   return key;
+}
+
+/**
+ * TEST-ONLY: extract the FIRST projected BudgetClaim from a DecisionRequest wire (field 6 inputs ->
+ * field 1 projected_claims -> BudgetClaim{1=budget_id, 2=UnitRef{1=unit_id}, 3=amount_atomic, 4=direction,
+ * 5=window_instance_id}). Guards the live-discovered bug where the encoder sent no projected_claims.
+ */
+export function decodeFirstBudgetClaimForTest(bytes: Buffer):
+  | {
+      budgetId: string;
+      unitId: string;
+      amountAtomic: string;
+      direction: number;
+      windowInstanceId: string;
+    }
+  | undefined {
+  const dec = new TextDecoder();
+  const fieldBytes = (buf: Uint8Array, want: number): Uint8Array | undefined => {
+    const r: Reader = { buf, pos: 0 };
+    while (r.pos < buf.length) {
+      const tag = readVarint(r);
+      const field = Math.floor(tag / 8);
+      const wireType = tag & 7;
+      if (field === want && wireType === 2) return readLenDelim(r);
+      skipField(r, wireType);
+    }
+    return undefined;
+  };
+  const inputs = fieldBytes(bytes, 6);
+  if (inputs === undefined) return undefined;
+  const claim = fieldBytes(inputs, 1);
+  if (claim === undefined) return undefined;
+  const out = { budgetId: "", unitId: "", amountAtomic: "", direction: 0, windowInstanceId: "" };
+  const r: Reader = { buf: claim, pos: 0 };
+  while (r.pos < claim.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 7;
+    if (field === 1 && wireType === 2) out.budgetId = dec.decode(readLenDelim(r));
+    else if (field === 2 && wireType === 2) {
+      const unit = readLenDelim(r);
+      const ur: Reader = { buf: unit, pos: 0 };
+      while (ur.pos < unit.length) {
+        const ut = readVarint(ur);
+        if (Math.floor(ut / 8) === 1 && (ut & 7) === 2) out.unitId = dec.decode(readLenDelim(ur));
+        else skipField(ur, ut & 7);
+      }
+    } else if (field === 3 && wireType === 2) out.amountAtomic = dec.decode(readLenDelim(r));
+    else if (field === 4 && wireType === 0) out.direction = readVarint(r);
+    else if (field === 5 && wireType === 2) out.windowInstanceId = dec.decode(readLenDelim(r));
+    else skipField(r, wireType);
+  }
+  return out;
 }
 
 function decodeDecisionRequestInputsForTest(bytes: Uint8Array): DecisionRequest_Inputs {

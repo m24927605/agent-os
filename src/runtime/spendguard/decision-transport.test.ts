@@ -41,6 +41,7 @@ import {
   createDecisionLedgerTransport,
   decodeDecisionIdempotencyKeyForTest,
   decodeDecisionRequestForTest,
+  decodeFirstBudgetClaimForTest,
   decodeHandshakeTenantAssertionForTest,
   decodePublishOutcomeRequestForTest,
   encodeDecisionResponseForTest,
@@ -141,12 +142,23 @@ const CONTINUE = DecisionResponse_Decision.CONTINUE;
 const STOP = DecisionResponse_Decision.STOP;
 const STOP_RUN_PROJECTION = DecisionResponse_Decision.STOP_RUN_PROJECTION;
 
+// A reserve now REQUIRES a budget projection (the real sidecar rejects an empty projected_claims set);
+// these are cost-accounting identifiers, never credentials. Tests that exercise reserve supply this.
+const TEST_CLAIM = {
+  budgetId: "44444444-4444-4444-8444-444444444444",
+  unitId: "66666666-6666-4666-8666-666666666666",
+  windowInstanceId: "55555555-5555-4555-8555-555555555555",
+} as const;
+
 describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
   it("reserve: a CONTINUE decision maps to {reservationId: decision_id}", async () => {
     fake = await startFakeSidecar({
       decision: () => ({ decisionId: "dec-123", decision: CONTINUE }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     const res = await transport.reserve({
       tenant_id: "tenant-a",
@@ -170,7 +182,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
         return { decisionId: "dec-x", decision: CONTINUE };
       },
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     await transport.reserve({ tenant_id: "t", estimated_amount_atomic: 5, route: "r1" });
     await transport.reserve({ tenant_id: "t", estimated_amount_atomic: 7, route: "r2" });
@@ -189,7 +204,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
         return { decisionId: "dec-x", decision: CONTINUE };
       },
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     await transport.reserve({
       tenant_id: "tenant-a",
@@ -219,6 +237,7 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
     const transport = createDecisionLedgerTransport({
       udsPath: fake.udsPath,
       tenantIdAssertion: "00000000-0000-4000-8000-000000000001",
+      budgetClaim: TEST_CLAIM,
     });
     await transport.reserve({ tenant_id: "t", estimated_amount_atomic: 5, route: "r" });
     expect(rawHandshake).toBeDefined();
@@ -235,17 +254,57 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
       },
       decision: () => ({ decisionId: "d", decision: CONTINUE }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
     await transport.reserve({ tenant_id: "t", estimated_amount_atomic: 5, route: "r" });
     expect(rawDecision).toBeDefined();
     expect(decodeDecisionIdempotencyKeyForTest(rawDecision as Buffer).length).toBeGreaterThan(0);
+  });
+
+  // --- R11-S10: projected BudgetClaim (live-discovered 3rd gate — the real sidecar rejects empty claims).
+  it("reserve ENCODES the configured projected BudgetClaim on the wire (budget/unit/amount/direction/window)", async () => {
+    let rawDecision: Buffer | undefined;
+    fake = await startFakeSidecar({
+      onDecisionRaw: (b) => {
+        rawDecision = b;
+      },
+      decision: () => ({ decisionId: "d", decision: CONTINUE }),
+    });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
+    await transport.reserve({ tenant_id: "t", estimated_amount_atomic: 42, route: "r" });
+    expect(rawDecision).toBeDefined();
+    const claim = decodeFirstBudgetClaimForTest(rawDecision as Buffer);
+    expect(claim).toBeDefined();
+    expect(claim).toMatchObject({
+      budgetId: TEST_CLAIM.budgetId,
+      unitId: TEST_CLAIM.unitId,
+      windowInstanceId: TEST_CLAIM.windowInstanceId,
+      amountAtomic: "42", // token unit scale=0 -> amount_atomic == estimatedTokens
+      direction: 1, // DEBIT
+    });
+  });
+
+  it("reserve WITHOUT a budgetClaim fails CLOSED (no empty/bogus claim is sent)", async () => {
+    fake = await startFakeSidecar({ decision: () => ({ decisionId: "d", decision: CONTINUE }) });
+    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath }); // no budgetClaim
+    await expect(
+      transport.reserve({ tenant_id: "t", estimated_amount_atomic: 5, route: "r" }),
+    ).rejects.toThrow(/budgetClaim|fail-closed/i);
   });
 
   it("reserve: a STOP decision (per-call budget) maps to {overBudget:true}", async () => {
     fake = await startFakeSidecar({
       decision: () => ({ decisionId: "dec-stop", decision: STOP }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     const res = await transport.reserve({
       tenant_id: "tenant-a",
@@ -260,7 +319,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
     fake = await startFakeSidecar({
       decision: () => ({ decisionId: "dec-stop-run", decision: STOP_RUN_PROJECTION }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     const res = await transport.reserve({
       tenant_id: "tenant-a",
@@ -279,7 +341,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
         return { auditOutcomeEventId: "evt-1" };
       },
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     const res = await transport.commit({
       tenant_id: "tenant-a",
@@ -295,7 +360,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
     fake = await startFakeSidecar({
       decision: () => ({ decisionId: "dec-deg", decision: DecisionResponse_Decision.DEGRADE }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     await expect(
       transport.reserve({ tenant_id: "t", estimated_amount_atomic: 1, route: "r" }),
@@ -306,7 +374,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
     fake = await startFakeSidecar({
       decision: () => ({ decisionId: "dec-u", decision: 0 /* DECISION_UNSPECIFIED */ }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     await expect(
       transport.reserve({ tenant_id: "t", estimated_amount_atomic: 1, route: "r" }),
@@ -317,7 +388,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
     fake = await startFakeSidecar({
       decision: () => ({ decisionId: "", decision: CONTINUE }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     await expect(
       transport.reserve({ tenant_id: "t", estimated_amount_atomic: 1, route: "r" }),
@@ -337,7 +411,11 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
 
   it("fail-closed: reserve REJECTS when the decision deadline expires (server never replies)", async () => {
     fake = await startFakeSidecar({ hangDecision: true });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath, timeoutMs: 100 });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      timeoutMs: 100,
+      budgetClaim: TEST_CLAIM,
+    });
 
     await expect(
       transport.reserve({ tenant_id: "t", estimated_amount_atomic: 1, route: "r" }),
@@ -351,7 +429,10 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
         error: { code: 11 /* AUDIT_INVARIANT_VIOLATED */, message: "bad", details: {} },
       }),
     });
-    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      budgetClaim: TEST_CLAIM,
+    });
 
     await expect(
       transport.commit({ tenant_id: "t", reservation_id: "dec-1", amount_atomic_delta: 1 }),

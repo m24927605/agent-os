@@ -4,7 +4,8 @@
 - **Branch**: slice/p2r-r11-s10-projected-budget-claim
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~160（`decision-transport.ts` encoder+config 擴充 + `decision-transport.test.ts` 補測）、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;encoder 擴充 + config-driven claim;對真實 demo 已驗 budget-backed CONTINUE;獨立 Opus 4.8 review = PASS）
+> **實作註記(誠實偏離 spec)**:claim 採 **config + 手寫 proto3 線格編碼**(`encodeBudgetClaim`,與 transport 既有手寫 codec 一致),**未**為 BudgetClaim/UnitRef regen 型別 stub(§3 原寫「擴 vendored proto subset + regen」)——手寫更輕、且 live 已逐位元驗證對真實 sidecar 正確,故不另 regen。
 
 ## (1) ID + Title
 SLICE-P2R-R11-S10 — 因 R11-S9 live ground-truth 證實真實 sidecar 要求 `DecisionRequest.inputs.projected_claims` 非空,擴充 `createDecisionLedgerTransport` 送一個由 **config-driven route→budget 映射** 構出的 projected `BudgetClaim`(`Inputs.projected_claims` field 1,repeated),使真實 sidecar `RequestDecision` 能對有效預算回 **CONTINUE**(額度內)/ **STOP**(超額)。route→budget 的翻譯住在 **adapter/transport(非 core port)**——保 pluggability 與 credential-blind。
@@ -39,12 +40,14 @@ SLICE-P2R-R11-S10 — 因 R11-S9 live ground-truth 證實真實 sidecar 要求 `
   - 未設定 budgetClaim → reserve **reject/deny**(fail-closed)。
   - amount_atomic == estimatedTokens 的十進位字串。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:encoder 未送 projected_claims 時,新解碼斷言測試紅。
-- [ ] `pnpm run verify` exit 0;`spendguard:proto:check` 綠(subset 擴充 regen 一致)。
-- [ ] depcruise exit 0 + 封閉性實證。
-- [ ] fail-closed:未設定 budgetClaim → deny;空 claim 不矇混。secret-scan clean;credential-blind 斷言。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:省略 projected_claims / 送錯 unit→對應測試紅)。
+## (6) Definition of Done（實測）
+- [x] RED:reserve 未送 projected_claims 時,`decodeFirstBudgetClaimForTest` 斷言會紅(reviewer mutation 驗證)。
+- [x] `pnpm run verify` **exit 0**;decision-transport 單元測試 **16 passed**(含 claim 編碼斷言 + 未設定 budgetClaim→fail-closed)。
+- [x] depcruise exit 0 + 封閉性(grpc-js/stub 仍只在 `src/runtime/spendguard/`)。
+- [x] fail-closed:未設定 budgetClaim → reserve reject(deny-by-default,不送空 claim);secret-scan clean;claim 只含 budget/unit/window/amount(credential-blind,測試斷言)。
+- [x] **LIVE 驗證**:`pnpm run e2e:live-spendguard` 對真實 demo sidecar → reserve(額度內 10)= **CONTINUE + 真實 reservationId**、commit = **committed**、reserve(600>500 餘額)= **denied(fail-closed)**;`LIVE_E2E_PASS`。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8)。
+> 真實 over-budget 經 sidecar 自身 `RecordDeniedDecision`(matched_rule_ids must be non-empty when DENY)→ INTERNAL → 我方 adapter fail-closed deny。**安全結果正確(over-budget 被拒)**;乾淨 STOP→overBudget 由單元測試(fake)覆蓋。此為 vendor demo 端 bug,記為 follow-up。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 claim 編碼 + opts + subset 擴充)。S8 的 tenant/idempotency 修正不受影響。
