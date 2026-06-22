@@ -33,6 +33,9 @@ function stubClient(handler: (req: AppendRequest) => Promise<AppendResponse>): A
   return {
     Append: handler,
     Checkpoint: () => Promise.reject(new Error("Checkpoint not exercised in this test")),
+    // ListEntries (P2R-PV-S3a) is part of the contract but not exercised by the S6 transport tests;
+    // fail-closed so an accidental call surfaces rather than returning a faked entry set.
+    ListEntries: () => Promise.reject(new Error("ListEntries not exercised in this test")),
   };
 }
 

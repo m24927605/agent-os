@@ -74,6 +74,8 @@ function stubService(handler: (req: AppendRequest, callIndex: number) => Promise
       },
       // Checkpoint (R10-S4) is part of the contract but not used by this wire e2e; fail-closed.
       Checkpoint: () => Promise.reject(new Error("Checkpoint not exercised in this test")),
+      // ListEntries (P2R-PV-S3a) is part of the contract but not used by this wire e2e; fail-closed.
+      ListEntries: () => Promise.reject(new Error("ListEntries not exercised in this test")),
     },
   };
 }

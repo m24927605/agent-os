@@ -73,6 +73,35 @@ export interface CheckpointResponse_PerSourceNextSeqEntry {
 }
 
 /**
+ * Entry is one read-back WORM record, field-aligned with chain.LogEntry (verifier-compatible). The
+ * server re-derives canonical_event from the stored (already-redacted) event via the SAME canonical
+ * function the chain used to seal it, so EntryHashFromCanonical(canonical_event, prev_hash, sequence)
+ * reproduces entry_hash byte-for-byte. The client cannot set these — they are read from the durable log.
+ */
+export interface Entry {
+  sequence: number;
+  /** ALREADY-redacted canonical bytes (re-derived; byte-identical to what was hashed) */
+  canonicalEvent: Uint8Array;
+  /** "sha256:"-prefixed */
+  prevHash: string;
+  /** "sha256:"-prefixed */
+  entryHash: string;
+}
+
+/** ListEntriesRequest selects the chain tail: entries with sequence >= from_sequence (0 => the whole log). */
+export interface ListEntriesRequest {
+  fromSequence: number;
+}
+
+/**
+ * ListEntriesResponse carries the consistent snapshot of entries in chain order (never a partial slice;
+ * a durable read failure surfaces as an Internal error instead).
+ */
+export interface ListEntriesResponse {
+  entries: Entry[];
+}
+
+/**
  * AppendService is the kernel's ingest surface. It is APPEND-ONLY by construction: exactly one RPC
  * (Append) and no Update/Delete/Rewrite/Upsert/Overwrite — the control plane can only append, never
  * rewrite history (HARD CONSTRAINT; gating c1/c4). The server additionally enforces monotonic
@@ -87,4 +116,12 @@ export interface AppendService {
    * cannot observe a torn (half-written) tail. It does NOT widen the append-only surface.
    */
   Checkpoint(request: CheckpointRequest): Promise<CheckpointResponse>;
+  /**
+   * ListEntries is READ-ONLY: under the same append mutex it captures a consistent snapshot of the
+   * durable WORM chain (store.Load), filters to sequence >= from_sequence, and returns the entries so a
+   * client can re-derive entryHash and verify chain integrity (reading != attesting). It NEVER appends,
+   * rewrites, or truncates, and on a durable read failure returns Internal — never a partial slice. It
+   * does NOT widen the append-only surface.
+   */
+  ListEntries(request: ListEntriesRequest): Promise<ListEntriesResponse>;
 }

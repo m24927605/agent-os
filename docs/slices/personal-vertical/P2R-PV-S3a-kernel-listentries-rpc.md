@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-pv-s3a-kernel-listentries-rpc
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~120（`proto/ingest.proto` + `kernel/internal/server/list.go` + `list_test.go`;**生成碼不計**)、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;canonical round-trip + proto-drift + append-only guard 皆 mutation 證實非 vacuous）
 
 ## (1) ID + Title
 SLICE-P2R-PV-S3a — 在現有 `AppendService` 上新增**一個唯讀** RPC `ListEntries(from_sequence)`,回傳與 `chain.LogEntry` 同構的 `Entry{sequence, canonical_event(已脫敏), prev_hash, entry_hash}`,讓 client 能從**真實 kernel WORM** 讀回鏈條目以重建 TaskTimeline(S3b)+ 獨立重算鏈結/entryHash 驗證完整性。**讀取 != 背書**(attester≠actor):append-only 安全、絕不 append/rewrite/truncate。
@@ -32,13 +32,15 @@ SLICE-P2R-PV-S3a — 在現有 `AppendService` 上新增**一個唯讀** RPC `Li
 - RED 清單:append 3 → ListEntries(0) 回 3、欄位齊全;**canonical round-trip**:`chain.EntryHashFromCanonical(entry.canonical_event, entry.prev_hash, entry.sequence) == entry.entry_hash`;ListEntries(2) 回 tail(seq≥2);空 log → 0 筆;Load torn → Internal error。
 - 首次 RED 證據:`go test ./internal/server -run ListEntries` 編譯失敗(method 不存在)。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:list_test 在 ListEntries 不存在時 fail。
-- [ ] `pnpm run verify` exit 0(含 `verify:go` + `proto:check` Go/TS drift 綠;生成碼兩邊一致已 commit)。
-- [ ] `go test ./internal/server`(env -u GOROOT CGO_ENABLED=0 GOTOOLCHAIN=local)綠;**canonical round-trip 不變量**測試過。
-- [ ] append-only 安全:ListEntries 取 s.mu、不 append/truncate(reviewer 檢視 + 既有 store 無 truncate 表面)。
-- [ ] secret-scan clean(canonical_event 已脫敏;無 raw secret)。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:回傳未脫敏/原始 event、或 entry_hash 與 canonical 不一致 → round-trip 測試紅;from_sequence filter 反向 → tail 測試紅)。
+## (6) Definition of Done（實測）
+- [x] RED:`go test ./internal/server -run ListEntries` 在 method 不存在時編譯失敗(`srv.ListEntries undefined` + `undefined: ingestpb.ListEntriesRequest`)。
+- [x] `pnpm run verify` **exit 0**(`proto:check: go ok / ts ok`——Go+TS 生成碼兩邊一致、無 drift;`verify:go: ok`;741 TS tests;secret-scan clean)。
+- [x] `go test ./...`(kernel)綠;**canonical round-trip 不變量**過:`chain.EntryHashFromCanonical(entry.canonical_event, entry.prev_hash, entry.sequence) == entry.entry_hash`(reviewer mutation:污染 canonical bytes → round-trip 測試紅)。
+- [x] append-only 安全:ListEntries 取 `s.mu`、零 mutation(無 Append/Truncate/head 賦值);store 無 write 表面(僅 Append/Load/Close);**surface guard deny-by-default**(reviewer 從 allowlist 移除 ListEntries → guard 報 `unexpected RPC`)。fail-closed:Load error → `codes.Internal` + nil(非部分;torn-store 測試證實)。
+- [x] secret-scan clean(canonical_event 已脫敏;error 字串為靜態字面、不回 event 內容)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;round-trip / from_sequence filter / fail-closed / proto-drift / surface-guard 五個 gate 皆 mutation 證實非 vacuous;8 攻擊面全 HELD/N/A)。
+> **採納 reviewer MINOR**:`Entry.sequence` 與 from_sequence filter 改用**被 hash 的 leaf `r.Sequence`**(非 `r.SourceSeq` 的 ingest metadata),消除「SourceSeq==Sequence」隱性耦合;go test 仍綠。
+> **誠實缺口(spec §3)**:讀回 **unsigned**(線上 kernel 無 Ed25519 私鑰)——client 可驗鏈結+entryHash,未驗 Ed25519 anchor。簽章讀回留待後續。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 ListEntries proto+impl+test + 還原生成碼)。Append/Checkpoint 不受影響、可逆。

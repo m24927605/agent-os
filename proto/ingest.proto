@@ -15,6 +15,12 @@ service AppendService {
   // truncates — it is a consistent read of the chain head + per-source next sequence so a snapshot
   // cannot observe a torn (half-written) tail. It does NOT widen the append-only surface.
   rpc Checkpoint(CheckpointRequest) returns (CheckpointResponse);
+  // ListEntries is READ-ONLY: under the same append mutex it captures a consistent snapshot of the
+  // durable WORM chain (store.Load), filters to sequence >= from_sequence, and returns the entries so a
+  // client can re-derive entryHash and verify chain integrity (reading != attesting). It NEVER appends,
+  // rewrites, or truncates, and on a durable read failure returns Internal — never a partial slice. It
+  // does NOT widen the append-only surface.
+  rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
 }
 
 message AppendRequest {
@@ -58,4 +64,26 @@ message CheckpointResponse {
   string head_entry_hash = 1;             // current chain head entryHash ("sha256:"-prefixed); genesis if empty log
   uint64 head_sequence = 2;               // sequence of the head record (0 for an empty log; check per_source_next_seq for emptiness)
   map<string, uint64> per_source_next_seq = 3; // expected next sequence per source (empty map => no appends yet)
+}
+
+// Entry is one read-back WORM record, field-aligned with chain.LogEntry (verifier-compatible). The
+// server re-derives canonical_event from the stored (already-redacted) event via the SAME canonical
+// function the chain used to seal it, so EntryHashFromCanonical(canonical_event, prev_hash, sequence)
+// reproduces entry_hash byte-for-byte. The client cannot set these — they are read from the durable log.
+message Entry {
+  uint64 sequence = 1;
+  bytes canonical_event = 2;  // ALREADY-redacted canonical bytes (re-derived; byte-identical to what was hashed)
+  string prev_hash = 3;       // "sha256:"-prefixed
+  string entry_hash = 4;      // "sha256:"-prefixed
+}
+
+// ListEntriesRequest selects the chain tail: entries with sequence >= from_sequence (0 => the whole log).
+message ListEntriesRequest {
+  uint64 from_sequence = 1;
+}
+
+// ListEntriesResponse carries the consistent snapshot of entries in chain order (never a partial slice;
+// a durable read failure surfaces as an Internal error instead).
+message ListEntriesResponse {
+  repeated Entry entries = 1;
 }
