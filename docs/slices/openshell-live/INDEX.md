@@ -19,7 +19,7 @@
 | Slice | 範圍 | infra | 狀態 |
 |---|---|---|---|
 | **OS-S1** | mTLS gRPC channel(讀 ca/tls cert 連 17670)+ pin 真實 proto 子集(擴 `openshell.subset.proto` 加 `ExecSandbox`+messages)+ regen codec + **`ExecSandbox` server-streaming** → 實作 `OpenShellExecTransport`;單元測試(proto codec + fake stream)+ **live 驗證**(對真 gateway exec)| 真 gateway(已就緒)| ✅ **DONE**(對真實 gateway live 驗證:exec→exitCode0+stdout;獨立 review PASS;**SNI 修正**〔grpc-js IP-SNI bug,live 抓到〕)|
-| **OS-S2a** | `CreateSandbox`/`GetSandbox`/`DeleteSandbox`(unary)+ codec + **生產 composition root**(同一 adapter:create→READY 輪詢→host/exec→delete,**收掉 NC-S11b same-instance tracking,無 seed**)| 真 gateway | DRAFT |
+| **OS-S2a** | `CreateSandbox`/`GetSandbox`/`DeleteSandbox`(unary)+ codec + **生產 composition root**(同一 adapter:create→READY 輪詢→host/exec→delete,**收掉 NC-S11b same-instance tracking,無 seed**)| 真 gateway | ✅ **DONE**(full lifecycle LIVE:create→ready→host→reconcile→delete 無 seed;3rd live-caught bug〔digest-ref pin〕修;獨立 review PASS)|
 | **OS-S2b** | `WatchSandbox`(server-stream readiness)→ 完成 `OpenShellReadinessTransport`(取代 getSandbox 輪詢)| 真 gateway | DRAFT |
 | **NC-S11b** | NemoClaw composition root 綁定 + gated live e2e(host trivial gateway〔python3 /health on 18789〕於真 sandbox → status running → reconcile)+ harness + **收斂 OS-S1 的 MAJOR-tracking:把 grpc-transport 包成 `OpenShellExecTransport`(yield stream)讓 adapter 單一累積,刪重複** | 真 gateway + sandbox | ✅ **DONE**(NemoClaw hosting 對真實 gateway LIVE:host→running→reconcile;收斂單一 accumulator;2 個 live-caught bug 修正〔dash launchCommand + refById〕;獨立 review PASS)|
 

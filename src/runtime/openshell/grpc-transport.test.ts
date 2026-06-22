@@ -14,12 +14,17 @@
  * Load-bearing seam probes:
  *   - execSandbox(req, signal) yields ALL injected events IN ORDER (the stream IS an AsyncIterable).
  *   - an aborted `signal` CANCELS the underlying stream (no leaked gRPC stream).
- *   - createSandbox / deleteSandbox FAIL CLOSED (reject, deny-by-default) until OS-S2 makes them real.
+ * The unary lifecycle (createSandbox / getSandbox / deleteSandbox) is now REAL — covered by
+ * grpc-transport.lifecycle.test.ts; watchSandbox stays a fail-closed stub (OS-S2b), asserted there.
  * A fail-closed reason carries NO endpoint / cert content (credential-blind).
  */
 import { describe, expect, it } from "vitest";
 import type { ExecSandboxRequest } from "./client.js";
-import { type ExecStreamHandle, createOpenShellGrpcTransport } from "./grpc-transport.js";
+import {
+  type ExecStreamHandle,
+  type UnaryRequestFn,
+  createOpenShellGrpcTransport,
+} from "./grpc-transport.js";
 import type { ExecSandboxEvent } from "./proto/openshell.subset.codec.js";
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -91,6 +96,10 @@ function transportWith(makeStream: () => { handle: ExecStreamHandle; cancelled: 
   lastCancelled: () => boolean;
 } {
   let last: () => boolean = () => false;
+  // Inject a unary seam too so a lifecycle call never falls through to the real grpc-js Client (these
+  // exec-focused tests don't exercise lifecycle; that lives in grpc-transport.lifecycle.test.ts).
+  const makeUnary: UnaryRequestFn = () =>
+    Promise.reject(new Error("unary not used in this test (fail-closed)"));
   const transport = createOpenShellGrpcTransport({
     endpoint: "127.0.0.1:17670",
     caCertPath: "/dev/null",
@@ -103,6 +112,7 @@ function transportWith(makeStream: () => { handle: ExecStreamHandle; cancelled: 
       last = s.cancelled;
       return s.handle;
     },
+    makeUnary,
   });
   return { transport, lastCancelled: () => last() };
 }
@@ -174,26 +184,25 @@ describe("createOpenShellGrpcTransport — execSandbox abort cancels the underly
   });
 });
 
-describe("createOpenShellGrpcTransport — lifecycle stubs FAIL CLOSED until OS-S2", () => {
-  it("createSandbox rejects deny-by-default (not implemented until OS-S2)", async () => {
+describe("createOpenShellGrpcTransport — watchSandbox STILL a fail-closed stub (OS-S2b)", () => {
+  it("watchSandbox iteration throws deny-by-default (not implemented until OS-S2b)", async () => {
     const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
     await expect(
-      transport.createSandbox({ spec: { template: { image: "sha256:" } } }),
-    ).rejects.toThrow(/OS-S2|not implemented|fail-closed/i);
+      (async () => {
+        for await (const _ of transport.watchSandbox({ id: "x", followStatus: true })) {
+          // unreachable — the stub throws before yielding.
+        }
+      })(),
+    ).rejects.toThrow(/OS-S2b|not implemented|fail-closed/i);
   });
 
-  it("deleteSandbox rejects deny-by-default (not implemented until OS-S2)", async () => {
-    const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
-    await expect(transport.deleteSandbox({ name: "anything" })).rejects.toThrow(
-      /OS-S2|not implemented|fail-closed/i,
-    );
-  });
-
-  it("does NOT leak the endpoint / cert paths into a lifecycle-stub rejection (credential-blind)", async () => {
+  it("does NOT leak the endpoint / cert paths into the watch-stub rejection (credential-blind)", async () => {
     const { transport } = transportWith(() => fakeStream({ events: [exitEvent(0)] }));
     let caught: unknown;
     try {
-      await transport.createSandbox({ spec: { template: { image: "sha256:" } } });
+      for await (const _ of transport.watchSandbox({ id: "x" })) {
+        // unreachable
+      }
     } catch (e) {
       caught = e;
     }

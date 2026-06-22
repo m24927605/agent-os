@@ -1,11 +1,14 @@
 /**
- * Hand-written proto3 wire codecs for the PINNED OpenShell `ExecSandbox` subset (slice SLICE-OS-S1).
+ * Hand-written proto3 wire codecs for the PINNED OpenShell subset — `ExecSandbox` (slice SLICE-OS-S1)
+ * + the unary sandbox lifecycle CreateSandbox / GetSandbox / DeleteSandbox (slice SLICE-OS-S2a).
  *
- * SINGLE responsibility: serialize an `ExecSandboxRequest` and parse an `ExecSandboxEvent` byte-for-byte
- * against the vendored subset (openshell.subset.proto, v0.0.66). It mirrors the proto 1:1 — there is NO
- * third-party codec (mirrors the ingest hand-written codec in src/runtime/ingest/grpc-client.ts and the
- * Health-descriptor approach in client.ts). The `.proto` file is the source of truth and
- * `pnpm run openshell:proto:check` guards it against drift.
+ * SINGLE responsibility: serialize the requests + parse the replies byte-for-byte against the vendored
+ * subset (openshell.subset.proto, v0.0.66). It mirrors the proto 1:1 — there is NO third-party codec
+ * (mirrors the ingest hand-written codec in src/runtime/ingest/grpc-client.ts and the Health-descriptor
+ * approach in client.ts). The `.proto` file is the source of truth and `pnpm run openshell:proto:check`
+ * guards it against drift. The lifecycle codecs encode/decode ONLY the fields we consume
+ * (CreateSandboxRequest spec.template.image/name/labels; SandboxResponse metadata id/name + status
+ * phase=6; DeleteSandboxResponse deleted); every other upstream field is SKIPPED (forward-compatible).
  *
  * proto3 semantics this codec honours (so the wire matches the gateway exactly):
  *   - a zero/empty SCALAR field is OMITTED on the wire (empty stdin, "" workdir, 0 timeout => no bytes);
@@ -20,6 +23,71 @@
 
 /** Fully-qualified ExecSandbox method id used on the wire (`/<package>.<service>/<method>`). */
 export const EXEC_SANDBOX_METHOD = "/openshell.v1.OpenShell/ExecSandbox";
+
+/** Fully-qualified unary lifecycle method ids (slice SLICE-OS-S2a). */
+export const CREATE_SANDBOX_METHOD = "/openshell.v1.OpenShell/CreateSandbox";
+export const GET_SANDBOX_METHOD = "/openshell.v1.OpenShell/GetSandbox";
+export const DELETE_SANDBOX_METHOD = "/openshell.v1.OpenShell/DeleteSandbox";
+
+// --- TS face of the pinned lifecycle messages (slice SLICE-OS-S2a; the codec owns the wire) ----------
+//
+// PARTIAL by design: only the fields we encode/decode are typed. The decoders SKIP every unknown field
+// (forward-compatible) and read only the nested fields we consume.
+
+/** `SandboxTemplate` subset — the pinned boot image lives here (template.image = 1). */
+export interface SandboxTemplateWire {
+  readonly image: string;
+}
+
+/** `SandboxSpec` subset — we encode ONLY `template` (= field 6). */
+export interface SandboxSpecWire {
+  readonly template: SandboxTemplateWire;
+}
+
+/** `CreateSandboxRequest` subset (spec=1, name=2, labels=3). */
+export interface CreateSandboxRequestWire {
+  readonly spec: SandboxSpecWire;
+  /** Optional caller-supplied name; empty => the gateway generates one (proto3 zero omitted). */
+  readonly name?: string;
+  readonly labels?: Readonly<Record<string, string>>;
+}
+
+/** `ObjectMeta` subset (datamodel.proto) — id=1, name=2. */
+export interface ObjectMetaWire {
+  readonly id?: string;
+  readonly name?: string;
+}
+
+/** `SandboxStatus` subset — phase=6 (NOTE: field 6, NOT 1). */
+export interface SandboxStatusWire {
+  readonly phase?: number;
+}
+
+/** `Sandbox` subset — metadata=1, status=3 (spec=2 is skipped). */
+export interface SandboxWire {
+  readonly metadata?: ObjectMetaWire;
+  readonly status?: SandboxStatusWire;
+}
+
+/** `SandboxResponse` — sandbox=1. */
+export interface SandboxResponseWire {
+  readonly sandbox?: SandboxWire;
+}
+
+/** `GetSandboxRequest` — name=1. */
+export interface GetSandboxRequestWire {
+  readonly name: string;
+}
+
+/** `DeleteSandboxRequest` — name=1. */
+export interface DeleteSandboxRequestWire {
+  readonly name: string;
+}
+
+/** `DeleteSandboxResponse` — deleted=1 bool. */
+export interface DeleteSandboxResponseWire {
+  readonly deleted?: boolean;
+}
 
 // --- TS face of the pinned ExecSandbox messages (mirrors client.ts 1:1; the codec owns the wire) -----
 
@@ -248,4 +316,138 @@ export function decodeExecSandboxEvent(bytes: Uint8Array): ExecSandboxEvent {
     ...(stderr !== undefined ? { stderr } : {}),
     ...(exit !== undefined ? { exit } : {}),
   };
+}
+
+// --- lifecycle encoders (slice SLICE-OS-S2a) --------------------------------------------------------
+
+/**
+ * Encode a `CreateSandboxRequest` to its proto3 message bytes. We encode ONLY the fields we use:
+ *   spec (=1) -> SandboxSpec{ template (=6) -> SandboxTemplate{ image (=1) string } },
+ *   name (=2, omitted when empty — proto3 zero),
+ *   labels (=3, one map-entry submessage per key in insertion order).
+ * No other SandboxSpec field (policy / providers / gpu / env) is emitted — the gateway does not
+ * require policy for a minimal create (empirically confirmed).
+ */
+export function encodeCreateSandboxRequest(req: CreateSandboxRequestWire): Buffer {
+  // SandboxTemplate { image = 1 }.
+  const template: number[] = [];
+  if (req.spec.template.image.length > 0) writeString(template, 1, req.spec.template.image);
+  // SandboxSpec { template = 6 } — always present (even if the template is empty, the field is set).
+  const spec: number[] = [];
+  writeLenDelim(spec, 6, Uint8Array.from(template));
+
+  const out: number[] = [];
+  writeLenDelim(out, 1, Uint8Array.from(spec)); // CreateSandboxRequest.spec = 1
+  if (req.name !== undefined && req.name.length > 0) writeString(out, 2, req.name); // name = 2
+  if (req.labels !== undefined) {
+    for (const [key, value] of Object.entries(req.labels)) {
+      writeLenDelim(out, 3, encodeMapEntry(key, value)); // labels = 3 (map entry submessage)
+    }
+  }
+  return Buffer.from(out);
+}
+
+/** Encode a `GetSandboxRequest { name = 1 }` (name omitted when empty — proto3 zero). */
+export function encodeGetSandboxRequest(req: GetSandboxRequestWire): Buffer {
+  const out: number[] = [];
+  if (req.name.length > 0) writeString(out, 1, req.name);
+  return Buffer.from(out);
+}
+
+/** Encode a `DeleteSandboxRequest { name = 1 }` (name omitted when empty — proto3 zero). */
+export function encodeDeleteSandboxRequest(req: DeleteSandboxRequestWire): Buffer {
+  const out: number[] = [];
+  if (req.name.length > 0) writeString(out, 1, req.name);
+  return Buffer.from(out);
+}
+
+// --- lifecycle decoders (slice SLICE-OS-S2a) — read ONLY the consumed fields; SKIP everything else ---
+
+/** Read a length-delimited string field's bytes as UTF-8. */
+function readString(r: Reader): string {
+  return new TextDecoder().decode(readLenDelim(r));
+}
+
+/** Decode an `ObjectMeta { id=1 string, name=2 string }`; other fields are skipped. */
+function decodeObjectMeta(bytes: Uint8Array): ObjectMetaWire {
+  const r: Reader = { buf: bytes, pos: 0 };
+  let id: string | undefined;
+  let name: string | undefined;
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 0x7;
+    if (field === 1 && wireType === 2) id = readString(r);
+    else if (field === 2 && wireType === 2) name = readString(r);
+    else skipField(r, wireType);
+  }
+  return {
+    ...(id !== undefined ? { id } : {}),
+    ...(name !== undefined ? { name } : {}),
+  };
+}
+
+/** Decode a `SandboxStatus { phase=6 enum (varint) }`; other fields are skipped. */
+function decodeSandboxStatus(bytes: Uint8Array): SandboxStatusWire {
+  const r: Reader = { buf: bytes, pos: 0 };
+  let phase: number | undefined;
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 0x7;
+    // SandboxStatus.phase is field 6 (NOT 1) per openshell.proto v0.0.66; an enum is a varint.
+    if (field === 6 && wireType === 0) phase = readVarint(r);
+    else skipField(r, wireType);
+  }
+  return phase !== undefined ? { phase } : {};
+}
+
+/** Decode a `Sandbox { metadata=1, status=3 }`; spec (=2) and unknown fields are skipped. */
+function decodeSandbox(bytes: Uint8Array): SandboxWire {
+  const r: Reader = { buf: bytes, pos: 0 };
+  let metadata: ObjectMetaWire | undefined;
+  let status: SandboxStatusWire | undefined;
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 0x7;
+    if (field === 1 && wireType === 2) metadata = decodeObjectMeta(readLenDelim(r));
+    else if (field === 3 && wireType === 2) status = decodeSandboxStatus(readLenDelim(r));
+    else skipField(r, wireType);
+  }
+  return {
+    ...(metadata !== undefined ? { metadata } : {}),
+    ...(status !== undefined ? { status } : {}),
+  };
+}
+
+/**
+ * Decode a `SandboxResponse { sandbox=1 }` (shared by CreateSandbox / GetSandbox). An absent sandbox
+ * (empty wire) decodes to `{}` — the adapter treats that as deny-by-default (no name => deny).
+ */
+export function decodeSandboxResponse(bytes: Uint8Array): SandboxResponseWire {
+  const r: Reader = { buf: bytes, pos: 0 };
+  let sandbox: SandboxWire | undefined;
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 0x7;
+    if (field === 1 && wireType === 2) sandbox = decodeSandbox(readLenDelim(r));
+    else skipField(r, wireType);
+  }
+  return sandbox !== undefined ? { sandbox } : {};
+}
+
+/** Decode a `DeleteSandboxResponse { deleted=1 bool }`. An absent field is the proto3 zero (false). */
+export function decodeDeleteSandboxResponse(bytes: Uint8Array): DeleteSandboxResponseWire {
+  const r: Reader = { buf: bytes, pos: 0 };
+  let deleted = false; // proto3 zero when omitted.
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    const wireType = tag & 0x7;
+    if (field === 1 && wireType === 0) deleted = readVarint(r) !== 0;
+    else skipField(r, wireType);
+  }
+  return { deleted };
 }

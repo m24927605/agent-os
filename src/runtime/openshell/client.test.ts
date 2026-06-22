@@ -107,6 +107,21 @@ describe("assertPinnedImageDigest", () => {
       ),
     ).not.toThrow();
   });
+
+  it("does NOT throw on a full OCI ref pinned by @sha256 digest (the gateway-pullable form)", () => {
+    // The gateway needs the full registry reference to pull; a digest-pinned ref is still immutable.
+    expect(() =>
+      assertPinnedImageDigest(
+        "ghcr.io/nvidia/openshell-community/sandboxes/openclaw@sha256:c116946b3f9e84791630f21f115ac35c9c9f669af70ec0eef3035d79833a9550",
+      ),
+    ).not.toThrow();
+  });
+
+  it("STILL throws on a digest-shaped tail that is not pinned (mutable ref, no @sha256)", () => {
+    // A floating tag on a real registry path must remain rejected even though it has a colon.
+    expect(() => assertPinnedImageDigest("ghcr.io/org/img:latest")).toThrow();
+    expect(() => assertPinnedImageDigest("ghcr.io/org/img@sha256:tooshort")).toThrow();
+  });
 });
 
 describe("PINNED_SANDBOX_IMAGE", () => {
