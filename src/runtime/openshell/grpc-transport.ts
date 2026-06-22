@@ -18,14 +18,21 @@
  *
  * Responsibility (and ONLY this): build an mTLS channel to the gateway, open the `ExecSandbox`
  * server-stream (encodeExecSandboxRequest -> stream<ExecSandboxEvent>), wire the caller's `AbortSignal`
- * to `call.cancel()`, and expose the stream as an `AsyncIterable<ExecSandboxEvent>`.
+ * to `call.cancel()`, expose the exec stream as an `AsyncIterable<ExecSandboxEvent>`, AND (slice
+ * SLICE-OS-S2a) drive the UNARY sandbox lifecycle CreateSandbox / GetSandbox / DeleteSandbox over the
+ * SAME channel via `makeUnaryRequest` (encode request -> decode the unary reply).
  *
- * FAIL-CLOSED INVARIANT (deny-by-default): the lifecycle primitives `createSandbox` / `deleteSandbox`
- * are NOT yet implemented (they land in OS-S2). They REJECT with a static reason rather than silently
- * claiming success — so `new OpenShellSandboxAdapter(this)` has a valid `OpenShellLifecycleTransport`
- * while a caller that tries to create/delete fails closed. The exec stream itself never fabricates a
- * result: a stream `error`, a stream `end` before exit, an abort, etc. surface to the adapter (the
- * single accumulator), which converges them deny-by-default.
+ * CONVERGENCE (OS-S2a): the NC-S11b fail-closed `createSandbox` / `deleteSandbox` stubs are REPLACED by
+ * real unary impls and a unary `getSandbox` is added, so `createOpenShellGrpcTransport` now returns a
+ * transport satisfying `OpenShellReadinessTransport` EXCEPT `watchSandbox` — which stays a fail-closed
+ * stub until OS-S2b (streaming readiness). OS-S2a readiness is the adapter's getSandbox polling path.
+ *
+ * FAIL-CLOSED INVARIANT (deny-by-default): a unary RPC error (refused / DEADLINE_EXCEEDED / malformed
+ * reply) surfaces as a REJECTED promise — the adapter's signal to fail closed (deny), never a silent
+ * fake success. `watchSandbox` is NOT yet implemented (OS-S2b): its iterator THROWS a static reason
+ * rather than yielding. The exec stream itself never fabricates a result: a stream `error`, a stream
+ * `end` before exit, an abort, etc. surface to the adapter (the single accumulator), which converges
+ * them deny-by-default.
  *
  * CREDENTIAL-BLIND: the mTLS materials are read from PATHS (never inlined); NO cert/key/endpoint
  * content is ever placed in an error message, a reason, or a log (mirrors the adapter's discipline —
@@ -39,15 +46,27 @@ import type {
   DeleteSandboxRequest,
   DeleteSandboxResponse,
   ExecSandboxRequest,
+  GetSandboxRequest,
   OpenShellExecTransport,
+  OpenShellReadinessTransport,
   SandboxResponse,
+  SandboxStreamEvent,
+  WatchSandboxRequest,
 } from "./client.js";
 import {
+  CREATE_SANDBOX_METHOD,
+  DELETE_SANDBOX_METHOD,
   EXEC_SANDBOX_METHOD,
   type ExecSandboxEvent,
   type ExecSandboxRequestWire,
+  GET_SANDBOX_METHOD,
+  decodeDeleteSandboxResponse,
   decodeExecSandboxEvent,
+  decodeSandboxResponse,
+  encodeCreateSandboxRequest,
+  encodeDeleteSandboxRequest,
   encodeExecSandboxRequest,
+  encodeGetSandboxRequest,
 } from "./proto/openshell.subset.codec.js";
 
 /**
@@ -63,6 +82,15 @@ export interface ExecStreamHandle {
   on(event: "error", cb: (err: Error) => void): ExecStreamHandle;
   cancel(): void;
 }
+
+/**
+ * The vendor-neutral unary seam (slice SLICE-OS-S2a): send `requestBytes` to the fully-qualified
+ * gRPC `method` and resolve the raw reply bytes (the codec decodes them in the caller). The real
+ * grpc-js `makeUnaryRequest` (built lazily from the cert PATHS) satisfies this; the unit test injects
+ * an in-process double — mirroring the `openExecStream` server-stream seam. A gRPC error (refused /
+ * DEADLINE_EXCEEDED / malformed) rejects, which the adapter converges deny-by-default.
+ */
+export type UnaryRequestFn = (method: string, requestBytes: Buffer) => Promise<Buffer>;
 
 export interface OpenShellGrpcTransportOpts {
   /** Gateway endpoint (host:port, e.g. `127.0.0.1:17670`). Treated as sensitive: NEVER logged / leaked. */
@@ -99,11 +127,17 @@ export interface OpenShellGrpcTransportOpts {
    * injected-client seam.
    */
   readonly openExecStream?: (request: ExecSandboxRequestWire) => ExecStreamHandle;
+  /**
+   * Test seam: drive a unary RPC (send `requestBytes` to `method` -> reply bytes). Production omits it
+   * and a real grpc-js mTLS Client + `makeUnaryRequest` is built lazily from the cert PATHS (so tests
+   * stay network-free, certless, and hermetic). Tests inject a fake unary fn. Mirrors `openExecStream`.
+   */
+  readonly makeUnary?: UnaryRequestFn;
 }
 
-/** Static deny reason for the not-yet-implemented lifecycle primitives (credential-blind; deny-by-default). */
-const LIFECYCLE_NOT_IMPLEMENTED =
-  "openshell grpc transport: lifecycle not implemented until OS-S2 (fail-closed)";
+/** Static deny reason for WatchSandbox (streaming readiness — OS-S2b; credential-blind; deny-by-default). */
+const WATCH_NOT_IMPLEMENTED =
+  "openshell grpc transport: watch not implemented until OS-S2b (fail-closed)";
 
 /**
  * Build an `OpenShellExecTransport` over an mTLS gRPC channel to the gateway — the transport
@@ -114,32 +148,63 @@ const LIFECYCLE_NOT_IMPLEMENTED =
  * The certs are read from the supplied PATHS lazily, ONLY when no `openExecStream` test seam is given,
  * so the unit tests never read a cert nor open a socket.
  *
- * `health()` reports `{ ok: true }` (the live exec path does not depend on a Health RPC here; readiness
- * is OS-S2 / out of scope). `createSandbox` / `deleteSandbox` FAIL CLOSED (reject) until OS-S2 makes
- * them real — they exist only so the returned object is a valid `OpenShellLifecycleTransport`.
+ * `health()` reports `{ ok: true }` (the live exec path does not depend on a Health RPC here; S1's
+ * health client wraps Health). `createSandbox` / `getSandbox` / `deleteSandbox` are REAL unary RPCs
+ * over the SAME mTLS channel (OS-S2a); `execSandbox` is the converged server-stream (NC-S11b);
+ * `watchSandbox` FAILS CLOSED (its iterator throws) until OS-S2b. The returned object therefore
+ * satisfies BOTH `OpenShellReadinessTransport` (minus a real watch) AND `OpenShellExecTransport`.
  */
 export function createOpenShellGrpcTransport(
   opts: OpenShellGrpcTransportOpts,
-): OpenShellExecTransport {
-  // Build the real mTLS grpc-js stream source lazily ONLY when no test seam is injected.
-  const openExecStream = opts.openExecStream ?? buildGrpcExecStreamSource(opts);
+): OpenShellReadinessTransport & OpenShellExecTransport {
+  // Build the real mTLS grpc-js sources LAZILY (one shared Client; certs read + channel built on first
+  // actual use), so a unit test that injects ONLY one seam (exec OR unary) never triggers a cert read
+  // for the other. The exec stream source and the unary fn share the SAME channel, so a single mTLS
+  // handshake backs both exec and the lifecycle RPCs.
+  let grpc: ReturnType<typeof buildGrpc> | undefined;
+  const lazyGrpc = (): ReturnType<typeof buildGrpc> => {
+    grpc ??= buildGrpc(opts);
+    return grpc;
+  };
+  const openExecStream =
+    opts.openExecStream ?? ((req: ExecSandboxRequestWire) => lazyGrpc().openExecStream(req));
+  const makeUnary: UnaryRequestFn =
+    opts.makeUnary ?? ((method: string, bytes: Buffer) => lazyGrpc().makeUnary(method, bytes));
 
   return {
     health(): Promise<{ ok: boolean }> {
       // The exec transport does not wrap a Health RPC (S1's health client does); exec health is proven
-      // by an actual exec. Report ok so the lifecycle seam is satisfied; readiness lands in OS-S2.
+      // by an actual exec. Report ok so the lifecycle seam is satisfied.
       return Promise.resolve({ ok: true });
     },
 
-    createSandbox(_req: CreateSandboxRequest): Promise<SandboxResponse> {
-      // Deny-by-default: OS-S2 wires the real CreateSandbox RPC. Until then a create attempt fails
-      // closed (never a silent fake success). No endpoint / cert detail in the reason.
-      return Promise.reject(new Error(LIFECYCLE_NOT_IMPLEMENTED));
+    async createSandbox(req: CreateSandboxRequest): Promise<SandboxResponse> {
+      // OS-S2a: real unary CreateSandbox. A gRPC error rejects (the adapter fails closed on it); a
+      // garbled/empty reply decodes to `{}` and the adapter denies on a missing name. No endpoint /
+      // cert detail is constructed here — the underlying grpc-js error is propagated AS-IS for the
+      // adapter's credential-blind deny() boundary to swallow.
+      const reply = await makeUnary(CREATE_SANDBOX_METHOD, encodeCreateSandboxRequest(req));
+      return decodeSandboxResponse(reply);
     },
 
-    deleteSandbox(_req: DeleteSandboxRequest): Promise<DeleteSandboxResponse> {
-      // Deny-by-default: OS-S2 wires the real DeleteSandbox RPC. Until then a delete attempt fails closed.
-      return Promise.reject(new Error(LIFECYCLE_NOT_IMPLEMENTED));
+    async getSandbox(req: GetSandboxRequest): Promise<SandboxResponse> {
+      // OS-S2a: real unary GetSandbox (the adapter's getSandbox-polling readiness path).
+      const reply = await makeUnary(GET_SANDBOX_METHOD, encodeGetSandboxRequest(req));
+      return decodeSandboxResponse(reply);
+    },
+
+    async deleteSandbox(req: DeleteSandboxRequest): Promise<DeleteSandboxResponse> {
+      // OS-S2a: real unary DeleteSandbox (keyed by the canonical name; the adapter passes ref.name).
+      const reply = await makeUnary(DELETE_SANDBOX_METHOD, encodeDeleteSandboxRequest(req));
+      return decodeDeleteSandboxResponse(reply);
+    },
+
+    // Deny-by-default: OS-S2b wires the real WatchSandbox server-stream. Until then the iterator THROWS
+    // (never yields) so the adapter's watch path fails closed. The reason is static and credential-blind
+    // (no endpoint / cert).
+    // biome-ignore lint/correctness/useYield: a fail-closed stub never yields (it throws on iteration).
+    async *watchSandbox(_req: WatchSandboxRequest): AsyncIterable<SandboxStreamEvent> {
+      throw new Error(WATCH_NOT_IMPLEMENTED);
     },
 
     execSandbox(req: ExecSandboxRequest, signal?: AbortSignal): AsyncIterable<ExecSandboxEvent> {
@@ -242,16 +307,22 @@ async function* streamExecSandbox(
 }
 
 /**
- * Build the production mTLS grpc-js stream source (lazy; exercised by the live harness, never by the
- * hermetic unit tests). Reads the cert PATHS, constructs an mTLS channel with the grpc-js
- * `createSsl(rootCerts, privateKey, certChain)` arg order, and opens an `ExecSandbox` server-stream via
- * `makeServerStreamRequest` (encode request -> decode each ExecSandboxEvent frame). The returned
- * `ClientReadableStream` is a Node `Readable` (already an `AsyncIterable`) AND exposes `cancel()`, so it
- * satisfies the vendor-neutral {@link ExecStreamHandle}.
+ * Build the production mTLS grpc-js sources (lazy; exercised by the live harness, never by the
+ * hermetic unit tests). Reads the cert PATHS, constructs ONE mTLS channel with the grpc-js
+ * `createSsl(rootCerts, privateKey, certChain)` arg order, and returns BOTH:
+ *   - `openExecStream`: opens an `ExecSandbox` server-stream via `makeServerStreamRequest` (encode
+ *     request -> decode each ExecSandboxEvent frame). The returned `ClientReadableStream` is a Node
+ *     `Readable` (already an `AsyncIterable`) AND exposes `cancel()`, so it satisfies the vendor-neutral
+ *     {@link ExecStreamHandle}.
+ *   - `makeUnary`: drives a unary RPC via `makeUnaryRequest` (identity serialize: we already hold the
+ *     encoded request bytes; identity deserialize: we return the raw reply bytes and decode in the
+ *     caller). A gRPC status error surfaces as a rejected promise.
+ * Both share the SAME Client so a single mTLS handshake backs exec + lifecycle.
  */
-function buildGrpcExecStreamSource(
-  opts: OpenShellGrpcTransportOpts,
-): (request: ExecSandboxRequestWire) => ExecStreamHandle {
+function buildGrpc(opts: OpenShellGrpcTransportOpts): {
+  openExecStream: (request: ExecSandboxRequestWire) => ExecStreamHandle;
+  makeUnary: UnaryRequestFn;
+} {
   // Read the mTLS materials from PATHS (never inlined). grpc-js createSsl arg order:
   // rootCerts (CA), privateKey (client key), certChain (client cert).
   const channelCreds = credentials.createSsl(
@@ -269,7 +340,7 @@ function buildGrpcExecStreamSource(
     "grpc.default_authority": serverName,
   });
 
-  return (request: ExecSandboxRequestWire): ExecStreamHandle => {
+  const openExecStream = (request: ExecSandboxRequestWire): ExecStreamHandle => {
     const call = client.makeServerStreamRequest<ExecSandboxRequestWire, ExecSandboxEvent>(
       EXEC_SANDBOX_METHOD,
       encodeExecSandboxRequest,
@@ -281,4 +352,26 @@ function buildGrpcExecStreamSource(
     // to the vendor-neutral handle the consumer expects.
     return call as unknown as ExecStreamHandle;
   };
+
+  const makeUnary: UnaryRequestFn = (method: string, requestBytes: Buffer): Promise<Buffer> =>
+    new Promise<Buffer>((resolve, reject) => {
+      // Identity serialize/deserialize: we already hold the encoded request bytes and want the raw
+      // reply bytes (the codec decodes them in the caller). The deadline is the channel default; the
+      // caller (adapter) wraps a wall-clock budget. A gRPC status error rejects (deny-by-default).
+      client.makeUnaryRequest<Buffer, Buffer>(
+        method,
+        (b: Buffer) => b,
+        (b: Buffer) => b,
+        requestBytes,
+        new Metadata(),
+        (err, value) => {
+          if (err !== null && err !== undefined) reject(err);
+          else if (value === undefined)
+            reject(new Error("openshell unary: empty reply (fail-closed)"));
+          else resolve(value);
+        },
+      );
+    });
+
+  return { openExecStream, makeUnary };
 }

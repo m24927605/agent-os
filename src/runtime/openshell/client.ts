@@ -33,7 +33,13 @@ import { ServiceStatus } from "./proto/openshell.subset.js";
 export const PINNED_SANDBOX_IMAGE =
   "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
-const SHA256_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+// PINNED BY DIGEST — accept a bare `sha256:<64hex>` content digest OR a full OCI reference pinned with
+// `@sha256:<64hex>` (e.g. ghcr.io/org/img@sha256:…). The gateway's SandboxTemplate.image needs the full
+// registry reference to pull the image; a bare digest alone is unresolvable there. Both forms are
+// immutable; a mutable tag (`:latest`, `:1.2.3`) has no trailing `@sha256:` and is rejected
+// (deny-by-default supply-chain pin). The `@sha256:` must be the LAST element so `repo:tag@sha256:…`
+// is still accepted (the digest, not the tag, is what's pulled).
+const SHA256_DIGEST_RE = /(?:^|@)sha256:[0-9a-f]{64}$/;
 
 /**
  * Assert that `image` is a pinned `sha256:` digest (deny-by-default). A floating tag, an empty

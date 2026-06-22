@@ -4,7 +4,7 @@
 - **Branch**: slice/os-s2a-lifecycle-create-get-delete
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1–2 day（不含 gateway）；net LOC <~320（codec 訊息 + 3 RPC + composition root + 測試;生成碼不計)、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8 + assertPinnedImageDigest 修正=main-loop/Opus4.8;獨立 Opus4.8 reviewer = PASS;**composition root 對真實 gateway full lifecycle LIVE 驗證,NC-S11b tracking 收掉**;1 MINOR 見 §6）
 
 ## (1) ID + Title
 SLICE-OS-S2a — 在 `createOpenShellGrpcTransport` 實作真實的 **CreateSandbox / GetSandbox / DeleteSandbox**(unary,over 既有 mTLS channel),取代 NC-S11b 的 fail-closed lifecycle stub;並建**生產 composition root** `createNemoClawOnOpenShell(...)`:用**同一個 `OpenShellSandboxAdapter` 實例** create sandbox → 等 READY(getSandbox 輪詢)→ 經 NemoClaw host/exec → reconcile → delete。**收掉 NC-S11b 的 same-instance refById tracking(無 test seed)。**
@@ -35,14 +35,15 @@ SLICE-OS-S2a — 在 `createOpenShellGrpcTransport` 實作真實的 **CreateSand
 - live e2e:對未起 gateway → create reject → 測試 FAIL(RED);真 gateway → 綠。
 - 我對真 gateway 跑 `pnpm run e2e:live-nemoclaw`(composition root 版)。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:codec/transport/composition/live 測試在實作前紅。
-- [ ] **tracking 收掉**:live e2e 經 composition root **無 refById 反射 seed** 通(create→ready→host→reconcile→delete,同一 adapter);grep 確認 live test 不再 seed refById。
-- [ ] `pnpm run verify` exit 0(gated live SKIP;codec/transport/composition 單元測試綠;`openshell:proto:check` re-pin 綠;depcruise grpc-js confined;secret-scan clean)。
-- [ ] **live(我跑)`pnpm run e2e:live-nemoclaw` exit 0**:真實 create→READY→host→reconcile→delete。
-- [ ] credential-blind;fail-closed(create/get/delete error→reject;readiness 逾時→deny;絕不偽造)。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:create 不填 refById → exec 退回 unknown-sandbox 紅;getSandbox phase 解碼錯 → readiness 測試紅;delete 不送 name → 測試紅)。
-- [ ] **誠實回報**:live surface 的任何落差逐一修 + hardening。
+## (6) Definition of Done（實測）
+- [x] RED:codec/transport/composition/live 測試在實作前紅(22 failed,`decodeDeleteSandboxResponse is not a function` 等)。
+- [x] **tracking 收掉**:`pnpm run e2e:live-nemoclaw` 經 composition root **無 refById 反射 seed** 通(create→READY→host→reconcile→delete,同一 adapter);reviewer grep 確認 NC-S11b 的 `as unknown as {refById}` hack 已移除、mutation(create 不填 refById → exec unknown-sandbox 紅)證實同-adapter exec 真不需 seed。
+- [x] `pnpm run verify` **exit 0**(816 passed + 8 skipped;gated live SKIP;codec/transport/composition 單元測試綠;`openshell:proto:check` re-pin 綠〔reviewer proto-tweak→FAIL 證實〕;depcruise grpc-js confined〔core 注入→exit 2 證實〕;secret-scan clean)。
+- [x] **live(我對真實 gateway 跑)`pnpm run e2e:live-nemoclaw` exit 0**:3/3——composition root **真實 CreateSandbox**(openclaw @sha256 digest)→ poll READY → host → status running → reconcile('health-probe') → DeleteSandbox;sandbox 自清空。
+- [x] credential-blind(deny reason 靜態、無 endpoint/cert;secret-scan clean);fail-closed(create/get/delete error→reject;readiness 逾時→deny+best-effort delete,絕不在 PROVISIONING 前進)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;codec phase=6 / tracking-no-seed / readiness / assertPinnedImageDigest 皆 mutation 證實非 vacuous;assertPinnedImageDigest 14-case 安全探測〔含 newline-injection〕全擋 mutable tag;8 攻擊面 HELD/N/A)。
+- [x] **誠實回報 — 第 3 個 live-caught bug 修正**:`assertPinnedImageDigest` regex `/^sha256:[0-9a-f]{64}$/` 只收**裸 digest**,拒了 gateway-pullable 的完整 ref `ghcr.io/...@sha256:...` → live create denied;修為 `/(?:^|@)sha256:[0-9a-f]{64}$/`(收 bare 或 `@sha256:` digest-pinned ref,**仍拒 `:latest`/`:1.2.3` mutable tag**,供應鏈 pin 不弱化)+ 新測試。
+> **MINOR(非阻斷,tracking)**:depcruise `not-to-internal` 以第一路徑段為界,**不強制** `runtime/nemoclaw`↔`runtime/openshell` 之間 barrel-only(本刀程式有遵守 `../openshell/index.js`;core→vendor 仍強制)。pre-existing 規則粒度,未來可細化。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(lifecycle 退回 stub + 移除 composition root)。NC-S11b exec 路徑不受影響(仍可 seed 測)。

@@ -40,12 +40,26 @@ export {
 export {
   type OpenShellGrpcTransportOpts,
   type ExecStreamHandle,
+  type UnaryRequestFn,
   createOpenShellGrpcTransport,
 } from "./grpc-transport.js";
 export {
   EXEC_SANDBOX_METHOD,
+  CREATE_SANDBOX_METHOD,
+  GET_SANDBOX_METHOD,
+  DELETE_SANDBOX_METHOD,
   type ExecSandboxRequestWire,
   type ExecSandboxEvent as ExecSandboxEventWire,
+  type CreateSandboxRequestWire,
+  type SandboxResponseWire,
+  type GetSandboxRequestWire,
+  type DeleteSandboxRequestWire,
+  type DeleteSandboxResponseWire,
   encodeExecSandboxRequest,
   decodeExecSandboxEvent,
+  encodeCreateSandboxRequest,
+  encodeGetSandboxRequest,
+  encodeDeleteSandboxRequest,
+  decodeSandboxResponse,
+  decodeDeleteSandboxResponse,
 } from "./proto/openshell.subset.codec.js";

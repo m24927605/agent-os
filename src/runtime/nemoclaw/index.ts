@@ -13,3 +13,8 @@ export {
   type OpenShellExecCommandSinkOpts,
 } from "./exec-command-sink.js";
 export { createNemoClawOpenShellExec } from "./openshell-exec.js";
+export {
+  type CreateNemoClawOnOpenShellOpts,
+  type NemoClawOnOpenShell,
+  createNemoClawOnOpenShell,
+} from "./openshell-host.js";

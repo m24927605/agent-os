@@ -6,13 +6,18 @@
 //   pinned tag    : v0.0.66 (the running gateway version; ExecSandbox messages added by SLICE-OS-S1)
 //
 // This file vendors ONLY the subset of `openshell.v1` that we consume: the `Health` RPC and its
-// request/response messages + the `ServiceStatus` enum (slice P2R-R1-S1), and the `ExecSandbox`
+// request/response messages + the `ServiceStatus` enum (slice P2R-R1-S1), the `ExecSandbox`
 // server-streaming RPC + its ExecSandboxRequest / ExecSandboxEvent / ExecSandboxStdout /
-// ExecSandboxStderr / ExecSandboxExit messages (slice SLICE-OS-S1), copied VERBATIM (field
-// numbers/types) from the v0.0.66 upstream proto. The full service, the sandbox lifecycle RPCs,
-// the interactive/tty exec fields, and their datamodel/sandbox imports are intentionally OUT OF
-// SCOPE here. Drift against this committed subset is guarded by `pnpm run openshell:proto:check`
-// (hash manifest in proto/openshell.subset.sha256).
+// ExecSandboxStderr / ExecSandboxExit messages (slice SLICE-OS-S1), and the unary sandbox lifecycle
+// RPCs CreateSandbox / GetSandbox / DeleteSandbox + their CreateSandboxRequest / SandboxSpec /
+// SandboxTemplate / SandboxResponse / Sandbox / ObjectMeta / SandboxStatus / SandboxPhase /
+// GetSandboxRequest / DeleteSandboxRequest / DeleteSandboxResponse messages (slice SLICE-OS-S2a),
+// copied VERBATIM (field numbers/types) from the v0.0.66 upstream proto (openshell.proto +
+// datamodel.proto). We vendor ONLY the fields we encode/decode (SandboxSpec.template, ObjectMeta
+// id/name, SandboxStatus.phase); the other fields exist upstream but are intentionally OUT OF SCOPE
+// (the codec skips them, forward-compatible). The full service, WatchSandbox (streaming readiness ->
+// OS-S2b), and the interactive/tty exec fields are out of scope. Drift against this committed subset
+// is guarded by `pnpm run openshell:proto:check` (hash manifest in proto/openshell.subset.sha256).
 //
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
@@ -21,10 +26,21 @@ syntax = "proto3";
 
 package openshell.v1;
 
-// OpenShell service — SUBSET. Health (openshell.proto:22) + ExecSandbox (openshell.proto:67).
+// OpenShell service — SUBSET. Health (openshell.proto:22) + the unary sandbox lifecycle
+// CreateSandbox (openshell.proto:25) / GetSandbox (openshell.proto:28) / DeleteSandbox
+// (openshell.proto:46) + ExecSandbox (openshell.proto:67).
 service OpenShell {
   // Check the health of the service.
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Create a sandbox (unary).
+  rpc CreateSandbox(CreateSandboxRequest) returns (SandboxResponse);
+
+  // Fetch a sandbox by its canonical name (unary readiness probe).
+  rpc GetSandbox(GetSandboxRequest) returns (SandboxResponse);
+
+  // Delete a sandbox by its canonical name (unary).
+  rpc DeleteSandbox(DeleteSandboxRequest) returns (DeleteSandboxResponse);
 
   // Execute a command in a ready sandbox and stream output.
   rpc ExecSandbox(ExecSandboxRequest) returns (stream ExecSandboxEvent);
@@ -48,6 +64,96 @@ enum ServiceStatus {
   SERVICE_STATUS_HEALTHY = 1;
   SERVICE_STATUS_DEGRADED = 2;
   SERVICE_STATUS_UNHEALTHY = 3;
+}
+
+// --- Sandbox lifecycle (slice SLICE-OS-S2a) — copied VERBATIM (field numbers/types) from v0.0.66. ---
+// We ENCODE/DECODE only the fields we consume; every other upstream field is reserved (its number is
+// recorded as a comment) so we never reuse it and the codec skips it (forward-compatible).
+
+// Create sandbox request (openshell.proto:427-433).
+message CreateSandboxRequest {
+  // Desired sandbox configuration. We populate ONLY spec.template.image.
+  SandboxSpec spec = 1;
+  // Optional user-supplied sandbox name. When empty the server generates one.
+  string name = 2;
+  // Optional labels for the sandbox (key-value metadata).
+  map<string, string> labels = 3;
+}
+
+// Desired sandbox configuration (openshell.proto SandboxSpec). Upstream also carries log_level=1,
+// environment=5, policy=7, providers=8, gpu=9 (+ reserved 10/11); we encode ONLY `template` (=6).
+message SandboxSpec {
+  reserved 1, 5, 7, 8, 9, 10, 11; // log_level, environment, policy, providers, gpu, (reserved upstream)
+  // Container or VM template used to provision the sandbox.
+  SandboxTemplate template = 6;
+}
+
+// Container/VM template (openshell.proto SandboxTemplate). Upstream carries many fields; we encode
+// ONLY the pinned boot image (=1).
+message SandboxTemplate {
+  // Fully-qualified OCI image reference used to boot the sandbox (MUST be a pinned sha256 digest).
+  string image = 1;
+}
+
+// Generic sandbox response wrapper (openshell.proto SandboxResponse).
+message SandboxResponse {
+  // The sandbox object. Absent on a garbled/empty wire => deny-by-default upstream.
+  Sandbox sandbox = 1;
+}
+
+// A sandbox object (openshell.proto Sandbox). We decode metadata (=1) + status (=3); spec (=2) is
+// skipped (the upstream `reserved 4, 5` is recorded so we never reuse those numbers).
+message Sandbox {
+  // Kubernetes-style metadata (id, name, …).
+  openshell.datamodel.v1.ObjectMeta metadata = 1;
+  reserved 2; // spec (SandboxSpec) — echoed by the gateway but not consumed here.
+  // Latest user-facing observed status derived by the gateway.
+  SandboxStatus status = 3;
+  reserved 4, 5; // upstream reserved ("phase", "current_policy_version").
+}
+
+// Kubernetes-style object metadata (datamodel.proto:12). We decode id (=1) + name (=2) only.
+message ObjectMeta {
+  // Stable object ID generated by the gateway (the WatchSandbox / ExecSandbox lookup key).
+  string id = 1;
+  // Human-readable object name (the GetSandbox / DeleteSandbox lookup key).
+  string name = 2;
+}
+
+// Observed sandbox status (openshell.proto:366-380). Upstream carries sandbox_name=1, agent_pod=2,
+// agent_fd=3, sandbox_fd=4, conditions=5, current_policy_version=7; we decode ONLY `phase` (=6).
+message SandboxStatus {
+  reserved 1, 2, 3, 4, 5, 7; // sandbox_name, agent_pod, agent_fd, sandbox_fd, conditions, current_policy_version
+  // Gateway-derived lifecycle summary.
+  SandboxPhase phase = 6;
+}
+
+// Sandbox lifecycle phase enum (openshell.proto). Numeric values match upstream EXACTLY so wire
+// decoding stays faithful; only READY/ERROR are terminal for readiness.
+enum SandboxPhase {
+  SANDBOX_PHASE_UNSPECIFIED = 0;
+  SANDBOX_PHASE_PROVISIONING = 1;
+  SANDBOX_PHASE_READY = 2;
+  SANDBOX_PHASE_ERROR = 3;
+  SANDBOX_PHASE_DELETING = 4;
+  SANDBOX_PHASE_UNKNOWN = 5;
+}
+
+// Get sandbox request (openshell.proto:436-439).
+message GetSandboxRequest {
+  // Sandbox name (canonical lookup key).
+  string name = 1;
+}
+
+// Delete sandbox request (openshell.proto:482-485).
+message DeleteSandboxRequest {
+  // Sandbox name (canonical lookup key).
+  string name = 1;
+}
+
+// Delete sandbox response (openshell.proto:517-519).
+message DeleteSandboxResponse {
+  bool deleted = 1;
 }
 
 // Execute command request (openshell.proto:645-672). Copied VERBATIM from v0.0.66. The tty fields
