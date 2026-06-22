@@ -34,7 +34,7 @@ action/resource/policyDecision/result/taskId/timestamp,timeline.ts:38-50)。**`p
 | Slice | 範圍 | 注入實作 | 狀態 |
 |---|---|---|---|
 | **P2R-PV-S1** | 最薄可執行主幹:純記憶體 composition root `createPersonalShell(deps)`(`src/personal/bootstrap.ts`)+ 6-case e2e(happy + screen/policy/cost deny + approve-once + clarify-cap) | InMemoryCostGate · FakeSandboxAdapter effect · **共享 InMemoryAppendOnlyLog 的 AuditEvent appender** · screenBrainEvent · evaluatePolicy(allow tool:invoke) | ✅ **DONE**(verify exit 0、740 tests;獨立 Opus4.8 review PASS;shared-log seam mutation 證實)|
-| **P2R-PV-S2** | 把 appender 換成 **live ingest**(`createIngestAppender`+`createRpcAppendTransport`)→ 真 kernel WAL append;gated on `AGENTOS_LIVE_KERNEL_ENDPOINT`;讀回仍走 WAL 檔斷言(沿用 live-kernel.e2e 模式)| 同 S1 + live appender(sourceId='personal')| DRAFT |
+| **P2R-PV-S2** | 把 appender 換成 **live ingest**(`createIngestAppender`+`createRpcAppendTransport`)→ 真 kernel WAL append;gated on `AGENTOS_LIVE_KERNEL_ENDPOINT`;讀回仍走 WAL 檔斷言(沿用 live-kernel.e2e 模式)| 同 S1 + live `createIngestAppender`(wormSink 注入,sourceId='personal')| ✅ **DONE**(`pnpm run e2e:live-kernel` 對真實 kernel 綠;Personal approve 落進真實 WAL;獨立 Opus4.8 review PASS,零 finding)|
 | **P2R-PV-S3** | live 讀回時間軸:需 kernel 新增 list/read-back RPC(目前只有 AppendService;Checkpoint 只回 head anchor、grpc-client Checkpoint fail-closed)→ timeline 吃 live kernel entries。**最重、可能再拆** | live kernel read-back | DRAFT(capability-gated)|
 
 ## 4. 風險（誠實）
