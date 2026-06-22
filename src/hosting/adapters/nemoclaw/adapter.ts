@@ -52,11 +52,34 @@ interface HostedAgent {
 const HERMES_ENV_PREFIX = "HERMES_HOME=/sandbox/.hermes";
 /** The non-root user NemoClaw drops to via gosu when launching the gateway (runtime.ts:147). */
 const GATEWAY_USER = "gateway";
+/**
+ * Default dashboard port the health-probe targets. NemoClaw serves /health on the DASHBOARD_PORT —
+ * NOT port 80 (runtime.ts:51-57 `http://127.0.0.1:${DASHBOARD_PORT}/health`; the seeded default is
+ * 18789). Probing :80 silently passed against the in-process fake sink (which ignores the port) yet
+ * would ALWAYS miss the real gateway — the fake-masked drift this slice fixes.
+ */
+const DEFAULT_DASHBOARD_PORT = 18789;
+
+/** Construction options for {@link NemoClawAgentHosting}. */
+export interface NemoClawAgentHostingOpts {
+  /**
+   * Port the agent's gateway dashboard serves /health on. Injected (not a secret); defaults to
+   * {@link DEFAULT_DASHBOARD_PORT}. A deployment overriding NEMOCLAW_DASHBOARD_PORT passes it here so
+   * the probe targets the real endpoint.
+   */
+  readonly dashboardPort?: number;
+}
 
 export class NemoClawAgentHosting implements AgentHosting {
   private readonly agents = new Map<string, HostedAgent>();
+  private readonly dashboardPort: number;
 
-  constructor(private readonly sink: CommandSink) {}
+  constructor(
+    private readonly sink: CommandSink,
+    opts: NemoClawAgentHostingOpts = {},
+  ) {
+    this.dashboardPort = opts.dashboardPort ?? DEFAULT_DASHBOARD_PORT;
+  }
 
   async hostAgent(ctx: unknown, spec: HostSpec): Promise<HostResult> {
     const c = contextOrError(ctx);
@@ -98,7 +121,7 @@ export class NemoClawAgentHosting implements AgentHosting {
     const owned = this.requireOwned(ctx, "status", sandboxId);
     if ("denied" in owned) return owned.denied as StatusResult;
 
-    const out = await this.dispatch(probeCommand());
+    const out = await this.dispatch(probeCommand(this.dashboardPort));
     if ("error" in out) return this.denied("status", out.error, sandboxId, ctx) as StatusResult;
     return {
       status: "ok",
@@ -116,7 +139,9 @@ export class NemoClawAgentHosting implements AgentHosting {
     if ("denied" in owned) return owned.denied as ReconcileResult;
 
     const command =
-      action === "restart" ? recoveryCommand(owned.agent.gatewayCommand) : probeCommand();
+      action === "restart"
+        ? recoveryCommand(owned.agent.gatewayCommand)
+        : probeCommand(this.dashboardPort);
     const out = await this.dispatch(command);
     if ("error" in out)
       return this.denied("reconcile", out.error, sandboxId, ctx) as ReconcileResult;
@@ -175,9 +200,13 @@ function launchCommand(gatewayCommand: string | undefined): string {
   return `${HERMES_ENV_PREFIX} if command -v gosu >/dev/null 2>&1; then nohup gosu ${GATEWAY_USER} ${cmd} & else nohup ${cmd} & fi; GPID=$!; sleep 2; if kill -0 "$GPID" 2>/dev/null; then echo "GATEWAY_PID=$GPID"; else echo GATEWAY_FAILED; fi`;
 }
 
-/** NemoClaw health-probe shape: `curl -w '%{http_code}' .../health` (runtime.ts:203/:272). */
-function probeCommand(): string {
-  return "curl -so /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1/health 2>/dev/null || echo 000";
+/**
+ * NemoClaw health-probe shape: `curl -w '%{http_code}' .../health` (runtime.ts:203/:272). The endpoint
+ * is on the gateway DASHBOARD_PORT (runtime.ts:51-57), NOT port 80 — the injected `dashboardPort`
+ * (default {@link DEFAULT_DASHBOARD_PORT}) targets the real /health so the probe is not fake-masked.
+ */
+function probeCommand(dashboardPort: number): string {
+  return `curl -so /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${dashboardPort}/health 2>/dev/null || echo 000`;
 }
 
 /** NemoClaw recovery shape: stale `pkill` + relaunch + liveness echo (runtime.ts:220-284). */

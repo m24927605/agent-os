@@ -77,6 +77,11 @@ describe("NemoClawAgentHosting — getAgentStatus (health-probe shape)", () => {
     const probe = sink.commands.at(-1) ?? "";
     expect(probe).toContain("curl");
     expect(probe).toContain("%{http_code}");
+    // The health endpoint is on the DASHBOARD_PORT (runtime.ts:51-57), NOT port 80. The default
+    // injected dashboardPort is 18789 — probing :80 silently broke against real NemoClaw (the fake
+    // sink never cared about the port). See "health-probe port" describe below.
+    expect(probe).toContain("http://127.0.0.1:18789/health");
+    expect(probe).not.toContain("http://127.0.0.1/health");
   });
 
   it("401 => running (authed-but-up), 000 => stopped", async () => {
@@ -111,6 +116,40 @@ describe("NemoClawAgentHosting — reconcileAgentProcess", () => {
     const recovery = sink.commands.at(-1) ?? "";
     expect(recovery).toContain("pkill");
     expect(recovery).toContain("nohup");
+  });
+});
+
+describe("NemoClawAgentHosting — health-probe port (the fixed drift)", () => {
+  /** Pull out the curl probe command from the most-recent dispatch (or "" if none). */
+  function lastProbe(sink: RecordingSink): string {
+    return sink.commands.at(-1) ?? "";
+  }
+
+  it("probes the DASHBOARD_PORT default 18789, NOT port 80 (runtime.ts:51-57)", async () => {
+    const sink = new RecordingSink((cmd) => (cmd.includes("http_code") ? "200" : "GATEWAY_PID=7"));
+    const h = new NemoClawAgentHosting(sink);
+    await h.hostAgent(ctxA, spec);
+    await h.getAgentStatus(ctxA, "sbx-1");
+    expect(lastProbe(sink)).toContain("http://127.0.0.1:18789/health");
+    expect(lastProbe(sink)).not.toContain("http://127.0.0.1/health");
+  });
+
+  it("threads a CUSTOM injected dashboardPort into the probe command", async () => {
+    const sink = new RecordingSink((cmd) => (cmd.includes("http_code") ? "200" : "GATEWAY_PID=7"));
+    const h = new NemoClawAgentHosting(sink, { dashboardPort: 19000 });
+    await h.hostAgent(ctxA, spec);
+    await h.getAgentStatus(ctxA, "sbx-1");
+    expect(lastProbe(sink)).toContain("http://127.0.0.1:19000/health");
+    expect(lastProbe(sink)).not.toContain("http://127.0.0.1:18789/health");
+  });
+
+  it("a 'health-probe' reconcile probes against the injected port too", async () => {
+    const sink = new RecordingSink((cmd) => (cmd.includes("http_code") ? "200" : "GATEWAY_PID=7"));
+    const h = new NemoClawAgentHosting(sink, { dashboardPort: 19500 });
+    await h.hostAgent(ctxA, spec);
+    // A 'health-probe' reconcile dispatches the probe command (not the recovery script).
+    await h.reconcileAgentProcess(ctxA, "sbx-1", "health-probe");
+    expect(lastProbe(sink)).toContain("http://127.0.0.1:19500/health");
   });
 });
 
