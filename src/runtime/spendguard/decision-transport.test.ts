@@ -39,7 +39,9 @@ import {
 import {
   DECISION_SIDECAR_ADAPTER_SERVICE,
   createDecisionLedgerTransport,
+  decodeDecisionIdempotencyKeyForTest,
   decodeDecisionRequestForTest,
+  decodeHandshakeTenantAssertionForTest,
   decodePublishOutcomeRequestForTest,
   encodeDecisionResponseForTest,
   encodeHandshakeResponseForTest,
@@ -54,6 +56,9 @@ type Handlers = {
   confirm?: (req: PublishOutcomeRequest) => Partial<PublishOutcomeResponse>;
   /** When true, RequestDecision never replies — only the client deadline can settle the call. */
   hangDecision?: boolean;
+  /** Raw-byte captures so a test can assert wire fields the decoded shapes drop (tenant assertion / idempotency). */
+  onHandshakeRaw?: (bytes: Buffer) => void;
+  onDecisionRaw?: (bytes: Buffer) => void;
 };
 
 const DEFAULT_HANDSHAKE: Partial<HandshakeResponse> = {
@@ -68,12 +73,14 @@ async function startFakeSidecar(handlers: Handlers): Promise<{ udsPath: string; 
   const server = new Server();
 
   const impl: UntypedServiceImplementation = {
-    Handshake: (_call: ServerUnaryCall<Buffer, Buffer>, cb: sendUnaryData<Buffer>) => {
+    Handshake: (call: ServerUnaryCall<Buffer, Buffer>, cb: sendUnaryData<Buffer>) => {
+      handlers.onHandshakeRaw?.(call.request);
       const out = handlers.handshake?.() ?? DEFAULT_HANDSHAKE;
       cb(null, encodeHandshakeResponseForTest(out));
     },
     RequestDecision: (call: ServerUnaryCall<Buffer, Buffer>, cb: sendUnaryData<Buffer>) => {
       if (handlers.hangDecision === true) return; // black hole — never call cb.
+      handlers.onDecisionRaw?.(call.request);
       const req = decodeDecisionRequestForTest(call.request);
       const out = handlers.decision?.(req) ?? { decisionId: "", decision: 0 };
       cb(null, encodeDecisionResponseForTest(out));
@@ -197,6 +204,41 @@ describe("createDecisionLedgerTransport (R11-S8) over a real UDS", () => {
     expect(JSON.stringify(seen)).not.toMatch(
       /secret|token|password|bearer|credential|api[_-]?key/i,
     );
+  });
+
+  // --- live-discovered regressions (R11-S8 fix): the fake never checked these, so the encoder silently
+  // dropped them and only the REAL sidecar rejected (PERMISSION_DENIED / INVALID_ARGUMENT). Pin them here.
+  it("handshake ENCODES the configured tenant_id_assertion on the wire (field 5)", async () => {
+    let rawHandshake: Buffer | undefined;
+    fake = await startFakeSidecar({
+      onHandshakeRaw: (b) => {
+        rawHandshake = b;
+      },
+      decision: () => ({ decisionId: "d", decision: CONTINUE }),
+    });
+    const transport = createDecisionLedgerTransport({
+      udsPath: fake.udsPath,
+      tenantIdAssertion: "00000000-0000-4000-8000-000000000001",
+    });
+    await transport.reserve({ tenant_id: "t", estimated_amount_atomic: 5, route: "r" });
+    expect(rawHandshake).toBeDefined();
+    expect(decodeHandshakeTenantAssertionForTest(rawHandshake as Buffer)).toBe(
+      "00000000-0000-4000-8000-000000000001",
+    );
+  });
+
+  it("RequestDecision ENCODES a non-empty idempotency.key on the wire (field 9 -> key)", async () => {
+    let rawDecision: Buffer | undefined;
+    fake = await startFakeSidecar({
+      onDecisionRaw: (b) => {
+        rawDecision = b;
+      },
+      decision: () => ({ decisionId: "d", decision: CONTINUE }),
+    });
+    const transport = createDecisionLedgerTransport({ udsPath: fake.udsPath });
+    await transport.reserve({ tenant_id: "t", estimated_amount_atomic: 5, route: "r" });
+    expect(rawDecision).toBeDefined();
+    expect(decodeDecisionIdempotencyKeyForTest(rawDecision as Buffer).length).toBeGreaterThan(0);
   });
 
   it("reserve: a STOP decision (per-call budget) maps to {overBudget:true}", async () => {
