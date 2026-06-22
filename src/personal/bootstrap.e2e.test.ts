@@ -14,7 +14,8 @@
  * RED-first: `./bootstrap.js` does not exist yet, so the import below fails and the suite cannot run.
  */
 import { describe, expect, it } from "vitest";
-import type { AppendReceipt, AuditEvent } from "../audit/index.js";
+import type { AppendReceipt, AuditEvent, LogEntry } from "../audit/index.js";
+import { createAuditEvent } from "../audit/index.js";
 import type { AgentContext } from "../iam/ids.js";
 import { createPersonalShell } from "./bootstrap.js";
 import { CLARIFY_MAX_QUESTIONS } from "./intent/index.js";
@@ -59,7 +60,7 @@ describe("createPersonalShell — end-to-end Personal vertical over the real in-
     expect(fakeRan.status).toBe("ok");
 
     // The timeline reads the SAME shared WORM the appender wrote into -> >=1 completed event.
-    const events = shell.timeline(ctx.taskId);
+    const events = await shell.timeline(ctx.taskId);
     expect(events.length).toBeGreaterThanOrEqual(1);
     expect(events.some((e) => e.headline.startsWith("已完成"))).toBe(true);
 
@@ -117,7 +118,44 @@ describe("createPersonalShell — end-to-end Personal vertical over the real in-
     expect(ae.requestId).toBe(ctx.requestId);
 
     // With the sink injected, timeline() reads the (empty) in-memory log — live read-back is S3.
-    expect(shell.timeline(ctx.taskId).length).toBe(0);
+    expect((await shell.timeline(ctx.taskId)).length).toBe(0);
+  });
+
+  it("INJECTED readEntries (S3b seam): timeline folds the reader's entries, NOT the in-memory log", async () => {
+    // A RECORDING reader standing in for the live ListEntries read-back (no kernel here). It returns
+    // two synthetic LogEntries; the shell never appended to its own in-memory log, so if timeline()
+    // folds these two, the seam is proven to read the INJECTED reader (not the in-memory sharedLog).
+    const synth = (sequence: number): LogEntry => ({
+      sequence,
+      event: createAuditEvent({
+        actorId: ctx.actorId,
+        tenantId: ctx.tenantId,
+        projectId: ctx.projectId,
+        taskId: ctx.taskId,
+        requestId: ctx.requestId,
+        action: "tool:invoke",
+        resource: `personal:backup-${sequence}`,
+        policyDecision: { effect: "allow", reason: "ok" },
+        result: "success",
+      }),
+      prevHash: `sha256:${"0".repeat(64)}`,
+      entryHash: `sha256:${String(sequence).repeat(64).slice(0, 64)}`,
+    });
+    const injected: readonly LogEntry[] = [synth(0), synth(1)];
+    let reads = 0;
+    const readEntries = (): Promise<readonly LogEntry[]> => {
+      reads++;
+      return Promise.resolve(injected);
+    };
+
+    const shell = createPersonalShell({ budget: 1000, allowToolInvoke: true, readEntries });
+
+    // No approve() ran -> the in-memory sharedLog is EMPTY. Any folded event came from the reader.
+    const events = await shell.timeline(ctx.taskId);
+    expect(reads).toBe(1);
+    expect(events.length).toBe(2);
+    expect(events.map((e) => e.sequence)).toEqual([0, 1]);
+    expect(events.every((e) => e.headline.startsWith("已完成"))).toBe(true);
   });
 
   it("SCREEN short-circuit: a secret canary in a target -> denied@screen, NO effect, canary absent from timeline", async () => {
@@ -146,7 +184,7 @@ describe("createPersonalShell — end-to-end Personal vertical over the real in-
     expect(fakeRan.status).toBe("denied");
 
     // Nothing was committed and the canary never reaches a human-readable surface.
-    const events = shell.timeline(ctx.taskId);
+    const events = await shell.timeline(ctx.taskId);
     expect(events.length).toBe(0);
     expect(JSON.stringify(events)).not.toContain(CANARY);
   });
@@ -166,7 +204,7 @@ describe("createPersonalShell — end-to-end Personal vertical over the real in-
     expect(decided).toMatchObject({ status: "denied" });
     expect(decided.outcome).toMatchObject({ status: "denied", stage: "policy" });
     expect((await shell.probeLastSandbox()).status).toBe("denied");
-    expect(shell.timeline(ctx.taskId).length).toBe(0);
+    expect((await shell.timeline(ctx.taskId)).length).toBe(0);
   });
 
   it("COST short-circuit: tiny budget / large estimate -> denied@cost, NO effect", async () => {
@@ -184,7 +222,7 @@ describe("createPersonalShell — end-to-end Personal vertical over the real in-
     expect(decided).toMatchObject({ status: "denied" });
     expect(decided.outcome).toMatchObject({ status: "denied", stage: "cost" });
     expect((await shell.probeLastSandbox()).status).toBe("denied");
-    expect(shell.timeline(ctx.taskId).length).toBe(0);
+    expect((await shell.timeline(ctx.taskId)).length).toBe(0);
   });
 
   it("APPROVE-ONCE: a second approve(id) is denied (terminal, replay-safe)", async () => {
@@ -204,7 +242,7 @@ describe("createPersonalShell — end-to-end Personal vertical over the real in-
     const second = await shell.approve(submitted.id);
     expect(second.status).toBe("denied");
     // A second approve never re-ran the effect -> exactly one committed event for the task.
-    expect(shell.timeline(ctx.taskId).length).toBe(1);
+    expect((await shell.timeline(ctx.taskId)).length).toBe(1);
   });
 
   it("CLARIFY-CAP: ambiguous text answered past CLARIFY_MAX_QUESTIONS -> clarify denied", async () => {

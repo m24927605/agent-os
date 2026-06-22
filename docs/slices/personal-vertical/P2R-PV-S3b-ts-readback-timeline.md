@@ -4,7 +4,7 @@
 - **Branch**: slice/p2r-pv-s3b-ts-readback-timeline
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day（不含 kernel build）；net LOC <~220（grpc-client ListEntries codec ~90 + reader+wiring ~70 + tests ~60;**若 >300 再拆 S3b-codec / S3b-wire**)、新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;live e2e 經真 ListEntries 從真實 WORM 重建 timeline）
 
 ## (1) ID + Title
 SLICE-P2R-PV-S3b — 在 `grpc-client.ts` 手寫 `ListEntries` codec(encode request / decode repeated Entry),加一個 reader port 回 `Promise<readonly LogEntry[]>`(canonical_event JSON.parse→AuditEvent,包成 LogEntry),並在 `createPersonalShell` 加 `readEntries?` 注入點(比照 `wormSink`),使 `timeline()` 能從**真實 kernel** 重建。live e2e 證明:Personal approve 後,`shell.timeline(taskId)` 經 ListEntries 讀回真實 WORM、折出該事件(headline「已完成」、sequence 正確、canary 不在)。
@@ -34,12 +34,13 @@ SLICE-P2R-PV-S3b — 在 `grpc-client.ts` 手寫 `ListEntries` codec(encode requ
 - reader fail-closed:對未起 kernel → reject。
 - live e2e:`AGENTOS_LIVE_KERNEL_ENDPOINT` 設、kernel 未起 → ListEntries reject → timeline reject/空 → 測試 FAIL(RED:真打真 kernel);起 kernel 後綠。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:decoder 單元測試 / live e2e 對未起 kernel 失敗。
-- [ ] `pnpm run e2e:live-kernel` **exit 0**:真 kernel → Personal approve → `shell.timeline(taskId)` 經 **ListEntries 讀回真實 WORM** 折出該事件(sequence 正確、headline「已完成」、canary 不在)。
-- [ ] `pnpm run verify` 仍 **exit 0**(gated live e2e SKIP;S1/S2 的 in-memory e2e 改 async 後仍綠;default reader byte-identical)。
-- [ ] depcruise exit 0(ListEntries codec/grpc-js 封閉於 runtime/ingest);secret-scan clean。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:reader 不被使用(仍讀 in-memory)→ live timeline 斷言紅;decoder 漏欄位 → fixture 測試紅;reader 吞錯回部分 → fail-closed 測試紅)。
+## (6) Definition of Done（實測）
+- [x] RED:decoder 單元測試在 codec 不存在時 fail(`encode/decodeListEntries… is not a function`);read-transport 載入失敗;bootstrap 注入-reader 測試紅(reader 未被呼叫)。
+- [x] `pnpm run e2e:live-kernel` **exit 0**:真 kernel build+spawn → 兩個 live e2e 共用同顆 = 4 passed;**Personal approve → `await shell.timeline(taskId)` 經真 `ListEntries` RPC 從真實 WORM 重建**,折出該治理事件(`events.some(e => e.sequence === receiptSeq)`、headline「已完成」、canary 不在)。**S2 的 readFileSync(WAL) hack 已移除。**
+- [x] `pnpm run verify` **exit 0**(748 passed + 5 skipped;gated live e2e SKIP;S1/S2 的 6 個 e2e 改 await 後仍綠;default reader = `sharedLog.entries()` byte-identical)。
+- [x] depcruise exit 0(120 modules;grpc-js 仍只在 `grpc-client.ts`;read-transport 只名 generated `AppendService` 契約;reviewer 以 core 注入 → exit 2 實證 `not-to-internal` 邊界仍 live);secret-scan clean。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;3 mutation 皆轉紅:reader 吞 parse 錯回部分→fail-closed 紅、decoder 漏 entry_hash→fixture 紅、timeline 忽略 readEntries→注入測試紅;codec 欄位號對照 proto/generated 正確;fixture 用獨立 encoder 非 tautology;8 攻擊面 HELD/N/A)。
+> MINOR(非阻斷):fixture 與 decoder 共用欄位號常數(但獨立 code path + 已對 proto/generated 外部交叉驗證)。誠實缺口(沿 S3a):讀回 unsigned——timeline 完整性可驗(鏈結+entryHash),未經 Ed25519 簽章背書。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 ListEntries codec + reader + readEntries 注入 + 還原 timeline 同步)。S1/S2 default 行為可逆。
