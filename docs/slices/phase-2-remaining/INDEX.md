@@ -32,6 +32,14 @@
     對稱 B→A wrong-key conformance 斷言 + `verify-cross-tenant.sh` 自帶工具鏈正規化(防 false-fail 再現),經獨立 review PASS。
   - **誠實邊界(沿用 R1)**:真實 vendor/RPC adapter(R1 OpenShell、R2 grpc ingest、R11 NemoClaw/Hermes/SpendGuard/AGT)
     的「邏輯 + fail-closed + contract」皆對注入 double 完整測試,但完整連到跑著的真實外部 runtime 屬後續組合/部署期。
+- ✅ **真實 runtime 端到端(kernel)完成**:**R2-S8** — TS ingest appender 對**真實跑著的 Go kernel** 進程(跨進程跨語言
+  gRPC)append,雜湊鏈經 TS 端逐位元重算與 Go kernel 一致、replay fail-closed、credential-blind;`pnpm run e2e:live-kernel`
+  opt-in、不入 hermetic 的 `verify`;writer=Opus4.8、獨立 Opus4.8 reviewer = PASS(3 mutation probe 非 vacuous)。
+- 📝 **真實 runtime(SpendGuard)slice 已 doc-first 寫好,BUILD-GATED on Docker**:**R11-S5**(SidecarAdapter proto TS codegen)、
+  **R11-S6**(真實 grpc-js-over-UDS `LedgerTransport`,vendor-confined、fail-closed)、**R11-S7**(live e2e:`docker compose`
+  起真實 sidecar+ledger+Postgres → 真 reserve/commit)。grounded 在 SpendGuard `sidecar_adapter` proto(:34/124/129/134)+
+  UDS `/var/run/spendguard/adapter.sock` + SO_PEERCRED config。**開工硬前提:Docker daemon 運行**(`make demo-up` 從源碼
+  build ~8 Rust 服務,重 infra);否則 fail-closed BLOCKED、不偽造。OpenShell/Hermes/NemoClaw/AGT live 同屬部署期 + 各自 infra/憑證。
 
 - **全部 12 個 ITEM 的設計文件 + 58 個小 slice 文件已撰寫並通過文件對抗式 review**（每 ITEM verdict =
   FIXED-THEN-PASS：reviewer 抓到並修掉 barrel 違規、slice 切太大、捏造/過時引用後才放行；無 blocking 殘留）。
