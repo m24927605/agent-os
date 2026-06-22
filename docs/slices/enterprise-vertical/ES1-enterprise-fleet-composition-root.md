@@ -4,7 +4,7 @@
 - **Branch**: slice/es1-enterprise-fleet-composition-root
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~220（`src/enterprise/bootstrap.ts` + `src/enterprise/bootstrap.e2e.cross-tenant.test.ts` + barrel）、新增依賴 = 0、modules <~1(`src/enterprise`,組裝既有 barrels)
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;tenant-sealed 經 3 mutation 證實;verify:cross-tenant 綠;採納 reviewer MINOR〔inbox-independence 直接 pin〕）
 
 ## (1) ID + Title
 SLICE-ES1 — 新增 composition root `createEnterpriseFleet(opts)`(`src/enterprise/bootstrap.ts`),把 R8 的 TenantRouter/TenantStore/ConsoleProjection + P2-I `runGovernedToolCall` + commit-before-effect + per-tenant CostGate + **per-tenant WORM partition(in-memory)** 組成一條**可呼叫、可跑的 gateway-per-tenant 治理主幹**:`route(ctx) → per-tenant 治理管線 → per-tenant WORM → operator console`。全程**純記憶體 in-tree**(無網路、無 kernel 行程),先證明「多租戶 fleet 接得起來、會跑、且 tenant-sealed」。鏡像 `createPersonalShell`(`src/personal/bootstrap.ts:129`)。
@@ -47,14 +47,16 @@ SLICE-ES1 — 新增 composition root `createEnterpriseFleet(opts)`(`src/enterpr
 - `pnpm run verify:cross-tenant` **仍綠**(組合根不得破壞既有三邊界閘)。
 - 首次 RED 證據:import `./bootstrap.js` 失敗(exit≠0)。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:bootstrap 不存在 → e2e import 失敗 exit≠0。
-- [ ] `pnpm run verify` exit 0(含 **`verify:cross-tenant` 綠**;e2e 全綠:happy + 組合跨租戶隔離 + 短路 + fail-closed)。
-- [ ] **組合後跨租戶證明**:tenant-A 的 approve→WORM→timeline **不滲入** tenant-B(每租戶獨立 log/inbox/repo,closure-bound);mutation(改成共用單一 log/inbox + tenantId 參數)→ 該隔離斷言紅。
-- [ ] **per-tenant 獨立實例**(非共用+參數):reviewer 檢視 + 測試證明 CostGate/WORM-log/inbox 每租戶一個。
-- [ ] depcruise exit 0(enterprise 只經 barrel、無 cycle、無 vendor;reviewer 以 core 注入 deep-import → exit 2 實證邊界)。
-- [ ] secret-scan clean(canary runtime 組裝);console/timeline 出口 allow-list(canary 不出現)。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:shared-log → 跨租 timeline 紅;route 回別租 binding → 隔離紅;移除 allow rule → policy 紅)。
+## (6) Definition of Done（實測）
+- [x] RED:`vitest run …/bootstrap.e2e.cross-tenant.test.ts` 在 bootstrap 不存在時 `Failed to load url ./bootstrap.js` exit 1。
+- [x] `pnpm run verify` **exit 0**（854 passed + 10 skipped;**`verify:cross-tenant: ok`**〔TS 11 + Go partition Conformance〕——R8 release-blocking 閘未破;e2e 4/4:happy + 組合跨租戶隔離 + screen/policy/cost 短路 + fail-closed）。
+- [x] **組合後跨租戶證明(本刀核心)**:tenant-A 的 approve→WORM→timeline **不滲入** tenant-B;3 mutation 證實非 vacuous(shared-log→`wormLogFor(A)!==B` 紅;route 回別租 binding→`tenant-b` 斷言紅;SEAM A→B repo leak→timeline 紅)。
+- [x] **per-tenant 獨立實例**:`Map<partitionId, 獨立 InMemoryAppendOnlyLog>`(各自 Ed25519 key)、per-tenant `InMemoryCostGate`、per-tenant `ApprovalInbox`(runner closure-bound 單一 binding)——非共用+參數(reviewer 確認 bootstrap.ts:254-263)。
+- [x] depcruise exit 0(128 modules;enterprise 只經 barrel,iam/ids 為 interim type-only 例外;reviewer 以 deep-import〔`../tenant/router.js`〕+ vendor〔`../runtime/openshell`〕注入 → 各 exit≠2 實證邊界 bites)。
+- [x] secret-scan clean(canary `sk-${"d".repeat(24)}` runtime 組裝);console timeline/fleet 出口 redact(canary 不出現)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;3 隔離 mutation + screen/unregistered-tenant mutation 皆翻紅;2 deviation〔`fleet:*` 非裸 `*`、minimal PlanPreview〕sound)。
+> **採納 reviewer MINOR(test-hardening)**:原 cross-approve 斷言被 replay-consumption+PDP backstop(共用 inbox 也會過)。新增**直接 pin inbox 獨立**的斷言:A submit 不 consume → B approve 該 pending id → denied **且 A 之後仍能 approve(executed)**(共用 inbox 會讓 A 後續 approve 失敗)。e2e 仍 4/4。
+> **誠實前提(spec §8)**:ES1 證同進程**邏輯**多租戶隔離 + in-memory WORM;live per-tenant kernel partition(ES2)、真 operator auth、per-tenant key provision、多進程物理隔離 = 後續/P4。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 `src/enterprise/bootstrap.ts` + 測試 + barrel)。純組合、無既有模組改動、可逆。
