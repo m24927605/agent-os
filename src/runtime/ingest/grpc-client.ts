@@ -19,6 +19,8 @@ import type {
   AppendService,
   CheckpointRequest,
   CheckpointResponse,
+  ListEntriesRequest,
+  ListEntriesResponse,
   Receipt,
 } from "../_generated/ingest/ingest.js";
 
@@ -55,6 +57,16 @@ export function grpcAppendService(endpoint: string): AppendService {
     Checkpoint(_request: CheckpointRequest): Promise<CheckpointResponse> {
       return Promise.reject(
         new Error("Checkpoint RPC client not wired yet (R10-S3 composition root; fail-closed)"),
+      );
+    },
+    // ListEntries is part of the AppendService contract (P2R-PV-S3a: read-only WORM chain read-back).
+    // Its client wire codecs + composition-root wiring are S3b (out of scope here). Until that slice
+    // wires it, fail CLOSED: never return a faked/empty entry set that a caller might trust.
+    ListEntries(_request: ListEntriesRequest): Promise<ListEntriesResponse> {
+      return Promise.reject(
+        new Error(
+          "ListEntries RPC client not wired yet (P2R-PV-S3b composition root; fail-closed)",
+        ),
       );
     },
   };
