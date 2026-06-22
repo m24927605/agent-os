@@ -6,13 +6,21 @@
 //   pinned rev     : 4ceb69a47a00f6ff440b1dc93c81524cedad1b87
 //
 // This file vendors ONLY the subset of the `SidecarAdapter` gRPC service that the SpendGuard
-// LedgerTransport seam (src/cost/adapters/spendguard/adapter.ts) needs S6 to implement for real:
-// the session-reservation lifecycle (ReserveSession / CommitSessionDelta / ReleaseSession —
-// adapter.proto:124/129/134) plus the explicit ReleaseReservation RPC (adapter.proto:116), with
-// their request/response messages and the transitive `spendguard.common.v1` dependencies
-// (UnitRef, PricingFreeze, Error). The handshake / decision-boundary / trace / budget-grant /
-// drain RPCs and their large datamodel are intentionally OUT OF SCOPE here (the client only
-// touches the reservation lifecycle; the rest stays upstream).
+// LedgerTransport seams (src/cost/adapters/spendguard/adapter.ts) need to implement for real:
+//
+//   (S6) the session-reservation lifecycle (ReserveSession / CommitSessionDelta / ReleaseSession —
+//        adapter.proto:124/129/134) plus the explicit ReleaseReservation RPC (adapter.proto:116).
+//
+//   (S8) the gating flow that the DEMO sidecar actually serves (R11-S7 ground truth: the session
+//        RPCs above are `unimplemented` in services/sidecar/src/server/adapter_uds.rs:142-173):
+//        Handshake (adapter.proto:39) -> RequestDecision (:46) -> ConfirmPublishOutcome (:50). Only
+//        the FIELDS the credential-blind transport speaks/reads are vendored — the large prediction /
+//        subscription-meter / trace datamodel of these messages stays upstream and is OMITTED here
+//        (proto3 additive evolution: omitted tags decode to defaults, present tags wire-match the
+//        upstream tag numbers). The trace / budget-grant / drain / approval RPCs remain OUT OF SCOPE.
+//
+// with their request/response messages and the transitive `spendguard.common.v1` dependencies
+// (UnitRef, PricingFreeze, Error for S6; TraceContext, SpendGuardIds, BudgetClaim for S8).
 //
 // Self-contained on purpose: the common.v1 dependency messages are inlined into THIS package so
 // the generated types-only TS stub is a single self-sufficient file with zero cross-proto imports
@@ -33,6 +41,19 @@ import "google/protobuf/timestamp.proto";
 // ============================================================================
 
 service SidecarAdapter {
+  // (S8) Initial handshake; mandatory before any other RPC. The transport reads
+  // back the negotiated session_id. (adapter.proto:39)
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+
+  // (S8) Adapter requests a decision at a *.pre trigger point. The IMPLEMENTED
+  // gating flow in the demo sidecar (adapter_uds.rs:82). (adapter.proto:46)
+  rpc RequestDecision(DecisionRequest) returns (DecisionResponse);
+
+  // (S8) Adapter confirms the publish_effect outcome (settles a decision).
+  // (adapter.proto:50)
+  rpc ConfirmPublishOutcome(PublishOutcomeRequest)
+      returns (PublishOutcomeResponse);
+
   // Reserve a session-scoped ledger hold before a realtime session connects to
   // paid model providers. Idempotent by
   // (tenant_id, session_id, route, idempotency_key). (adapter.proto:124)
@@ -112,6 +133,40 @@ message Error {
   Code code = 1;
   string message = 2;
   map<string, string> details = 3;
+}
+
+// common.proto:37 — TraceContext (W3C trace context; S8 RequestDecision.trace).
+message TraceContext {
+  string trace_id = 1;
+  string span_id = 2;
+  string parent_span_id = 3;
+  string trace_state = 4;
+}
+
+// common.proto:51 — SpendGuardIds (canonical UUID v7 IDs; S8 RequestDecision.ids).
+message SpendGuardIds {
+  string run_id = 1;
+  string step_id = 2;
+  string llm_call_id = 3;
+  string tool_call_id = 4;
+  string decision_id = 5;
+  string snapshot_id = 6;
+}
+
+// common.proto:232 — BudgetClaim (a single projected cost claim; S8 Inputs.projected_claims).
+message BudgetClaim {
+  string budget_id = 1;
+  UnitRef unit = 2;
+  string amount_atomic = 3;
+
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DEBIT = 1;
+    CREDIT = 2;
+  }
+  Direction direction = 4;
+
+  string window_instance_id = 5;
 }
 
 // ============================================================================
@@ -233,4 +288,107 @@ message ReleaseReservationResponse {
 
   string ledger_transaction_id = 100;
   repeated string released_reservation_ids = 101;
+}
+
+// ============================================================================
+// (S8) Gating flow the demo sidecar ACTUALLY serves — adapter.proto:34-55,190-540
+//
+// Only the fields the credential-blind transport sends or reads are vendored;
+// the upstream prediction / subscription-meter / approval datamodel is OMITTED
+// (proto3 additive evolution keeps the present tags wire-compatible).
+// ============================================================================
+
+// adapter.proto:190 — HandshakeRequest (we send a minimal mandatory handshake).
+message HandshakeRequest {
+  string sdk_version = 1;
+  string runtime_kind = 2;
+  string runtime_version = 3;
+  string tenant_id_assertion = 5;
+  uint32 protocol_version = 7;
+}
+
+// adapter.proto:211 — HandshakeResponse (we read back the negotiated session_id).
+message HandshakeResponse {
+  string sidecar_version = 1;
+  uint32 protocol_version = 6;
+  string session_id = 7;
+}
+
+// adapter.proto:309 — DecisionRequest (we send session_id, trigger, route, cost
+// projection in Inputs; trace / ids carried opaque). Idempotency / prediction /
+// subscription-meter fields are OMITTED (the credential-blind transport sends none).
+message DecisionRequest {
+  string session_id = 1;
+
+  enum Trigger {
+    TRIGGER_UNSPECIFIED = 0;
+    RUN_PRE = 1;
+    AGENT_STEP_PRE = 2;
+    LLM_CALL_PRE = 3;
+    TOOL_CALL_PRE = 4;
+  }
+  Trigger trigger = 2;
+
+  TraceContext trace = 3;
+  SpendGuardIds ids = 4;
+  string route = 5;
+
+  message Inputs {
+    repeated BudgetClaim projected_claims = 1;
+    string projected_p50_atomic = 2;
+    string projected_p90_atomic = 3;
+    string projected_p95_atomic = 4;
+    string projected_p99_atomic = 5;
+    UnitRef projected_unit = 6;
+  }
+  Inputs inputs = 6;
+}
+
+// adapter.proto:422 — DecisionResponse (we read decision_id + the decision enum;
+// unknown enum MUST fail closed per adapter.proto:448).
+message DecisionResponse {
+  string decision_id = 1;
+  string audit_decision_event_id = 2;
+
+  enum Decision {
+    DECISION_UNSPECIFIED = 0;
+    CONTINUE = 1;
+    DEGRADE = 2;
+    SKIP = 3;
+    STOP = 4;
+    REQUIRE_APPROVAL = 5;
+    STOP_RUN_PROJECTION = 6;
+  }
+  Decision decision = 3;
+
+  repeated string reason_codes = 4;
+  bool terminal = 14;
+  Error error = 15;
+}
+
+// adapter.proto:516 — PublishOutcomeRequest (commit confirms a decision settled).
+message PublishOutcomeRequest {
+  string session_id = 1;
+  string decision_id = 2;
+  bytes effect_hash = 3;
+
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    APPLIED = 1;
+    APPLIED_NOOP = 2;
+    APPLY_FAILED = 3;
+    APPROVAL_GRANTED = 4;
+    APPROVAL_DENIED = 5;
+    APPROVAL_TIMED_OUT = 6;
+  }
+  Outcome outcome = 4;
+
+  string adapter_error = 5;
+}
+
+// adapter.proto:535 — PublishOutcomeResponse (a populated error => fail closed).
+message PublishOutcomeResponse {
+  string audit_outcome_event_id = 1;
+  google.protobuf.Timestamp recorded_at = 2;
+  Error error = 3;
 }

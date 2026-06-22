@@ -71,6 +71,40 @@ export interface Error_DetailsEntry {
   value: string;
 }
 
+/** common.proto:37 — TraceContext (W3C trace context; S8 RequestDecision.trace). */
+export interface TraceContext {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  traceState: string;
+}
+
+/** common.proto:51 — SpendGuardIds (canonical UUID v7 IDs; S8 RequestDecision.ids). */
+export interface SpendGuardIds {
+  runId: string;
+  stepId: string;
+  llmCallId: string;
+  toolCallId: string;
+  decisionId: string;
+  snapshotId: string;
+}
+
+/** common.proto:232 — BudgetClaim (a single projected cost claim; S8 Inputs.projected_claims). */
+export interface BudgetClaim {
+  budgetId: string;
+  unit: UnitRef | undefined;
+  amountAtomic: string;
+  direction: BudgetClaim_Direction;
+  windowInstanceId: string;
+}
+
+export enum BudgetClaim_Direction {
+  DIRECTION_UNSPECIFIED = 0,
+  DEBIT = 1,
+  CREDIT = 2,
+  UNRECOGNIZED = -1,
+}
+
 export interface ReserveSessionRequest {
   tenantId: string;
   budgetId: string;
@@ -176,7 +210,121 @@ export interface ReleaseReservationResponse {
   releasedReservationIds: string[];
 }
 
+/** adapter.proto:190 — HandshakeRequest (we send a minimal mandatory handshake). */
+export interface HandshakeRequest {
+  sdkVersion: string;
+  runtimeKind: string;
+  runtimeVersion: string;
+  tenantIdAssertion: string;
+  protocolVersion: number;
+}
+
+/** adapter.proto:211 — HandshakeResponse (we read back the negotiated session_id). */
+export interface HandshakeResponse {
+  sidecarVersion: string;
+  protocolVersion: number;
+  sessionId: string;
+}
+
+/**
+ * adapter.proto:309 — DecisionRequest (we send session_id, trigger, route, cost
+ * projection in Inputs; trace / ids carried opaque). Idempotency / prediction /
+ * subscription-meter fields are OMITTED (the credential-blind transport sends none).
+ */
+export interface DecisionRequest {
+  sessionId: string;
+  trigger: DecisionRequest_Trigger;
+  trace: TraceContext | undefined;
+  ids: SpendGuardIds | undefined;
+  route: string;
+  inputs: DecisionRequest_Inputs | undefined;
+}
+
+export enum DecisionRequest_Trigger {
+  TRIGGER_UNSPECIFIED = 0,
+  RUN_PRE = 1,
+  AGENT_STEP_PRE = 2,
+  LLM_CALL_PRE = 3,
+  TOOL_CALL_PRE = 4,
+  UNRECOGNIZED = -1,
+}
+
+export interface DecisionRequest_Inputs {
+  projectedClaims: BudgetClaim[];
+  projectedP50Atomic: string;
+  projectedP90Atomic: string;
+  projectedP95Atomic: string;
+  projectedP99Atomic: string;
+  projectedUnit: UnitRef | undefined;
+}
+
+/**
+ * adapter.proto:422 — DecisionResponse (we read decision_id + the decision enum;
+ * unknown enum MUST fail closed per adapter.proto:448).
+ */
+export interface DecisionResponse {
+  decisionId: string;
+  auditDecisionEventId: string;
+  decision: DecisionResponse_Decision;
+  reasonCodes: string[];
+  terminal: boolean;
+  error: Error | undefined;
+}
+
+export enum DecisionResponse_Decision {
+  DECISION_UNSPECIFIED = 0,
+  CONTINUE = 1,
+  DEGRADE = 2,
+  SKIP = 3,
+  STOP = 4,
+  REQUIRE_APPROVAL = 5,
+  STOP_RUN_PROJECTION = 6,
+  UNRECOGNIZED = -1,
+}
+
+/** adapter.proto:516 — PublishOutcomeRequest (commit confirms a decision settled). */
+export interface PublishOutcomeRequest {
+  sessionId: string;
+  decisionId: string;
+  effectHash: Uint8Array;
+  outcome: PublishOutcomeRequest_Outcome;
+  adapterError: string;
+}
+
+export enum PublishOutcomeRequest_Outcome {
+  OUTCOME_UNSPECIFIED = 0,
+  APPLIED = 1,
+  APPLIED_NOOP = 2,
+  APPLY_FAILED = 3,
+  APPROVAL_GRANTED = 4,
+  APPROVAL_DENIED = 5,
+  APPROVAL_TIMED_OUT = 6,
+  UNRECOGNIZED = -1,
+}
+
+/** adapter.proto:535 — PublishOutcomeResponse (a populated error => fail closed). */
+export interface PublishOutcomeResponse {
+  auditOutcomeEventId: string;
+  recordedAt: string | undefined;
+  error: Error | undefined;
+}
+
 export interface SidecarAdapter {
+  /**
+   * (S8) Initial handshake; mandatory before any other RPC. The transport reads
+   * back the negotiated session_id. (adapter.proto:39)
+   */
+  Handshake(request: HandshakeRequest): Promise<HandshakeResponse>;
+  /**
+   * (S8) Adapter requests a decision at a *.pre trigger point. The IMPLEMENTED
+   * gating flow in the demo sidecar (adapter_uds.rs:82). (adapter.proto:46)
+   */
+  RequestDecision(request: DecisionRequest): Promise<DecisionResponse>;
+  /**
+   * (S8) Adapter confirms the publish_effect outcome (settles a decision).
+   * (adapter.proto:50)
+   */
+  ConfirmPublishOutcome(request: PublishOutcomeRequest): Promise<PublishOutcomeResponse>;
   /**
    * Reserve a session-scoped ledger hold before a realtime session connects to
    * paid model providers. Idempotent by
