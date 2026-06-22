@@ -4,7 +4,7 @@
 - **Branch**: slice/es2a-proto-partition-id-kernel-routing
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；Go + proto only（無 TS 消費者改動）；新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;drift gate + fail-closed 路由 + head-independence 經 mutation 證實;單鏈 server byte-identical;honest P4 key marker）
 
 ## (0) 動機 + 現況（grounded）
 ES1 的 per-tenant WORM 是 in-memory(`Map<partitionId, InMemoryAppendOnlyLog>`)。要升到**真實 kernel per-tenant partition**,前提是 live gRPC AppendService 能依 partition 路由。現況:
@@ -41,13 +41,15 @@ SLICE-ES2a — (a) `proto/ingest.proto` `AppendRequest` 加 `string partition_id
 - proto:gen 後 `proto:check` 綠(pin 對齊);若 Go 編譯依賴 `PartitionId` 欄位,先 proto:gen 才編得過(契約先行)。
 - `pnpm run verify:go` 綠(partition lib 既有 test + 新 server-level test)。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:server-level 路由 test 在接線前紅(單鏈不路由)。
-- [ ] `proto/ingest.proto` 加 `partition_id=4`;`pnpm run proto:gen` 重生;`pnpm run proto:check` 綠(Go ingestpb pin 對齊)。
-- [ ] Go server `Append` 依 `req.PartitionId` 路由到 `PartitionedIngest`;**空/未知 partition_id → deny(fail-closed,不 fall-through)**。
-- [ ] Go conformance:per-tenant head 獨立(append a 不移 b)、per-tenant sequence 獨立、wrong-key 驗證 fail;`pnpm run verify:go` 綠;`pnpm run verify` exit 0(TS 不受影響)。
-- [ ] **誠實標記**:per-tenant key 在記憶體生 = attester==operator 上限,真實 key provision/KMS = P4。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:partition_id 空→預設 partition 不 deny → test 紅;append a 移動 b head → 隔離紅)。
+## (6) Definition of Done（實測）
+- [x] RED:`partition_append_test.go` 在 adapter 不存在時 build failed(`undefined: PartitionAppendServer`)。
+- [x] `proto/ingest.proto` 加 `partition_id=4`;`pnpm run proto:gen` 重生(Go ingestpb + TS `_generated/ingest`);`pnpm run proto:check` 綠(`go ok`+`ts ok`;reviewer mutation:手改 ingest.pb.go drift → proto:check FAIL,證 drift gate bites)。
+- [x] partitioned gRPC AppendService adapter(`kernel/internal/server/partition_append.go`)依 `req.GetPartitionId()` 路由到 `PartitionedIngest`;**空 → deny(MALFORMED "partition_id is required");未知 → fail-closed deny(不洩 partition 值、不生預設 tenant)**。**單鏈 `append.go` byte-identical**(Personal 向後相容,git diff 空)。
+- [x] Go conformance(gRPC handler 層):per-tenant head 獨立(append a 不移 b)、per-tenant sequence 獨立、wrong-key 驗證 fail;`verify:go` ok;`pnpm run verify` exit 0(TS 不受影響)。reviewer mutation:empty fall-through → empty-deny test 紅;route a into b → head-independence 紅。
+- [x] **誠實標記**:`main.go -partitions` 旗標 provision per-tenant Store+**記憶體生 Ed25519 key**(`// P4: replace with externalized per-tenant key provision` + "attester==operator" 註解 + 啟動 log);`-partitions` 空 = 單鏈模式不變。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;drift / empty-fall-through / head-misroute 三 mutation 皆翻紅;8 攻擊面 HELD/N/A)。
+> **⚠️ ES2b 硬前置(reviewer MINOR)**:`src/runtime/ingest/grpc-client.ts` 的 `encodeAppendRequest` **無 field-4(partitionId)encode 分支**;ES2a 只送空值故 wire-correct,但 **ES2b 第一任務必須加 field-4 encode 分支**,否則 TS partitioned append 以空值上線 → fail-closed denied。
+> **LSP 註記**:proto regen 後編輯器 LSP 顯示 `GetPartitionId undefined` 為 **stale**(以 `go test`/`verify` command output 為準)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(proto 欄位 + server 路由 + 重生檔)。`PartitionedIngest` lib 不受影響。
