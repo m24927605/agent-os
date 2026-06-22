@@ -4,7 +4,15 @@
 - **Branch**: slice/p2r-r11-s9-spendguard-live-e2e-decision
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day（不含 docker build）；net LOC <~190（`scripts/e2e-live-spendguard.sh` + `src/cost/adapters/spendguard/live-spendguard.e2e.test.ts` + package.json 一行）、新增依賴 = 0
-- **狀態**: **PARTIAL-LIVE / 待設計裁決**（live 整合已**實際對真實 sidecar 跑過**並推進到下述 ground-truth;完整 CONTINUE 待一個設計決定，見「Live ground-truth」）
+- **狀態**: **DONE**（裁決 (a) 已執行:R11-S10 補上 config-driven projected BudgetClaim;`pnpm run e2e:live-spendguard` 對真實 demo = **LIVE_E2E_PASS**;獨立 Opus 4.8 review PASS。實作於 `scripts/e2e-live-spendguard.sh` + `scripts/spendguard-live-e2e.mjs`,opt-in、不入 `verify`）
+
+> ## ✅ DONE（2026-06-22）— 完整 live 證明達成
+> 對真實跑著的 SpendGuard demo(Rust sidecar + ledger + Postgres),經 **SpendGuardCostGate adapter**:
+> - **reserve(額度內 10)→ status `ok` + 真實 reservationId**(RequestDecision CONTINUE,真實 ledger 預留)。
+> - **commit → `committed`**(ConfirmPublishOutcome 真實結算)。
+> - **reserve(600 > 500 餘額)→ `denied`(fail-closed)**(over-budget 被拒)。
+> harness:build → `docker compose up -d sidecar`(重用既有 images)→ sidecar-adjacent 容器(uid 65532、掛 UDS volume)跑 e2e → `down -v` 清理。可由 `pnpm run e2e:live-spendguard` 重現。
+> **裁決 (a) 的設計實現**:route→budget 翻譯住 adapter/transport config(`createDecisionLedgerTransport({budgetClaim})`),core CostGate port 仍 `{resource, estimatedTokens}` 不變、credential-blind 保住。
 
 > ## ✅/⏸ Live ground-truth（2026-06-22,真實對跑著的 SpendGuard demo 驗證,非偽造）
 > 真實 demo 已起(`docker compose up --build`,OrbStack:postgres+ledger+sidecar+endpoint-catalog+canonical-ingest+run-cost-projector 全 healthy,sidecar log「adapter UDS listener bound」)。在 sidecar-adjacent 容器(uid 65532、掛 UDS volume)用**我們編譯後的 `createDecisionLedgerTransport`+`SpendGuardCostGate`** 對**真實 UDS** 跑,**已證明**:
