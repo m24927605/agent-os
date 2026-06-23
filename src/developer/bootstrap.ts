@@ -136,6 +136,12 @@ export interface DeveloperKit {
   /** Read-only deterministic fold of THIS kit's WORM into a TaskTimeline (forensic replay). */
   replayFold(uptoSequence?: number): TaskTimeline;
   /**
+   * Export THIS kit's Ed25519 PUBLIC key as an SPKI PEM — the trust-root a developer/auditor hands to
+   * the released verifier (`--pubkey`) to verify the kit's signed WORM chain. PUBLIC material ONLY:
+   * the private key never leaves the kit and is unreachable through this (or any) accessor.
+   */
+  publicKeyPem(): string;
+  /**
    * INDEPENDENT verification: serialize THIS kit's WORM to the verifier's --chain input, SPAWN the
    * released verifier (`AGENTOS_VERIFIER_BIN` override; default `agentos-verifier`), and RELAY its exit
    * code (0=intact / 1=broken / 2=bad-input; absent/error => fail-closed). NEVER recomputes the chain.
@@ -246,6 +252,11 @@ export function createDeveloperKit(opts: DeveloperKitOpts = {}): DeveloperKit {
     registeredTools: () => registry.list(),
 
     bundleRefFor: (pattern) => `bundle://${pattern}`,
+
+    // Export the kit's Ed25519 PUBLIC key as an SPKI PEM (the verifier's `--pubkey` input). We export
+    // the PUBLIC KeyObject ONLY — `privateKey` is closed over but is NEVER exposed, so an auditor gets
+    // the trust-root to verify the signed chain without ever seeing private material.
+    publicKeyPem: () => publicKey.export({ type: "spki", format: "pem" }) as string,
 
     runTool: async (toolCall) => {
       lastSandboxCreated = false;
