@@ -56,9 +56,12 @@ message AppendResponse {
   }
 }
 
-// CheckpointRequest carries no fields: the anchor is the kernel's single global chain head; there is
-// no per-task / per-tenant scoping at the kernel (the WORM log is shared, monotonic, single-writer).
-message CheckpointRequest {}
+// CheckpointRequest — for the single-chain server the anchor is the kernel's single global chain head
+// (no per-tenant scoping; partition_id is IGNORED, back-compat with K1/K2 + Personal). For the
+// PARTITIONED server (Enterprise) partition_id selects the tenant chain to anchor.
+message CheckpointRequest {
+  string partition_id = 1;    // P3 tenant partition; empty => single-chain servers ignore it, the partitioned server fail-closed denies
+}
 
 // CheckpointResponse — the snapshot-safe anchor captured atomically under the append mutex.
 message CheckpointResponse {
@@ -90,8 +93,11 @@ message Entry {
 }
 
 // ListEntriesRequest selects the chain tail: entries with sequence >= from_sequence (0 => the whole log).
+// For the single-chain server partition_id is IGNORED (back-compat). For the PARTITIONED server it
+// selects the tenant chain to read back; empty/unknown fail-closed denies (no default tenant).
 message ListEntriesRequest {
   uint64 from_sequence = 1;
+  string partition_id = 2;    // P3 tenant partition; empty => single-chain servers ignore it, the partitioned server fail-closed denies
 }
 
 // ListEntriesResponse carries the consistent snapshot of entries in chain order (never a partial slice;

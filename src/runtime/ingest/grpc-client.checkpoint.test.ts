@@ -57,7 +57,9 @@ function encodeMapEntry(key: string, value: number): Uint8Array {
 
 describe("Checkpoint request encoder (K2)", () => {
   it("encodes the empty CheckpointRequest to zero bytes (no fields)", () => {
-    expect(encodeCheckpointRequest({}).length).toBe(0);
+    // partitionId: "" is the single-chain (Personal) default — the hand-written encoder omits it on
+    // the wire (proto3 default), so the single-chain CheckpointRequest stays ZERO bytes (PK1).
+    expect(encodeCheckpointRequest({ partitionId: "" }).length).toBe(0);
   });
 });
 

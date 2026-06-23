@@ -160,3 +160,58 @@ func (p *PartitionedIngest) Checkpoint(partitionID string) (chain.Checkpoint, er
 		Signature:     chain.SignCheckpoint(st.signer, head, st.length),
 	}, nil
 }
+
+// PublicKey returns THIS tenant's Ed25519 public key (signer.Public()) so a signed read-back can
+// expose the verifying key alongside the Checkpoint signature — letting each tenant be verified
+// INDEPENDENTLY (a's signature verifies only under a's key; under b's key it returns false). An
+// unknown partitionId fails closed (no default tenant; mirrors Append/Checkpoint). The PRIVATE key is
+// never returned — only the public half, which is safe to publish to a release verifier.
+func (p *PartitionedIngest) PublicKey(partitionID string) (ed25519.PublicKey, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	st, ok := p.parts[partitionID]
+	if !ok {
+		return nil, fmt.Errorf("partition %q: unknown partition (deny-by-default)", partitionID)
+	}
+	pub, ok := st.signer.Public().(ed25519.PublicKey)
+	if !ok {
+		// signer is constructed as an ed25519.PrivateKey in NewPartitionedIngest; this never happens,
+		// but fail-closed rather than hand back a key that cannot verify the signature.
+		return nil, fmt.Errorf("partition %q: signer public key is not Ed25519", partitionID)
+	}
+	return pub, nil
+}
+
+// ListEntries returns a consistent snapshot of THIS tenant's durable WORM chain (records with chain
+// sequence >= fromSeq), read under the SAME mutex that serializes Append so it cannot observe a torn
+// (half-written) tail. It reads ONLY the routed partition's store — no other tenant's store is ever
+// touched. An unknown partitionId fails closed (no default tenant; mirrors Append/Checkpoint). It is
+// READ-ONLY: it never appends, rewrites, truncates, or mutates head/length/next/the store.
+//
+// It returns the durable store.LogRecord snapshot; the gRPC adapter re-derives canonical_event from
+// each (already-redacted) record.Event via the SAME canonical function the chain used to seal it (so
+// EntryHashFromCanonical reproduces entry_hash byte-for-byte), mirroring the single-chain list.go.
+func (p *PartitionedIngest) ListEntries(partitionID string, fromSeq uint64) ([]store.LogRecord, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	st, ok := p.parts[partitionID]
+	if !ok {
+		return nil, fmt.Errorf("partition %q: unknown partition (deny-by-default)", partitionID)
+	}
+	// Read THIS partition's durable log; fail-closed on a torn/unreadable tail (never a partial slice).
+	records, _, err := st.store.Load()
+	if err != nil {
+		return nil, fmt.Errorf("partition %q: durable log read failed: %w", partitionID, err)
+	}
+	out := make([]store.LogRecord, 0, len(records))
+	for _, r := range records {
+		// Filter on the LEAF chain sequence (the value framed into entry_hash), mirroring list.go.
+		if uint64(r.Sequence) < fromSeq {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}

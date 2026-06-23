@@ -53,10 +53,13 @@ export interface AppendResponse {
 }
 
 /**
- * CheckpointRequest carries no fields: the anchor is the kernel's single global chain head; there is
- * no per-task / per-tenant scoping at the kernel (the WORM log is shared, monotonic, single-writer).
+ * CheckpointRequest — for the single-chain server the anchor is the kernel's single global chain head
+ * (no per-tenant scoping; partition_id is IGNORED, back-compat with K1/K2 + Personal). For the
+ * PARTITIONED server (Enterprise) partition_id selects the tenant chain to anchor.
  */
 export interface CheckpointRequest {
+  /** P3 tenant partition; empty => single-chain servers ignore it, the partitioned server fail-closed denies */
+  partitionId: string;
 }
 
 /** CheckpointResponse — the snapshot-safe anchor captured atomically under the append mutex. */
@@ -105,9 +108,15 @@ export interface Entry {
   entryHash: string;
 }
 
-/** ListEntriesRequest selects the chain tail: entries with sequence >= from_sequence (0 => the whole log). */
+/**
+ * ListEntriesRequest selects the chain tail: entries with sequence >= from_sequence (0 => the whole log).
+ * For the single-chain server partition_id is IGNORED (back-compat). For the PARTITIONED server it
+ * selects the tenant chain to read back; empty/unknown fail-closed denies (no default tenant).
+ */
 export interface ListEntriesRequest {
   fromSequence: number;
+  /** P3 tenant partition; empty => single-chain servers ignore it, the partitioned server fail-closed denies */
+  partitionId: string;
 }
 
 /**

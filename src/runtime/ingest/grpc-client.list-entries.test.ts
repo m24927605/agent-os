@@ -63,11 +63,14 @@ function encodeListEntriesResponseFixture(entries: readonly Entry[]): Buffer {
 
 describe("ListEntries request encoder (S3b)", () => {
   it("encodes from_sequence as a field-1 varint; omits the proto3 zero value", () => {
-    const withFrom = encodeListEntriesRequest({ fromSequence: 1 });
+    // partitionId: "" is the single-chain (Personal) default — the hand-written encoder omits it on
+    // the wire (proto3 default), so only from_sequence is emitted (PK1 leaves the single-chain wire
+    // byte-identical).
+    const withFrom = encodeListEntriesRequest({ fromSequence: 1, partitionId: "" });
     // tag = field 1, wiretype 0 (varint) => 0x08 ; value 1 => 0x01
     expect(Array.from(withFrom)).toEqual([0x08, 0x01]);
 
-    const zero = encodeListEntriesRequest({ fromSequence: 0 });
+    const zero = encodeListEntriesRequest({ fromSequence: 0, partitionId: "" });
     // proto3 zero value is omitted on the wire.
     expect(zero.length).toBe(0);
   });
