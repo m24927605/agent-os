@@ -67,6 +67,21 @@ export interface CheckpointResponse {
   headSequence: number;
   /** expected next sequence per source (empty map => no appends yet) */
   perSourceNextSeq: { [key: string]: number };
+  /**
+   * checkpoint_signature is the kernel's base64 Ed25519 signature over CheckpointBytes(head_entry_hash,
+   * length) — length being the chain's total entry COUNT (NOT head_sequence, which is a per-source
+   * sequence). It lets a third party verify the operator's ACTUAL kernel chain head with chain.
+   * VerifyCheckpoint / the released verifier. The kernel (attester process) signs; the control plane
+   * (actor) can only Append and holds no key — attester != actor holds TO THE PROCESS BOUNDARY. The
+   * signing key being operator-held (in-memory generated or loaded from a file) is the honest known
+   * limit: real key externalization (HSM/KMS/remote attestation) is P4, NOT solved here.
+   */
+  checkpointSignature: string;
+  /**
+   * public_key is the kernel's Ed25519 public key in SPKI/PKIX DER (x509.MarshalPKIXPublicKey). A
+   * verifier parses it with x509.ParsePKIXPublicKey -> ed25519.PublicKey to check checkpoint_signature.
+   */
+  publicKey: Uint8Array;
 }
 
 export interface CheckpointResponse_PerSourceNextSeqEntry {

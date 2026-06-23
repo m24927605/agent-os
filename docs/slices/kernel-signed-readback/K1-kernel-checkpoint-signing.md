@@ -4,7 +4,7 @@
 - **Branch**: slice/k1-kernel-checkpoint-signing
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；Go + proto only（無 TS 消費者改動）；新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;簽章正確/length=entry-count/tamper/fail-closed/attester≠actor 經 mutation 證實;drift gate 親測 bite）
 
 ## (0) 動機 + 現況（grounded）
 live kernel 的 read-back UNSIGNED(P2R-PV-S3a):`CheckpointResponse` 無 signature/pubkey,`NewIngestServer` 不持 signer。簽章原語已備(`chain/sign.go` `SignCheckpoint`/`VerifyCheckpoint`,`CheckpointBytes` 與 TS byte-match)。K1 讓 kernel(attester 行程)持 ed25519 key + 簽 checkpoint + 經 `Checkpoint` RPC 露出 signature+pubkey,為 K2(TS 重建可驗 SignedChain + live 驗真 kernel 鏈)鋪 contract + 簽章基礎。
@@ -38,13 +38,15 @@ SLICE-K1 — (a) `proto/ingest.proto` `CheckpointResponse` 加 `string checkpoin
 - proto:gen 後 `proto:check` 綠;竄改 head → verify fail;control-plane-無-key 結構確認。
 - `pnpm run verify:go` 綠。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:Checkpoint-signature test 在簽章前紅。
-- [ ] `proto/ingest.proto` 加 `checkpoint_signature=4`+`public_key=5`;`proto:gen` 重生;`proto:check` 綠。
-- [ ] kernel `Checkpoint` 在 mutex 下 `SignCheckpoint` 簽 + 回 signature+pubkey;`-signing-key` 載入或啟動生成(honest log);無 signer fail-closed(不靜默 UNSIGNED)。
-- [ ] Go conformance:signature 過 `VerifyCheckpoint`、竄改 head→fail、genesis 可簽可驗、**control plane 無簽章 API/key**(attester≠actor 行程邊界);`verify:go` 綠;`pnpm run verify` exit 0。
-- [ ] **誠實標記**:key 由 kernel 行程持有(operator-held)→ attester≠actor 只到行程邊界;key 外部化/HSM/KMS = P4。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:簽錯 bytes→verify fail 沒抓、無 signer 靜默 UNSIGNED、竄改 head 仍 verify 過)。
+## (6) Definition of Done（實測）
+- [x] RED:`undefined: WithSigner` / `too many arguments in call to NewIngestServer`(簽章前無 signer/欄位)。
+- [x] `proto/ingest.proto` 加 `checkpoint_signature=4`+`public_key=5`;`proto:gen` 重生(Go ingestpb + TS,TS 不消費);`proto:check` 綠(reviewer 親改 ingest.pb.go drift → proto:check FAIL,證 gate bite)。
+- [x] kernel `Checkpoint` 在 mutex 下 `SignCheckpoint(signer, head, length)` 簽 + 回 signature + `public_key`(PKIX DER);`-signing-key` 載入(malformed fail-closed)或啟動生成(honest log);無 signer → `FailedPrecondition` fail-closed(不靜默 UNSIGNED)。
+- [x] Go conformance:signature 過 `VerifyCheckpoint`(pub 從 `public_key` parse)、**length=total entry count**(非 head_sequence;length+1 / =headSeq mutation 翻紅)、竄改 head/length→fail(constant-head mutation 翻紅)、genesis(head,0)可簽可驗、no-signer fail-closed(unsigned-return mutation 翻紅)、**control plane `AppendOnlyClient` 僅 Append、無簽章 API/key**(attester≠actor;加 Sign → compile fail + test RED 雙重 bite)、signing 在 append mutex 內(並發 test 綠);`verify:go` ok(15 包 -count=1);`pnpm run verify` exit 0(TS 不受影響;verify:cross-tenant 綠;secret-scan clean)。
+- [x] **誠實標記**:key 由 kernel 行程持有(operator-held)→ attester≠actor **只到行程邊界**(`append.go:42` 明說「operator 也不能偽造」= P4,即承認 K1 operator 仍可偽造);key 外部化/HSM/KMS/remote-attestation = P4(proto 註解 + 2 行啟動 log + 多處 code 註解,不 overclaim)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;5 mutation〔drift、length+1、length=headSeq、constant-head、unsigned-return、+interface Sign〕皆翻紅;8 攻擊面 HELD/N/A)。
+> **追蹤 reviewer MINOR(→ K2)**:head/length atomicity 未直接 test-assert(production 在 lock 內正確,torn-read mutation 未翻任何 test;既有並發 test 只查 head_sequence/next)。K2 重建 length 時加並發 head-vs-length self-consistency 斷言。
+> **pre-existing MAJOR-with-tracking(非 K1 引入)**:Go-plane dependency-boundary 工具(repo-wide SLICE-P0-003;Go 用 internal/ 邊界 + 編譯期強制,reviewer 已 live 驗 mutation E)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(proto 欄位 + server signer + Checkpoint 簽 + main.go flag + 重生檔)。`chain/sign.go` 不受影響。

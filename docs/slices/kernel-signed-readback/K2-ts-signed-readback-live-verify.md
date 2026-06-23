@@ -38,6 +38,7 @@ SLICE-K2 — (a) TS `createSignedChainReader`(或擴 `createEntriesReader`):從 
 
 ## (5) Test-first plan（RED 先行）
 - 單元(hermetic,fake/ fixture transport):reader 從 entries+signed-checkpoint 重建合法 SignedChain;缺 signature/pubkey → fail-closed error;在 reader 實作前紅。
+- **(採納 K1 reviewer MINOR)head/length self-consistency**:reader 重建的 `checkpoint.length` 與 `entries.length` 一致(K1 簽 `CheckpointBytes(head, length)`,length=entry count);若 read-back 的 entries 數與 signed checkpoint 的 length 不符 → reader fail-closed(防 K1 在 lock 外 torn-read 的回歸,且 verifier 也會因 length 不符報 broken)。
 - **gated live e2e(我跑)**:真 kernel append → signed read-back → 真 verifier → intact;tampered→broken;wrong-pubkey→非零。RED = reader/harness 未建前型別/檔案錯。
 
 ## (6) Definition of Done（待實測填）
