@@ -4,7 +4,7 @@
 - **Branch**: slice/dv1-developer-kit-composition-root
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；net LOC <~240（`src/developer/bootstrap.ts` + e2e + barrel）、新增依賴 = 0、新模組 = 1(`src/developer`)
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;registry-deny/commit-before-effect/spawn-relay moat 經 mutation 證實;Personal/Enterprise byte-unchanged;self-contained）
 
 ## (1) ID + Title
 SLICE-DV1 — 新增 composition root `createDeveloperKit(opts?)`(`src/developer/bootstrap.ts`),把 R9 的 `ToolRegistry`/`parseToolManifest`/`authorizeToolInvoke` + 治理核 `runGovernedToolCall` + commit-before-effect + WORM + R10 `replayTimeline` + R9-S5 釋出的 verifier,組成一條**自包含、可呼叫**的開發者主幹:`authorTool → runTool(governed)→ WORM → replayFold + verifyEvidenceChain(獨立)`。鏡像 `createPersonalShell`/`createEnterpriseFleet`,但**獨有 developer-facing INDEPENDENT VERIFIABILITY**(開發者不必信任 operator,自己重算+驗證鏈)。
@@ -44,15 +44,17 @@ SLICE-DV1 — 新增 composition root `createDeveloperKit(opts?)`(`src/developer
 - **INDEPENDENT verify(moat,DV1 以 test-double 證契約)**:`verifyEvidenceChain` spawn 一個 stub verifier(`AGENTOS_VERIFIER_BIN`)→ relay exit 0→`{ok:true}`、1→`{ok:false,broken}`、2→`{ok:false,bad-input}`;**斷言 DeveloperKit 從不 import Go / 不在 TS 重算鏈**(grep/結構)。真 verifier binary 的 intact/broken = DV2(gated,我跑)。
 - 首次 RED:import `./bootstrap.js` 失敗(exit≠0)。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:bootstrap 不存在 → e2e import 失敗 exit≠0。
-- [ ] `pnpm run verify` exit 0(e2e 全綠:happy + registry deny + guardrail + credential-blind + verify-relay 契約;Personal/Enterprise 既有 e2e **不變**)。
-- [ ] **registry-backed authorize 非 vacuous**:未註冊 tool → deny;mutation(authorize 略過 registry/always-allow)→ deny test 紅。
-- [ ] **commit-before-effect**:AuditEvent 先落 WORM 才 effect(沿用既有 seam;mutation:effect 先 → 序列/happy 紅)。
-- [ ] **INDEPENDENT verify**:`verifyEvidenceChain` spawn-relay test-double exit 0/1/2 正確映射;**確認從不 import Go 內部、不在 TS 重寫鏈驗證**(depcruise + grep)。
-- [ ] credential-blind(canary runtime 組裝、不在 source、不出現在 timeline/verify 出口);depcruise/secret-scan clean。
-- [ ] **誠實標記**:integrateWithPersonal/Enterprise = 後續(需 authorize-seam 改動);真 verifier binary + live kernel = DV2;verifier pubkey trust-root 外部化 = P4。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:authorize-always-allow、effect-before-audit、verify-relay 吞 exit code)。
+## (6) Definition of Done（實測）
+- [x] RED:`Failed to load url ./bootstrap.js`(createDeveloperKit 不存在)→ e2e import 失敗。
+- [x] `pnpm run verify` **exit 0**(881 passed + 11 skipped;e2e 6/6:happy + registry deny + guardrail + credential-blind + verify-relay 契約 + moat-invariant;**Personal〔8〕/Enterprise〔4〕既有 e2e byte-unchanged 綠**;verify:cross-tenant ok)。
+- [x] **registry-backed authorize 非 vacuous**:`runTool` 未註冊 tool → denied@policy(WORM 無 effect-success);reviewer mutation:authorize always-allow → registry-deny test 紅。
+- [x] **commit-before-effect**:AuditEvent 先落 WORM 才 effect;reviewer mutation:appender 回 synthetic receipt 不 append → happy/WORM-write test 紅(且證 replayFold 讀同一 WORM = write==read)。
+- [x] **INDEPENDENT verify(moat)**:`verifyEvidenceChain` spawn-relay,exit 0→{ok}、1→{broken}、2→{bad-input}、absent→fail-closed;reviewer mutation:吞 exit 1→{ok:true} → relay test 紅;**bootstrap.ts 零 Go/kernel import、不重算鏈**(spawnSync 委派為唯一驗證路徑;序列化 `{entries,checkpoint}` field 名與 Go json tag byte-for-name 對齊 → DV2 sound 前置)。
+- [x] credential-blind(canary `sk-${"d".repeat(24)}` runtime 組裝、不在 source、不出現在 replayFold 出口;reviewer 親跑 probe 證 **by-VALUE** redact 真 fire;test-fix〔key credential→benign target〕是 hardening 非弱化);depcruise exit 0(133 modules,reviewer 以 deep-import → exit 1 實證邊界 bites);secret-scan clean。
+- [x] **誠實標記**:integrateWithPersonal/Enterprise = 後續(Personal authorize 寫死,需 seam 改動);真 verifier binary intact/broken + live kernel = DV2;verifier pubkey trust-root 外部化 = P4。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;4 mutation〔authorize-always-allow、appender-no-append、verify-swallow-exit、screen-always-ok〕皆翻紅;8 攻擊面 HELD/N/A;self-contained 不碰 Personal/Enterprise)。
+> **2 deviation(reviewer 判定 sound)**:① `ToolBinding` 本地定義(repo 無此型,`ToolRegistry.register` 回 void → kit 從 parsed manifest 投影 4 欄)② root re-export 用 named(非 `export *`)避與 audit kernel 的 `VerifyResult` 撞名(kit 的仍可經 developer barrel 取用)。
+> **追蹤 MINOR(非阻斷)**:moat-invariant e2e 以 source-grep 守「不 import Go」(belt-and-suspenders;真強制是 depcruise 邊界 + spawn 委派)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 `src/developer/`)。純組合、無既有模組改動、可逆。
