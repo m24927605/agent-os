@@ -27,6 +27,7 @@ import type {
 
 const METHOD = "/agentos.kernel.ingest.v1.AppendService/Append";
 const LIST_ENTRIES_METHOD = "/agentos.kernel.ingest.v1.AppendService/ListEntries";
+const CHECKPOINT_METHOD = "/agentos.kernel.ingest.v1.AppendService/Checkpoint";
 
 /** Build a typed `AppendService` over a grpc-js channel to `endpoint` (insecure; TLS is an S7 concern). */
 export function grpcAppendService(endpoint: string): AppendService {
@@ -53,13 +54,31 @@ export function grpcAppendService(endpoint: string): AppendService {
         );
       });
     },
-    // Checkpoint is part of the AppendService contract (R10-S4: snapshot-safe checkpoint RPC). Its
-    // wire codecs + composition-root wiring are consumed by R10-S3 (out of scope here). Until that
-    // slice wires it, fail CLOSED: never return a faked/empty anchor that a caller might trust.
-    Checkpoint(_request: CheckpointRequest): Promise<CheckpointResponse> {
-      return Promise.reject(
-        new Error("Checkpoint RPC client not wired yet (R10-S3 composition root; fail-closed)"),
-      );
+    // Checkpoint is the snapshot-safe SIGNED anchor RPC (K1 added checkpoint_signature + public_key;
+    // SLICE-K2 wires the client so a signed read-back can reconstruct the operator's ACTUAL chain head).
+    // It is READ-ONLY (the kernel signs under its append mutex). Mirrors Append/ListEntries' fail-closed
+    // shape: an RPC error or a missing response surfaces as a rejected promise (the signed-chain reader
+    // treats it as fail-closed — never a faked/empty/unsigned anchor a caller might trust as signed).
+    Checkpoint(request: CheckpointRequest): Promise<CheckpointResponse> {
+      return new Promise<CheckpointResponse>((resolve, reject) => {
+        client.makeUnaryRequest(
+          CHECKPOINT_METHOD,
+          encodeCheckpointRequest,
+          decodeCheckpointResponse,
+          request,
+          (err: ServiceError | null, value?: CheckpointResponse) => {
+            if (err !== null) {
+              reject(err);
+              return;
+            }
+            if (value === undefined) {
+              reject(new Error("checkpoint: missing RPC response (fail-closed)"));
+              return;
+            }
+            resolve(value);
+          },
+        );
+      });
     },
     // ListEntries is the read-only WORM chain read-back (P2R-PV-S3a contract): a unary RPC over the
     // SAME AppendService channel. It returns a CONSISTENT snapshot of entries (sequence >= from_sequence)
@@ -259,4 +278,69 @@ export function decodeListEntriesResponse(bytes: Buffer): ListEntriesResponse {
     else throw new Error("listEntries: unexpected field in ListEntriesResponse (fail-closed)");
   }
   return { entries };
+}
+
+// --- Checkpoint codecs (SLICE-K2: signed read-back; same hand-written proto3 path) ------------------
+
+/**
+ * Encode a `CheckpointRequest` — it carries NO fields (the anchor is the kernel's single global chain
+ * head), so the wire is always ZERO bytes. Exported for the K2 codec unit test (no kernel needed).
+ */
+export function encodeCheckpointRequest(_req: CheckpointRequest): Buffer {
+  return Buffer.from([]);
+}
+
+/**
+ * Decode one map<string,uint64> entry { key=1:string, value=2:uint64 } from `per_source_next_seq`. A
+ * proto3 map field is encoded as repeated length-delimited messages with this shape.
+ */
+function decodePerSourceEntry(bytes: Uint8Array): { key: string; value: number } {
+  const r: Reader = { buf: bytes, pos: 0 };
+  let key = "";
+  let value = 0;
+  const dec = new TextDecoder();
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    if (field === 1) key = dec.decode(readLenDelim(r));
+    else if (field === 2) value = readVarint(r);
+    else throw new Error("checkpoint: unexpected field in per_source_next_seq entry (fail-closed)");
+  }
+  return { key, value };
+}
+
+/**
+ * Decode a `CheckpointResponse`:
+ *   head_entry_hash=1:string, head_sequence=2:uint64, per_source_next_seq=3:map<string,uint64>,
+ *   checkpoint_signature=4:string (base64 Ed25519), public_key=5:bytes (SPKI/PKIX DER).
+ *
+ * K1 added fields 4 + 5; this decoder MUST carry them so a signed read-back can reconstruct the
+ * operator's ACTUAL signed chain head + the kernel's pubkey (a dropped field 4/5 would silently
+ * downgrade a signed checkpoint to an UNSIGNED one — the signed-chain reader then fails closed). A
+ * malformed frame throws (fail-closed). Exported for the K2 byte-fixture unit test (no kernel needed).
+ */
+export function decodeCheckpointResponse(bytes: Buffer): CheckpointResponse {
+  const r: Reader = { buf: bytes, pos: 0 };
+  const out: CheckpointResponse = {
+    headEntryHash: "",
+    headSequence: 0,
+    perSourceNextSeq: {},
+    checkpointSignature: "",
+    publicKey: new Uint8Array(),
+  };
+  const dec = new TextDecoder();
+  while (r.pos < bytes.length) {
+    const tag = readVarint(r);
+    const field = Math.floor(tag / 8);
+    if (field === 1) out.headEntryHash = dec.decode(readLenDelim(r));
+    else if (field === 2) out.headSequence = readVarint(r);
+    else if (field === 3) {
+      const { key, value } = decodePerSourceEntry(readLenDelim(r));
+      out.perSourceNextSeq[key] = value;
+    } else if (field === 4) out.checkpointSignature = dec.decode(readLenDelim(r));
+    // copy the DER bytes out of the shared buffer so the response owns an independent slice.
+    else if (field === 5) out.publicKey = Uint8Array.from(readLenDelim(r));
+    else throw new Error("checkpoint: unexpected field in CheckpointResponse (fail-closed)");
+  }
+  return out;
 }

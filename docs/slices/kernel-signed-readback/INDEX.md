@@ -29,7 +29,7 @@ kernel(attester 行程,持 ed25519 key)→ 簽 checkpoint(SignCheckpoint)
 | Slice | 範圍 | 狀態 |
 |---|---|---|
 | **K1** | proto + Go 簽章:`CheckpointResponse` 加 `checkpoint_signature`(base64)+ `public_key`(kernel ed25519 pubkey,DER/PEM);kernel server 持 ed25519 key(`-signing-key` 檔載入,無則啟動生成並記 honest log)+ `Checkpoint` RPC 用 `SignCheckpoint` 簽 + 回 signature+pubkey;Go conformance(簽出的 checkpoint 過 `VerifyCheckpoint`;control plane 無 key 不能簽)| ✅ **DONE**(簽章正確/length=entry-count/tamper/fail-closed/attester≠actor 5 mutation 證實;drift gate bite;獨立 Opus4.8 review PASS)|
-| **K2** | TS signed read-back + live 驗真 kernel 鏈:TS reader 從 `Checkpoint`+`ListEntries` 重建 `SignedChain{entries, checkpoint{signature,...}}` + kernel pubkey;gated live e2e:對真實 kernel append 後 read-back → 重建 SignedChain → 釋出 verifier(DV2 的)驗 → **intact(驗營運方實際鏈)** + tamper→broken | DRAFT(依 K1)|
+| **K2** | TS signed read-back + live 驗真 kernel 鏈:TS reader 從 `Checkpoint`+`ListEntries` 重建 `SignedChain{entries, checkpoint{signature,...}}` + kernel pubkey;gated live e2e:對真實 kernel append 後 read-back → 重建 SignedChain → 釋出 verifier(DV2 的)驗 → **intact(驗營運方實際鏈)** + tamper→broken | ✅ **DONE + LIVE 3/3**(釋出 verifier 驗真 kernel 鏈 intact〔跨語言〕、tamper→broken、wrong-pubkey→拒;修 Checkpoint codec field4/5;獨立 Opus4.8 review 親 re-ran PASS)|
 
 ## 4. 交付順序
 K1(proto + Go kernel 簽章,Go conformance)→ K2(TS signed read-back + live 驗真 kernel 鏈,串上 DV2 的 verifier)。每刀 doc-first + RED + `pnpm run verify` 綠 + 獨立 Opus 4.8 review + merge;K2 含 gated live(我跑)。
