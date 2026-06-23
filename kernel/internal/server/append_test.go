@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -21,14 +23,21 @@ func (a *auditSpy) RecordDenial(sourceID string, sequence uint64, code, detail s
 	return nil
 }
 
+// newTestServer mirrors the real wiring (main.go always provides a signer): a kernel server with an
+// Ed25519 signing key so Checkpoint can sign. The dedicated no-signer fail-closed path is asserted
+// separately in TestCheckpointNoSignerFailsClosed (which constructs an UNSIGNED server inline).
 func newTestServer(t *testing.T) (*IngestServer, *auditSpy) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "k.wal"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	spy := &auditSpy{}
-	srv, err := NewIngestServer(st, spy)
+	srv, err := NewIngestServer(st, spy, WithSigner(priv))
 	if err != nil {
 		t.Fatal(err)
 	}

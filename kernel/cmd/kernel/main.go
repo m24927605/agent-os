@@ -7,7 +7,10 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -31,6 +34,7 @@ func main() {
 	// path stays byte-identical and never sets partition_id.
 	partitions := flag.String("partitions", "", "comma-separated tenant partition IDs; empty => single-chain mode (default)")
 	partitionDir := flag.String("partition-dir", "kernel-partitions", "directory for per-tenant durable chain logs (partitioned mode only)")
+	signingKeyPath := flag.String("signing-key", "", "path to the kernel's Ed25519 private key (PEM or raw DER PKCS#8); empty => generate an in-memory key at startup")
 	flag.Parse()
 
 	auditStore, err := store.Open(*auditPath)
@@ -82,22 +86,70 @@ func main() {
 		ingestpb.RegisterAppendServiceServer(gs, server.NewPartitionAppendServer(pi))
 		log.Printf("agent-os kernel ingest listening on %s (append-only, PARTITIONED: %d tenants; in-memory per-tenant keys = attester==operator, real key provision is P4)", *addr, len(ids))
 	} else {
-		// SINGLE-CHAIN mode (default, unchanged): Personal's live path. No partition_id is consulted.
+		// SINGLE-CHAIN mode (default): Personal's live path. No partition_id is consulted. The kernel
+		// (attester process) holds an Ed25519 signing key so its Checkpoint read-back is SIGNED — a
+		// third party can verify the operator's ACTUAL chain head. The key is loaded from -signing-key
+		// or generated in-memory at startup (see the HONEST log line below).
+		signer, generated, err := loadOrGenerateSigner(*signingKeyPath)
+		if err != nil {
+			log.Fatalf("kernel signing key: %v", err)
+		}
+		if generated {
+			// HONEST boundary (do NOT remove): the key lives in THIS process and was generated here.
+			log.Printf("agent-os kernel: in-memory signing key generated — operator-held; attester!=actor holds to the PROCESS boundary (control plane cannot sign), real key externalization / HSM / KMS / remote-attestation = P4")
+		} else {
+			log.Printf("agent-os kernel: signing key loaded from %q — operator-held; attester!=actor holds to the PROCESS boundary (control plane cannot sign), real key externalization / HSM / KMS / remote-attestation = P4", *signingKeyPath)
+		}
 		chainStore, err := store.Open(*chainPath)
 		if err != nil {
 			log.Fatalf("open chain store: %v", err)
 		}
-		srv, err := server.NewIngestServer(chainStore, audit)
+		srv, err := server.NewIngestServer(chainStore, audit, server.WithSigner(signer))
 		if err != nil {
 			log.Fatalf("init ingest server: %v", err)
 		}
 		ingestpb.RegisterAppendServiceServer(gs, srv)
-		log.Printf("agent-os kernel ingest listening on %s (append-only)", *addr)
+		log.Printf("agent-os kernel ingest listening on %s (append-only, signed checkpoint)", *addr)
 	}
 
 	if err := gs.Serve(lis); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
+}
+
+// loadOrGenerateSigner returns the kernel's Ed25519 signing key. With an empty path it GENERATES an
+// in-memory key (generated=true; the caller logs the honest in-memory/process-boundary/P4 line). With
+// a path it loads a PEM or raw-DER PKCS#8 Ed25519 private key, FAIL-CLOSED on any malformed/wrong-type
+// key (it never falls back to generating a key when an explicit path was given — a misconfigured key
+// must surface, not silently mint a different identity).
+func loadOrGenerateSigner(path string) (ed25519.PrivateKey, bool, error) {
+	if path == "" {
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, false, fmt.Errorf("generate in-memory signer: %w", err)
+		}
+		return priv, true, nil
+	}
+	raw, err := os.ReadFile(path) //nolint:gosec // operator-supplied key path, by design.
+	if err != nil {
+		return nil, false, fmt.Errorf("read signing key %q: %w", path, err)
+	}
+	der := raw
+	if block, _ := pem.Decode(raw); block != nil {
+		der = block.Bytes // PEM-wrapped PKCS#8; otherwise treat the bytes as raw DER.
+	}
+	key, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse signing key %q (expect PKCS#8 Ed25519, PEM or DER): %w", path, err)
+	}
+	priv, ok := key.(ed25519.PrivateKey)
+	if !ok {
+		return nil, false, fmt.Errorf("signing key %q is not Ed25519: %T", path, key)
+	}
+	if len(priv) != ed25519.PrivateKeySize {
+		return nil, false, fmt.Errorf("signing key %q has wrong Ed25519 size", path)
+	}
+	return priv, false, nil
 }
 
 // splitPartitions parses the -partitions flag into a clean, de-duplicated tenant ID list (trimming

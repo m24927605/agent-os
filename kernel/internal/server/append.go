@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"sync"
 
@@ -32,11 +33,30 @@ type IngestServer struct {
 	next    map[string]uint64 // expected next sequence per source (0 if unseen)
 	head    string            // current chain head entryHash (genesis if empty)
 	headSeq uint64            // source-sequence of the head record (0 if empty log)
+	length  int               // total committed entry COUNT (checkpoint length; distinct from headSeq)
+	// signer is the kernel's Ed25519 private key used to SIGN the chain checkpoint over
+	// CheckpointBytes(head, length). It is held in memory only (runtime-provided via WithSigner); it
+	// is never serialized to source/log/fixture/testdata. HONEST BOUNDARY: the kernel PROCESS holds
+	// this key (operator-held — generated in-memory or loaded from an operator file), so attester !=
+	// actor holds TO THE PROCESS BOUNDARY (the control plane cannot sign). Real key externalization
+	// (HSM/KMS/remote attestation, so the operator also cannot forge) is P4 and is NOT solved here.
+	signer ed25519.PrivateKey
 }
 
-// NewIngestServer wires the durable store + audit sink, rebuilding per-source next-sequence + head
-// from the durable log so a restart cannot silently re-open a gap or accept a replay.
-func NewIngestServer(st *store.Store, audit AuditSink) (*IngestServer, error) {
+// IngestOption configures an IngestServer at construction (functional-option, so adding the signer
+// does not break unrelated callers noisily).
+type IngestOption func(*IngestServer)
+
+// WithSigner installs the kernel's Ed25519 signing key. Checkpoint signing requires a signer; a server
+// built WITHOUT one fails closed at Checkpoint time (it never emits an UNSIGNED checkpoint silently).
+func WithSigner(priv ed25519.PrivateKey) IngestOption {
+	return func(s *IngestServer) { s.signer = priv }
+}
+
+// NewIngestServer wires the durable store + audit sink, rebuilding per-source next-sequence + head +
+// total length from the durable log so a restart cannot silently re-open a gap or accept a replay.
+// Pass WithSigner to enable checkpoint signing (main.go always provides one — loaded or generated).
+func NewIngestServer(st *store.Store, audit AuditSink, opts ...IngestOption) (*IngestServer, error) {
 	records, head, err := st.Load()
 	if err != nil {
 		return nil, err
@@ -49,7 +69,11 @@ func NewIngestServer(st *store.Store, audit AuditSink) (*IngestServer, error) {
 		}
 		headSeq = r.SourceSeq // head is the last record replayed; its source-sequence is the head sequence
 	}
-	return &IngestServer{store: st, audit: audit, next: next, head: head, headSeq: headSeq}, nil
+	s := &IngestServer{store: st, audit: audit, next: next, head: head, headSeq: headSeq, length: len(records)}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }
 
 func (s *IngestServer) deny(req *ingestpb.AppendRequest, code ingestpb.AppendError_Code, detail string) (*ingestpb.AppendResponse, error) {
@@ -96,6 +120,7 @@ func (s *IngestServer) Append(_ context.Context, req *ingestpb.AppendRequest) (*
 	}
 	s.head = entryHash
 	s.headSeq = req.GetSequence()
+	s.length++ // total committed entry count: the checkpoint length the signature binds
 	s.next[req.GetSourceId()] = req.GetSequence() + 1
 	return &ingestpb.AppendResponse{Result: &ingestpb.AppendResponse_Receipt{Receipt: &ingestpb.Receipt{
 		Sequence: req.GetSequence(), ContentHash: contentHash, PrevHash: prevHash, EntryHash: entryHash,
