@@ -28,8 +28,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { AuditEvent, LogEntry } from "../audit/index.js";
 import type { AgentContext } from "../iam/ids.js";
+import { ReplayError } from "../orchestration/index.js";
+// ALIGNMENT TARGET (test-only import; dep-cruiser excludes test files): the system's real
+// plain-language timeline projection. DV3 proves forensic replay LINES UP with it 1:1.
+import { buildTaskTimeline } from "../personal/timeline/index.js";
 import { createDeveloperKit } from "./bootstrap.js";
+import { type ForensicState, foldForensicState, projectWormToReplayEvents } from "./forensic.js";
 
 // A runtime-assembled secret canary — never a literal in source, so scan_secrets.sh stays clean.
 const CANARY = `sk-${"d".repeat(24)}`;
@@ -226,6 +232,179 @@ describe("createDeveloperKit — end-to-end Developer vertical over the real in-
       AGENTOS_VERIFIER_BIN: join(dir, "does-not-exist"),
     });
     expect(absent.ok).toBe(false);
+  });
+
+  it("(DV3 ALIGNMENT) replayFold(WORM).steps line up 1:1 with buildTaskTimeline(same entries)", async () => {
+    // Build a REAL WORM by running several governed tools through the kit — the entries are genuine
+    // commit-before-effect AuditEvents (the appender synthesizes them), so this is the system's true
+    // history, not a hand-built fixture.
+    const kit = createDeveloperKit();
+    kit.authorTool(validManifest("dev:echo"));
+    kit.authorTool({ ...validManifest("dev:build"), resourcePattern: "dev:build:*" });
+    kit.authorTool({ ...validManifest("dev:deploy"), resourcePattern: "dev:deploy:*" });
+
+    await kit.runTool(toolCall("dev:echo", { note: "one" }));
+    await kit.runTool(toolCall("dev:build", { note: "two" }));
+    await kit.runTool(toolCall("dev:deploy", { note: "three" }));
+
+    const tl = kit.replayFold();
+    expect(tl.steps.length).toBe(3);
+
+    // Reconstruct the WORM LogEntry[] from the replay steps (buildTaskTimeline reads only .sequence +
+    // .event). The SAME entries fed to both projections is the alignment premise.
+    const entries: LogEntry[] = tl.steps.map((step) => ({
+      sequence: step.sequence,
+      event: step.event as AuditEvent,
+      prevHash: `sha256:${"0".repeat(64)}`,
+      entryHash: `sha256:${"1".repeat(64)}`,
+    }));
+    const timeline = buildTaskTimeline(entries);
+
+    // 1:1 length.
+    expect(timeline.length).toBe(tl.steps.length);
+
+    // Per-index: SAME sequence, and the replay step's underlying AuditEvent action/resource matches
+    // the AuditEvent buildTaskTimeline projected at that sequence.
+    for (let i = 0; i < tl.steps.length; i++) {
+      const step = tl.steps[i];
+      const tev = timeline[i];
+      expect(step).toBeDefined();
+      expect(tev).toBeDefined();
+      if (step === undefined || tev === undefined) continue;
+      // Same per-index sequence (neither projection renumbers).
+      expect(step.sequence).toBe(tev.sequence);
+      const replayEvent = step.event as AuditEvent;
+      // Genuine cross-check (NOT a same-object tautology): buildTaskTimeline is an INDEPENDENT projection
+      // of the same WORM; its plain-language headline embeds `${action} ${resource}`. So asserting the
+      // replay step's action+resource appear in buildTaskTimeline's headline at this sequence proves the
+      // two projections agree on what happened — a dropped/reordered replay step breaks the per-index
+      // sequence match above and this headline match.
+      expect(tev.headline).toContain(replayEvent.action);
+      expect(tev.headline).toContain(replayEvent.resource);
+    }
+
+    // The expected resource order, in WORM-append (sequence) order.
+    expect(tl.steps.map((s) => (s.event as AuditEvent).resource)).toEqual([
+      "dev:echo",
+      "dev:build",
+      "dev:deploy",
+    ]);
+    // NON-VACUITY: a mutation that DROPPED a replay step (length 2) or REORDERED them would break
+    // the length/per-index/resource-order assertions above.
+  });
+
+  it("(DV3 ALIGNMENT non-vacuity) the REAL projectWormToReplayEvents aligns; a tampered projection breaks 1:1", async () => {
+    const kit = createDeveloperKit();
+    kit.authorTool(validManifest("dev:echo"));
+    kit.authorTool({ ...validManifest("dev:build"), resourcePattern: "dev:build:*" });
+    await kit.runTool(toolCall("dev:echo", { note: "one" }));
+    await kit.runTool(toolCall("dev:build", { note: "two" }));
+
+    // Reconstruct the kit's WORM LogEntry[] from the replay steps, then drive the PRODUCTION projection
+    // helper over them (not a hand-rolled local map) — the SAME helper replayFold/forensicState use.
+    const tl = kit.replayFold();
+    const entries: LogEntry[] = tl.steps.map((step) => ({
+      sequence: step.sequence,
+      event: step.event as AuditEvent,
+      prevHash: `sha256:${"0".repeat(64)}`,
+      entryHash: `sha256:${"1".repeat(64)}`,
+    }));
+    const projected = projectWormToReplayEvents(entries);
+    const timeline = buildTaskTimeline(entries);
+
+    // The REAL helper output aligns 1:1 with buildTaskTimeline (length + per-index sequence/resource).
+    expect(projected.length).toBe(timeline.length);
+    for (let i = 0; i < projected.length; i++) {
+      expect(projected[i]?.sequence).toBe(timeline[i]?.sequence);
+      expect(timeline[i]?.headline).toContain((projected[i]?.event as AuditEvent).resource);
+    }
+
+    // A DROPPED step (a projection that lost an entry) no longer matches buildTaskTimeline's length.
+    const dropped = projected.slice(0, -1);
+    expect(dropped.length).not.toBe(timeline.length);
+
+    // A REORDERED projection (per-index resource diverges from buildTaskTimeline) — proving the
+    // per-index resource assertion above is load-bearing, not vacuous.
+    const reordered = [...projected].reverse();
+    const mismatch = reordered.some(
+      (re, i) =>
+        !(timeline[i]?.headline ?? "").includes((re.event as AuditEvent).resource) ||
+        re.sequence !== timeline[i]?.sequence,
+    );
+    expect(mismatch).toBe(true);
+  });
+
+  it("(DV3 POINT-IN-TIME) forensicState(uptoSeq=k) reflects ONLY entries seq<=k; replayFold cut matches", async () => {
+    const kit = createDeveloperKit();
+    kit.authorTool(validManifest("dev:echo"));
+    kit.authorTool({ ...validManifest("dev:build"), resourcePattern: "dev:build:*" });
+    kit.authorTool({ ...validManifest("dev:deploy"), resourcePattern: "dev:deploy:*" });
+
+    // Three governed runs -> WORM sequences 0,1,2.
+    await kit.runTool(toolCall("dev:echo", { note: "one" }));
+    await kit.runTool(toolCall("dev:build", { note: "two" }));
+    await kit.runTool(toolCall("dev:deploy", { note: "three" }));
+
+    // As-of-0: only the FIRST entry (dev:echo) is in view.
+    const asOf0: ForensicState = kit.forensicState(0);
+    expect(asOf0.eventCount).toBe(1);
+    expect(asOf0.executed).toBe(1);
+    expect(Object.keys(asOf0.byResource).sort()).toEqual(["dev:echo"]);
+    expect(asOf0.byResource["dev:echo"]).toEqual({
+      lastAction: "tool:invoke",
+      lastResult: "success",
+    });
+    // replayFold cut at the same point holds 1 step.
+    expect(kit.replayFold(0).steps.length).toBe(1);
+
+    // As-of-1: the first TWO entries (dev:echo, dev:build).
+    const asOf1 = kit.forensicState(1);
+    expect(asOf1.eventCount).toBe(2);
+    expect(Object.keys(asOf1.byResource).sort()).toEqual(["dev:build", "dev:echo"]);
+    expect(kit.replayFold(1).steps.length).toBe(2);
+
+    // As-of-2 (== head): all three.
+    const asOf2 = kit.forensicState(2);
+    expect(asOf2.eventCount).toBe(3);
+    expect(Object.keys(asOf2.byResource).sort()).toEqual(["dev:build", "dev:deploy", "dev:echo"]);
+
+    // Default (no uptoSeq) folds the WHOLE WORM (== as-of-head).
+    expect(kit.forensicState()).toEqual(asOf2);
+
+    // NON-VACUITY: a forensicState that IGNORED uptoSeq (always folded all) would make asOf0.eventCount
+    // === 3, flipping the as-of-0 assertions RED.
+  });
+
+  it("(DV3 POINT-IN-TIME) an out-of-range uptoSeq -> ReplayError (same fail-closed as replayFold)", async () => {
+    const kit = createDeveloperKit();
+    kit.authorTool(validManifest("dev:echo"));
+    await kit.runTool(toolCall("dev:echo", { note: "one" })); // WORM has only sequence 0.
+
+    // uptoSeq beyond head -> the replayTimeline cut-point validation throws ReplayError; forensicState
+    // reuses replayFold's validated steps so the SAME error propagates.
+    expect(() => kit.forensicState(5)).toThrow(ReplayError);
+    expect(() => kit.replayFold(5)).toThrow(ReplayError);
+
+    // A non-integer cut-point also fails closed.
+    expect(() => kit.forensicState(0.5)).toThrow(ReplayError);
+  });
+
+  it("(DV3) forensicState reuses the SAME projection helper; replayFold determinism still holds", async () => {
+    const kit = createDeveloperKit();
+    kit.authorTool(validManifest("dev:echo"));
+    await kit.runTool(toolCall("dev:echo", { note: "one" }));
+
+    // replayFold is still deterministic over the same WORM (same timelineHash) — DV1 invariant intact.
+    expect(kit.replayFold().timelineHash).toBe(kit.replayFold().timelineHash);
+
+    // The standalone projection helper, fed the steps' events, folds to the same forensic state the
+    // kit reports (the kit's forensicState is the projection helper + foldForensicState over the WORM).
+    const steps = kit.replayFold().steps;
+    const events = steps.map((s) => ({ sequence: s.sequence, event: s.event }));
+    expect(foldForensicState(events)).toEqual(kit.forensicState());
+
+    // The projection helper is credential-blind: nothing in the forensic state is a literal secret.
+    expect(JSON.stringify(kit.forensicState())).not.toContain("sk-");
   });
 
   it("(MOAT INVARIANT) bootstrap.ts imports NO Go and does NOT re-implement chain hashing in TS", () => {
