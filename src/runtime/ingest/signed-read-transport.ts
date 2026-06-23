@@ -49,6 +49,15 @@ export interface SignedChainReaderOpts {
    * built from `endpoint`; tests inject an in-process stub (no network). Mirrors read-transport.ts.
    */
   readonly client?: AppendService;
+  /**
+   * PK2 — the PARTITIONED (Enterprise) tenant selector. ABSENT/empty => the K2 single-chain path: both
+   * RPCs send the proto3 default "" so the wire is byte-identical and a single-chain server is unchanged.
+   * SET => `Checkpoint({partitionId})` + `ListEntries({fromSequence:0, partitionId})`, so the partitioned
+   * kernel routes BOTH read-only RPCs to THIS tenant's independent WORM chain and reports THIS tenant's
+   * signing key — reconstructing that tenant's `SignedChain` + that tenant's pubkey PEM. The K2
+   * fail-closed guards (missing signature/pubkey, head/length self-consistency) apply UNCHANGED per-tenant.
+   */
+  readonly partitionId?: string;
 }
 
 /** The reconstructed, verifier-ready artifact: a SignedChain + the kernel's pubkey as an SPKI PEM. */
@@ -70,12 +79,14 @@ export async function createSignedChainReader(
   // Build the real grpc-js-backed client lazily ONLY when none is injected (keeps tests network-free).
   const client = opts.client ?? grpcAppendService(opts.endpoint);
   const dec = new TextDecoder();
+  // PK2: the tenant selector threaded onto BOTH read-only RPCs. ABSENT/empty => the K2 single-chain path
+  // ("" is omitted on the wire by the codec, byte-identical); SET => the partitioned kernel routes both
+  // RPCs to THIS tenant's independent chain + reports THIS tenant's signing key.
+  const partitionId = opts.partitionId ?? "";
 
   // 1. Read the WHOLE chain (fromSequence 0 => the entire log; a partial tail is NOT verifier-compatible).
   //    A throw here (a non-JSON canonical_event) propagates as a reject — the WHOLE read fails closed.
-  // partitionId: "" — single-chain (Personal) reader; the partitioned (Enterprise) field stays empty
-  // and is omitted on the wire (proto3 default), so this single-chain read is byte-identical (PK1).
-  const listResp = await client.ListEntries({ fromSequence: 0, partitionId: "" });
+  const listResp = await client.ListEntries({ fromSequence: 0, partitionId });
   const entries: readonly LogEntry[] = listResp.entries.map((entry): LogEntry => {
     const event = JSON.parse(dec.decode(entry.canonicalEvent)) as AuditEvent;
     return {
@@ -86,8 +97,9 @@ export async function createSignedChainReader(
     };
   });
 
-  // 2. Read the SIGNED checkpoint (K1's anchor: head + signature + pubkey).
-  const checkpoint = await client.Checkpoint({ partitionId: "" });
+  // 2. Read the SIGNED checkpoint (K1's anchor: head + signature + pubkey). PK2: the SAME tenant selector
+  //    so the partitioned kernel returns THIS tenant's signed head + THIS tenant's public_key.
+  const checkpoint = await client.Checkpoint({ partitionId });
 
   // 3. FAIL-CLOSED: a signed read-back MUST be signed. An empty signature or pubkey would let an
   //    UNSIGNED checkpoint masquerade as signed (e.g. a dropped wire field 4/5) — refuse it.

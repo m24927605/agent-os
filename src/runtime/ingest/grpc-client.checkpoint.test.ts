@@ -63,6 +63,25 @@ describe("Checkpoint request encoder (K2)", () => {
   });
 });
 
+describe("Checkpoint request encoder (PK2) — partition_id (field 1) for the Enterprise per-tenant path", () => {
+  it("encodes a NON-EMPTY partitionId as proto field 1 (tag 0x0a) len-delimited UTF-8", () => {
+    // PK1's PartitionAppendServer.Checkpoint REQUIRES a non-empty partition_id (empty => InvalidArgument
+    // deny). The Enterprise reader (PK2) must therefore SEND it. CheckpointRequest has exactly ONE field:
+    // partition_id = 1 (string) — so the WHOLE wire is field 1: tag (1<<3 | 2) = 0x0a, len, then bytes.
+    const out = encodeCheckpointRequest({ partitionId: "tenant-a" });
+    const expectedBytes = Array.from(new TextEncoder().encode("tenant-a"));
+    // 0x0a = field 1, wiretype 2 (len-delimited); next byte = length (8); then the UTF-8 bytes.
+    expect(Array.from(out)).toEqual([0x0a, expectedBytes.length, ...expectedBytes]);
+  });
+
+  it("omits partition_id entirely when empty (proto3 default; single-chain wire stays ZERO bytes)", () => {
+    // The single-chain (Personal) path NEVER sets partition_id — the field must be omitted so the wire is
+    // byte-identical to pre-PK1. (Drop the field-1 branch and the NON-EMPTY test above goes RED while this
+    // one stays green: the field is present iff non-empty.)
+    expect(encodeCheckpointRequest({ partitionId: "" }).length).toBe(0);
+  });
+});
+
 describe("Checkpoint response decoder (K2) — decodes signature(4) + public_key(5)", () => {
   it("decodes every field round-trip incl. checkpoint_signature + public_key", () => {
     const head = `sha256:${"a".repeat(64)}`;

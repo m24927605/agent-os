@@ -85,12 +85,25 @@ function k1Fixture(
     ],
   };
 
+  // SPY: record the partitionId each RPC actually receives, so a test can prove the reader threaded the
+  // tenant selector (or left it "" for the single-chain path). The fake transport returns the SAME
+  // fixture regardless — partition routing is the kernel's job; here we only assert what the reader SENT.
+  const seen = {
+    checkpointPartitionId: undefined as string | undefined,
+    listPartitionId: undefined as string | undefined,
+  };
   const client: AppendService = {
     Append: () => Promise.reject(new Error("Append not exercised in this test")),
-    Checkpoint: () => Promise.resolve(checkpoint),
-    ListEntries: () => Promise.resolve(list),
+    Checkpoint: (req) => {
+      seen.checkpointPartitionId = req.partitionId;
+      return Promise.resolve(checkpoint);
+    },
+    ListEntries: (req) => {
+      seen.listPartitionId = req.partitionId;
+      return Promise.resolve(list);
+    },
   };
-  return { client, publicKey, publicKeyDer, entryHash, signature };
+  return { client, publicKey, publicKeyDer, entryHash, signature, seen };
 }
 
 describe("createSignedChainReader (K2) — reconstruct + fail-closed", () => {
@@ -117,6 +130,11 @@ describe("createSignedChainReader (K2) — reconstruct + fail-closed", () => {
     expect(publicKeyPem).toMatch(/^-----BEGIN PUBLIC KEY-----/);
     const fromPem = createPublicKey(publicKeyPem);
     expect(fromPem.asymmetricKeyType).toBe("ed25519");
+
+    // SINGLE-CHAIN (no partitionId): the reader sends the proto3 default "" on both RPCs, so the wire is
+    // byte-identical to K2 (the partitioned server is never engaged; the field is omitted by the codec).
+    expect(f.seen.listPartitionId).toBe("");
+    expect(f.seen.checkpointPartitionId).toBe("");
   });
 
   it("(b) FAIL-CLOSED: a missing checkpointSignature -> reject (never an UNSIGNED chain as signed)", async () => {
@@ -158,5 +176,81 @@ describe("createSignedChainReader (K2) — reconstruct + fail-closed", () => {
     // Re-export the DER and confirm it equals the kernel's reported SPKI DER (no leakage, exact match).
     const reDer = new Uint8Array(ko.export({ type: "spki", format: "der" }));
     expect(Buffer.from(reDer).equals(Buffer.from(f.publicKeyDer))).toBe(true);
+  });
+});
+
+describe("createSignedChainReader (PK2) — per-tenant partitionId routing + per-tenant fail-closed", () => {
+  it("(a) WITH partitionId: sends Checkpoint({partitionId}) + ListEntries({partitionId}) and reconstructs THAT tenant's SignedChain + pubkey", async () => {
+    const f = k1Fixture();
+    const { chain, publicKeyPem } = await createSignedChainReader({
+      endpoint: "passthrough:fake",
+      client: f.client,
+      partitionId: "tenant-a",
+    });
+
+    // SPY: the tenant selector reached BOTH read-only RPCs (so the partitioned kernel routes to THIS
+    // tenant's independent chain + reports THIS tenant's signing key). A reader that dropped partitionId
+    // would leave these "" and the partitioned kernel would InvalidArgument-deny — non-vacuity.
+    expect(f.seen.listPartitionId).toBe("tenant-a");
+    expect(f.seen.checkpointPartitionId).toBe("tenant-a");
+
+    // The reconstructed artifact is that tenant's SignedChain + that tenant's pubkey (verbatim from the
+    // per-tenant Checkpoint response — the partitioned server returns the partition's own public_key).
+    expect(chain.entries.length).toBe(1);
+    expect(chain.checkpoint.length).toBe(1);
+    expect(chain.checkpoint.headEntryHash).toBe(f.entryHash);
+    expect(chain.checkpoint.signature).toBe(f.signature);
+    expect(publicKeyPem).toMatch(/^-----BEGIN PUBLIC KEY-----/);
+    const reDer = new Uint8Array(
+      createPublicKey(publicKeyPem).export({ type: "spki", format: "der" }),
+    );
+    expect(Buffer.from(reDer).equals(Buffer.from(f.publicKeyDer))).toBe(true);
+  });
+
+  it('(b) WITHOUT partitionId: behavior is byte-identical to K2 single-chain (partitionId stays "")', async () => {
+    const f = k1Fixture();
+    const { chain } = await createSignedChainReader({
+      endpoint: "passthrough:fake",
+      client: f.client,
+    });
+    // Omitting partitionId leaves it "" on the wire (proto3 default) — the K2 single-chain path, unchanged.
+    expect(f.seen.listPartitionId).toBe("");
+    expect(f.seen.checkpointPartitionId).toBe("");
+    expect(chain.entries.length).toBe(1);
+  });
+
+  it("(c) FAIL-CLOSED per-tenant: an empty per-tenant checkpointSignature -> reject", async () => {
+    // The K2 fail-closed guards apply UNCHANGED when partitionId is set: a per-tenant checkpoint that is
+    // unsigned must never be presented as signed.
+    const f = k1Fixture({ signatureOverride: "" });
+    await expect(
+      createSignedChainReader({
+        endpoint: "passthrough:fake",
+        client: f.client,
+        partitionId: "tenant-a",
+      }),
+    ).rejects.toThrow(/empty checkpoint signature/);
+  });
+
+  it("(c) FAIL-CLOSED per-tenant: an empty per-tenant publicKey -> reject", async () => {
+    const f = k1Fixture({ publicKeyOverride: new Uint8Array() });
+    await expect(
+      createSignedChainReader({
+        endpoint: "passthrough:fake",
+        client: f.client,
+        partitionId: "tenant-a",
+      }),
+    ).rejects.toThrow(/empty public key/);
+  });
+
+  it("(c) FAIL-CLOSED per-tenant: a torn read (checkpoint head != entries' head) -> reject", async () => {
+    const f = k1Fixture({ headOverride: `sha256:${"f".repeat(64)}` });
+    await expect(
+      createSignedChainReader({
+        endpoint: "passthrough:fake",
+        client: f.client,
+        partitionId: "tenant-a",
+      }),
+    ).rejects.toThrow();
   });
 });

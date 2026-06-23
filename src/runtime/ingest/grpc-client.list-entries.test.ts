@@ -76,6 +76,33 @@ describe("ListEntries request encoder (S3b)", () => {
   });
 });
 
+describe("ListEntries request encoder (PK2) — partition_id (field 2) for the Enterprise per-tenant path", () => {
+  it("encodes a NON-EMPTY partitionId as proto field 2 (tag 0x12) len-delimited UTF-8, AFTER from_sequence", () => {
+    // PK1's PartitionAppendServer.ListEntries REQUIRES a non-empty partition_id (empty => InvalidArgument
+    // deny). The Enterprise reader (PK2) reads the WHOLE tenant chain (from_sequence 0, so field 1 is
+    // omitted) but MUST send partition_id = 2 (string): tag (2<<3 | 2) = 0x12, len, then UTF-8 bytes.
+    const out = encodeListEntriesRequest({ fromSequence: 0, partitionId: "tenant-b" });
+    const expectedBytes = Array.from(new TextEncoder().encode("tenant-b"));
+    // from_sequence 0 => field 1 omitted; partition_id => 0x12, length (8), bytes.
+    expect(Array.from(out)).toEqual([0x12, expectedBytes.length, ...expectedBytes]);
+  });
+
+  it("emits from_sequence (field 1) AND partition_id (field 2) together when both are set", () => {
+    // A non-zero from_sequence (field 1 varint 0x08 0x01) followed by partition_id (field 2 len-delim).
+    const out = encodeListEntriesRequest({ fromSequence: 1, partitionId: "tenant-b" });
+    const expectedBytes = Array.from(new TextEncoder().encode("tenant-b"));
+    expect(Array.from(out)).toEqual([0x08, 0x01, 0x12, expectedBytes.length, ...expectedBytes]);
+  });
+
+  it("omits partition_id when empty (proto3 default; single-chain wire stays unchanged)", () => {
+    // Empty partition_id => field 2 omitted, so the single-chain wire is byte-identical (only from_seq).
+    // (Drop the field-2 branch and the two NON-EMPTY tests above go RED while this one stays green: the
+    // field is present iff non-empty.)
+    const out = encodeListEntriesRequest({ fromSequence: 1, partitionId: "" });
+    expect(Array.from(out)).toEqual([0x08, 0x01]);
+  });
+});
+
 describe("ListEntries response decoder (S3b)", () => {
   it("decodes every Entry field (sequence / canonical_event / prev_hash / entry_hash) round-trip", () => {
     const canonical0 = new TextEncoder().encode('{"a":1}');
