@@ -40,7 +40,7 @@ R9 + R10 **全部 DONE & merged**(各有 RED/contract 測試),治理核(runGover
 ## 4. 切片分解（小、RED-first）
 | Slice | 範圍 | 狀態 |
 |---|---|---|
-| **DV1** | 最薄 in-tree 可跑 Developer spine:`createDeveloperKit`(`src/developer/bootstrap.ts`)+ authorTool/verifyToolManifest/registeredTools/bundleRefFor + integrateWithPersonal/Enterprise(registry → authorize seam)+ replayFold + verifyEvidenceChain;**作者→治理→WORM→獨立驗證**全鏈 in-memory(零 kernel/docker/vendor)| DRAFT(先建) |
+| **DV1** | 最薄 in-tree 可跑 Developer spine:`createDeveloperKit`(`src/developer/bootstrap.ts`)+ authorTool/verifyToolManifest/registeredTools/bundleRefFor + integrateWithPersonal/Enterprise(registry → authorize seam)+ replayFold + verifyEvidenceChain;**作者→治理→WORM→獨立驗證**全鏈 in-memory(零 kernel/docker/vendor)| ✅ **DONE**(registry-deny/commit-before-effect/spawn-relay moat 3 mutation 證實;Personal/Enterprise byte-unchanged;獨立 Opus4.8 review PASS)|
 | **DV2** | Live:注入 `wormSinkFor`(真 kernel ingest)+ `readEntries`(真 ListEntries)+ `verifyEvidenceChain` 指向 R9-S5 **釋出的真 verifier binary**;gated e2e + checksum 校驗 | DRAFT(依 DV1)|
 | **DV3** | Forensic replay 端點:WORM `LogEntry`→`ReplayEvent` 投影 helper;`replayFold` 與 `buildTaskTimeline` 對齊;point-in-time `uptoSequence`;鎖定 `foldedState` schema | DRAFT |
 | **DV4** | Python plane 端到端 demo + 邊界證明:shim 產 bundleRef-only proposal → fixture/JSON 邊界 → governed 管線;import-linter | DRAFT |

@@ -33,6 +33,17 @@ export * from "./personal/approval/index.js";
 export * from "./personal/timeline/index.js";
 export * from "./personal/voice/index.js";
 export * from "./tenant/index.js";
+// Developer-surface composition root (SLICE-DV1). Named (not `export *`) so the kit's own `VerifyResult`
+// does not collide with the audit kernel's `VerifyResult` already aggregated above — the root barrel
+// stays unambiguous. The kit's `VerifyResult` is exposed via the depth-1 `src/developer/index.js` barrel.
+export {
+  createDeveloperKit,
+  type DeveloperKit,
+  type DeveloperKitOpts,
+  type DeveloperToolCall,
+  type RunToolOutcome,
+  type ToolBinding,
+} from "./developer/index.js";
 // SDK author-facing barrel (SLICE-P2R-R9-S2). Re-exports a NARROW author surface that is a strict
 // subset of the bindings already aggregated above (same original bindings, so no ambiguity). The
 // direction is one-way: root -> sdk -> module barrels; `src/sdk/index.ts` MUST NOT import this file.
