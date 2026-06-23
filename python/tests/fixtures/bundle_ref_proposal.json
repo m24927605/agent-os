@@ -1,0 +1,1 @@
+{"args": {"config": "bundle://prod/app-config"}, "tool": "dev:deploy"}
