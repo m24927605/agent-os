@@ -73,7 +73,9 @@ export async function createSignedChainReader(
 
   // 1. Read the WHOLE chain (fromSequence 0 => the entire log; a partial tail is NOT verifier-compatible).
   //    A throw here (a non-JSON canonical_event) propagates as a reject — the WHOLE read fails closed.
-  const listResp = await client.ListEntries({ fromSequence: 0 });
+  // partitionId: "" — single-chain (Personal) reader; the partitioned (Enterprise) field stays empty
+  // and is omitted on the wire (proto3 default), so this single-chain read is byte-identical (PK1).
+  const listResp = await client.ListEntries({ fromSequence: 0, partitionId: "" });
   const entries: readonly LogEntry[] = listResp.entries.map((entry): LogEntry => {
     const event = JSON.parse(dec.decode(entry.canonicalEvent)) as AuditEvent;
     return {
@@ -85,7 +87,7 @@ export async function createSignedChainReader(
   });
 
   // 2. Read the SIGNED checkpoint (K1's anchor: head + signature + pubkey).
-  const checkpoint = await client.Checkpoint({});
+  const checkpoint = await client.Checkpoint({ partitionId: "" });
 
   // 3. FAIL-CLOSED: a signed read-back MUST be signed. An empty signature or pubkey would let an
   //    UNSIGNED checkpoint masquerade as signed (e.g. a dropped wire field 4/5) — refuse it.

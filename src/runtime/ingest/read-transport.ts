@@ -43,7 +43,9 @@ export function createEntriesReader(opts: EntriesReaderOpts): () => Promise<read
   const dec = new TextDecoder();
 
   return async (): Promise<readonly LogEntry[]> => {
-    const resp = await client.ListEntries({ fromSequence });
+    // partitionId: "" — single-chain (Personal) reader; the partitioned (Enterprise) field stays empty
+    // and is omitted on the wire (proto3 default), so this single-chain read is byte-identical (PK1).
+    const resp = await client.ListEntries({ fromSequence, partitionId: "" });
     // Fold the consistent snapshot. A throw here (a non-JSON canonical_event) propagates as a reject,
     // so the WHOLE read fails closed — we never resolve a partially-folded slice.
     return resp.entries.map((entry): LogEntry => {

@@ -4,7 +4,7 @@
 - **Branch**: slice/pk1-partition-checkpoint-signing
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；Go + proto only（無 TS 消費者改動）；新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8〔報告截斷但實作完成〕;獨立 Opus4.8 reviewer = PASS〔自行建立 RED + 5 mutation 證實〕;per-tenant attester 隔離/ListEntries 隔離/deny/signing 皆證實;drift gate 親測 bite;單鏈 byte-unchanged）
 
 ## (0) 動機 + 現況（grounded）
 K1/K2 讓單鏈 kernel 簽 checkpoint 並可被釋出 verifier 驗。Enterprise 走 **PartitionedIngest**(ES2a,每 partition 已有獨立 `signer`/`head`/`length`)——但:
@@ -40,13 +40,14 @@ SLICE-PK1 — (a) `CheckpointRequest` 加 `string partition_id = 1`、`ListEntri
 - Go test:partitioned `Checkpoint(A)` signature 過 A 的 pubkey、**過 B 的 pubkey fail**;`ListEntries(A)` 只回 A entries;空/未知 deny → 在實作前紅(目前 partitioned server 無 Checkpoint/ListEntries)。
 - proto:gen 後 `proto:check` 綠。`verify:go` 綠。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:partitioned Checkpoint/ListEntries test 在實作前紅(Unimplemented/無 partition_id 欄位)。
-- [ ] proto 加 `CheckpointRequest.partition_id`+`ListEntriesRequest.partition_id`;`proto:gen` 重生;`proto:check` 綠。
-- [ ] `PartitionedIngest.Checkpoint(partitionID)` 用該 partition signer 簽 + 回 signature+pubkey;`ListEntries(partitionID)` 該租戶快照;`PartitionAppendServer` route by partition_id,空/未知 fail-closed deny(不洩值)。
-- [ ] Go conformance:A signature 過 A pubkey、**過 B pubkey fail(per-tenant attester 隔離)**、per-tenant ListEntries 隔離、append A 不動 B、空/未知 deny;`verify:go` 綠;`pnpm run verify` exit 0。
-- [ ] **誠實標記**:per-tenant key 由 kernel 行程持有(ES2a 記憶體生)→ attester≠actor 行程邊界;per-tenant key 外部化/HSM/KMS = P4。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:A 用 B key 簽仍過、ListEntries 跨租戶洩、空 partition_id 不 deny)。
+## (6) Definition of Done（實測）
+- [x] RED:reviewer 自證 — 移除 `PartitionAppendServer.Checkpoint` → 落到 `UnimplementedAppendServiceServer` → "method Checkpoint not implemented"(pre-impl 失敗態);test 為新檔。
+- [x] proto 加 `CheckpointRequest.partition_id=1`+`ListEntriesRequest.partition_id=2`;`proto:gen` 重生(Go+TS);`proto:check` go+ts ok(reviewer 親改 ingest.pb.go drift → FAIL,證 gate bite)。
+- [x] `PartitionedIngest.Checkpoint(partitionID)` 用該 partition signer 簽(既有 ES2a)+ 新增 `PublicKey(partitionID)`(該 partition pubkey)+ `ListEntries(partitionID, fromSeq)`(該租戶 store 快照);`PartitionAppendServer` 實作 `Checkpoint`/`ListEntries` route by `partition_id`,空/未知 **fail-closed deny**(靜態 detail 不洩 partition 值)。
+- [x] Go conformance(經 gRPC handler,pubkey 從 **response** 解):A signature 過 A pubkey、**過 B pubkey REJECTED + 反向亦然(per-tenant attester 隔離)**、兩 pubkey distinct、per-tenant ListEntries 隔離(distinct markers + count)、append A 不動 B、空/未知 deny;`verify:go` ok(15 包 -count=1);`verify:cross-tenant` 綠;`pnpm run verify` exit 0。non-vacuity:fixed-pubkey / shared-signer / shared-store / empty-fall-through / Unimplemented 五 mutation 皆翻紅(reviewer 親跑)。
+- [x] **誠實標記**:per-tenant key 由 kernel 行程持有(ES2a 記憶體生)→ **attester==operator at THIS layer**(code 註解明示)→ attester≠actor 行程邊界;per-tenant key 外部化/HSM/KMS = P4(不宣稱 operator 不能偽造)。
+- [x] **back-compat**:單鏈 `checkpoint.go`/`list.go`(K1/K2)**git diff 空**;TS `partitionId:""` 為最小向後相容(proto required 欄位;單鏈送空 → wire 省略),`createSignedChainReader` **未**獲 per-tenant 行為(PK2)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;writer 報告截斷,reviewer 自行完整建立 RED + 5 mutation;8 攻擊面 HELD/N/A)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(proto 欄位 + PartitionedIngest Checkpoint/ListEntries + server 實作 + 重生檔)。單鏈 K1/K2 + ES2a Append 不受影響。

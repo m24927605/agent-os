@@ -2,7 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/x509"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/agent-os/kernel/internal/canonical"
 	"github.com/agent-os/kernel/internal/ingestpb"
 	"github.com/agent-os/kernel/internal/partition"
 )
@@ -68,4 +73,84 @@ func (s *PartitionAppendServer) Append(_ context.Context, req *ingestpb.AppendRe
 	// Known partition: pass through the typed AppendResponse (Receipt on accept, typed AppendError on
 	// intra-tenant malformed/gap/replay).
 	return resp, nil
+}
+
+// Checkpoint produces the SIGNED read-back anchor for ONE tenant: it signs that tenant's chain head
+// with that tenant's OWN Ed25519 key and exposes the signature + that tenant's public key (SPKI/PKIX
+// DER), so each Enterprise tenant can be verified INDEPENDENTLY — a's checkpoint verifies only under
+// a's key (chain.VerifyCheckpoint), and is rejected under b's key (per-tenant attester isolation).
+//
+// FAIL-CLOSED routing (deny-by-default; the partition value is NEVER echoed in the deny detail, so the
+// error text is not a tenant-enumeration oracle):
+//   - empty partition_id   -> InvalidArgument (the partitioned server REQUIRES a tenant; it must NOT
+//                             fall through to a default/first tenant).
+//   - unknown partition_id -> PartitionedIngest returns (·, err); translate to InvalidArgument with a
+//                             STATIC detail (no partition_id value), no default tenant materialized.
+// It returns an ERROR (not a typed AppendError) on deny, matching the single-chain Checkpoint
+// (checkpoint.go) which has no error oneof — a CheckpointResponse is only ever returned on success.
+func (s *PartitionAppendServer) Checkpoint(_ context.Context, req *ingestpb.CheckpointRequest) (*ingestpb.CheckpointResponse, error) {
+	if req.GetPartitionId() == "" {
+		// FAIL-CLOSED: no default/first tenant. Static detail — never echo a partition_id value.
+		return nil, status.Error(codes.InvalidArgument, "partition_id is required")
+	}
+	cp, err := s.pi.Checkpoint(req.GetPartitionId())
+	if err != nil {
+		// Unknown partition (no default tenant materialized). Translate WITHOUT leaking the partition_id
+		// value (no tenant-enumeration oracle) — static detail, same discipline as Append.
+		return nil, status.Error(codes.InvalidArgument, "checkpoint rejected by partition router")
+	}
+	pub, err := s.pi.PublicKey(req.GetPartitionId())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "checkpoint rejected by partition router")
+	}
+	derPub, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		// Cannot expose a usable public key -> fail closed (the signature would be unverifiable).
+		return nil, status.Error(codes.Internal, "marshal partition public key failed")
+	}
+	// Load-bearing fields: head_entry_hash + checkpoint_signature + public_key. (head_sequence /
+	// per_source_next_seq are not exposed by the per-partition Checkpoint and stay zero/empty here.)
+	return &ingestpb.CheckpointResponse{
+		HeadEntryHash:       cp.HeadEntryHash,
+		CheckpointSignature: cp.Signature,
+		PublicKey:           derPub,
+	}, nil
+}
+
+// ListEntries returns ONE tenant's WORM chain read-back (records with chain sequence >= from_sequence),
+// re-deriving canonical_event from each stored (already-redacted) event via the SAME canonical function
+// the chain used to seal it, so a client's EntryHashFromCanonical(canonical_event, prev_hash, sequence)
+// reproduces entry_hash byte-for-byte (mirrors the single-chain list.go). It reads ONLY the routed
+// tenant's store — never another tenant's.
+//
+// FAIL-CLOSED routing (same discipline as Append/Checkpoint; the partition value is never echoed):
+//   - empty partition_id   -> InvalidArgument (no default/first tenant).
+//   - unknown partition_id -> InvalidArgument (no default tenant materialized).
+// FAIL-CLOSED read: a torn/unreadable durable log surfaces as Internal — NEVER a partial slice.
+func (s *PartitionAppendServer) ListEntries(_ context.Context, req *ingestpb.ListEntriesRequest) (*ingestpb.ListEntriesResponse, error) {
+	if req.GetPartitionId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "partition_id is required")
+	}
+	records, err := s.pi.ListEntries(req.GetPartitionId(), req.GetFromSequence())
+	if err != nil {
+		// Unknown partition OR a durable read failure inside the routed tenant. Static detail — never
+		// leak the partition_id value. (Both map to a deny; a client cannot tell them apart.)
+		return nil, status.Error(codes.InvalidArgument, "listentries rejected by partition router")
+	}
+	entries := make([]*ingestpb.Entry, 0, len(records))
+	for _, r := range records {
+		// Re-canonicalize from the stored (already-redacted) event via the SAME function the chain used
+		// to seal it, so canonical_event round-trips to entry_hash. Fail closed if it cannot round-trip.
+		cb, cerr := canonical.CanonicalBytes(r.Event)
+		if cerr != nil {
+			return nil, status.Error(codes.Internal, "stored event is not re-canonicalizable")
+		}
+		entries = append(entries, &ingestpb.Entry{
+			Sequence:       uint64(r.Sequence),
+			CanonicalEvent: cb,
+			PrevHash:       r.PrevHash,
+			EntryHash:      r.EntryHash,
+		})
+	}
+	return &ingestpb.ListEntriesResponse{Entries: entries}, nil
 }

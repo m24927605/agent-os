@@ -242,6 +242,9 @@ export function encodeListEntriesRequest(req: ListEntriesRequest): Buffer {
     writeTag(out, 1, 0);
     writeVarint(out, req.fromSequence);
   }
+  // partition_id (field 2) is the PARTITIONED (Enterprise) tenant selector. This is the single-chain
+  // (Personal) client; it NEVER sends a partition_id, so the field is intentionally omitted — the
+  // single-chain wire stays byte-identical. The Enterprise per-tenant TS reader is PK2.
   return Buffer.from(out);
 }
 
@@ -283,8 +286,10 @@ export function decodeListEntriesResponse(bytes: Buffer): ListEntriesResponse {
 // --- Checkpoint codecs (SLICE-K2: signed read-back; same hand-written proto3 path) ------------------
 
 /**
- * Encode a `CheckpointRequest` — it carries NO fields (the anchor is the kernel's single global chain
- * head), so the wire is always ZERO bytes. Exported for the K2 codec unit test (no kernel needed).
+ * Encode a `CheckpointRequest`. partition_id (field 1) is the PARTITIONED (Enterprise) tenant selector;
+ * this is the single-chain (Personal) client, which NEVER sends a partition_id — the anchor is the
+ * kernel's single global chain head — so the wire is always ZERO bytes (byte-identical to pre-PK1). The
+ * Enterprise per-tenant TS reader is PK2. Exported for the K2 codec unit test (no kernel needed).
  */
 export function encodeCheckpointRequest(_req: CheckpointRequest): Buffer {
   return Buffer.from([]);
