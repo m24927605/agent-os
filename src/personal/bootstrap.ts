@@ -51,6 +51,7 @@ import {
 } from "../policy/index.js";
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { type AdapterResult, FakeSandboxAdapter } from "../runtime/substrate/index.js";
+import { type ToolRegistry, authorizeToolInvoke } from "../tools/index.js";
 import { ApprovalInbox, type DecideOutcome, type SubmitOutcome } from "./approval/index.js";
 import {
   type ClarifyStep,
@@ -95,6 +96,18 @@ export interface PersonalShellOpts {
    * read failure rejects, so `timeline()` rejects rather than returning a partial/empty reconstruction.
    */
   readonly readEntries?: () => Promise<readonly LogEntry[]>;
+  /**
+   * SLICE-DVx — an INJECTABLE, developer-registered tool catalog. When provided, the authorize seam
+   * gains a registry deny-by-default PRE-SCREEN in front of the EXISTING `personal:*` PDP: a
+   * `tool:invoke` whose tool name is NOT in this registry is denied@authorize (deny-by-default), and a
+   * REGISTERED tool is delegated to the SAME `personal:*` PDP as today (`authorizeToolInvoke(req,
+   * toolRegistry, allow)`). The registry can ONLY deny more — it NEVER grants (the PDP remains the sole
+   * grant authority). ABSENT => BYTE-IDENTICAL to today: authorize is `evaluatePolicy(req, allow)`
+   * (the S1 hardcoded path), so the existing bootstrap.e2e stays green unchanged. This is the Personal
+   * half of the three-surface UNIFIED registry-backed admission (Developer already does this; DVx adds
+   * the SAME deny-by-default to Personal + Enterprise behind an optional opt).
+   */
+  readonly toolRegistry?: ToolRegistry;
 }
 
 /** The composed Personal-surface facade a human (or a test) can drive end-to-end. */
@@ -201,7 +214,15 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
     },
     authorize: (tc) => {
       const req = { ...tc.context, action: "tool:invoke", resource: tc.tool } as PolicyRequest;
-      const combined = combineDecisions(evaluatePolicy(req, allow), []);
+      // SLICE-DVx: with an injected registry, the registry deny-by-default runs IN FRONT of the
+      // EXISTING `personal:*` PDP (`authorizeToolInvoke` = deny-by-default pre-screen -> evaluatePolicy);
+      // an UNREGISTERED tool is denied before the PDP. WITHOUT a registry, this is BYTE-IDENTICAL to S1:
+      // `evaluatePolicy(req, allow)`. Either branch is folded through `combineDecisions(_, [])` exactly
+      // as before, so the seam shape (effect/reason) is unchanged.
+      const decision = opts.toolRegistry
+        ? authorizeToolInvoke(req, opts.toolRegistry, allow)
+        : evaluatePolicy(req, allow);
+      const combined = combineDecisions(decision, []);
       return { effect: combined.effect, reason: combined.reason };
     },
     cost,
