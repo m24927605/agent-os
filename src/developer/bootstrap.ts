@@ -70,6 +70,7 @@ import {
   authorizeToolInvoke,
   parseToolManifest,
 } from "../tools/index.js";
+import { type ForensicState, foldForensicState, projectWormToReplayEvents } from "./forensic.js";
 
 /**
  * A ToolBinding — the registry-pinned identity of a registered tool. `ToolRegistry.register` is
@@ -135,6 +136,18 @@ export interface DeveloperKit {
   runTool(toolCall: DeveloperToolCall): Promise<RunToolOutcome>;
   /** Read-only deterministic fold of THIS kit's WORM into a TaskTimeline (forensic replay). */
   replayFold(uptoSequence?: number): TaskTimeline;
+  /**
+   * Read-only, deterministic forensic fold of THIS kit's WORM into the typed `ForensicState` schema
+   * (SLICE-DV3): `{ eventCount, executed, denied, byResource }` over the WORM's AuditEvents. ADDITIVE
+   * over `replayFold` (which keeps returning the generic `TaskTimeline`): an auditor reads the
+   * point-in-time forensic SUMMARY without the engine's `unknown` foldedState.
+   *
+   * POINT-IN-TIME: `forensicState(uptoSeq)` reflects ONLY entries with `sequence <= uptoSeq` — it folds
+   * the SAME `replayTimeline` cut `replayFold` produces (reusing the engine's validated, gap-checked
+   * steps), so the cut semantics + an out-of-range `uptoSequence` (-> `ReplayError`) are IDENTICAL to
+   * `replayFold`. Default (no `uptoSequence`) folds the whole WORM (== as-of-head).
+   */
+  forensicState(uptoSequence?: number): ForensicState;
   /**
    * Export THIS kit's Ed25519 PUBLIC key as an SPKI PEM — the trust-root a developer/auditor hands to
    * the released verifier (`--pubkey`) to verify the kit's signed WORM chain. PUBLIC material ONLY:
@@ -275,11 +288,20 @@ export function createDeveloperKit(opts: DeveloperKitOpts = {}): DeveloperKit {
 
     replayFold: (uptoSequence) => {
       // Project the WORM's LogEntry[] into the ReplayEvent shape replayTimeline consumes
-      // (`{sequence, event}` — replay.ts:30), then fold (read-only, deterministic timelineHash).
-      const events = worm
-        .entries()
-        .map((entry) => ({ sequence: entry.sequence, event: entry.event }));
+      // (`{sequence, event}` — replay.ts:30) via the formalized, fail-closed, sorted DV3 helper
+      // (replacing the prior inline projection), then fold (read-only, deterministic timelineHash).
+      const events = projectWormToReplayEvents(worm.entries());
       return replayTimeline(events, uptoSequence);
+    },
+
+    forensicState: (uptoSequence) => {
+      // Reuse replayTimeline's VALIDATED, point-in-time cut: the engine gap-checks + orders the
+      // projection and trims to `sequence <= uptoSequence` (out-of-range uptoSequence -> ReplayError,
+      // IDENTICAL to replayFold). Then fold ONLY those cut steps into the typed ForensicState — so the
+      // forensic summary is consistent with the timeline replayFold returns at the same cut-point.
+      const events = projectWormToReplayEvents(worm.entries());
+      const timeline = replayTimeline(events, uptoSequence);
+      return foldForensicState(timeline.steps);
     },
 
     verifyEvidenceChain: async (pubkeyPath, env = process.env) => {

@@ -4,7 +4,7 @@
 - **Branch**: slice/dv3-forensic-replay-endpoint
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；純 TS;新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;forensicState/point-in-time/alignment 經 mutation 證實;replay.ts + buildTaskTimeline ZERO-diff;採納 reviewer MINOR〔移除 alignment 測試的 tautology 行〕）
 
 ## (0) 動機 + 現況（grounded）
 DV1 的 `replayFold(uptoSeq?)` 是 thin `replayTimeline`。但 forensic 端點有三個缺口:
@@ -44,15 +44,16 @@ SLICE-DV3 — (a) **鎖定 typed forensic foldedState schema**(取代 `unknown`)
 - projection:malformed LogEntry → fail-closed;依 sequence 排序。
 - 首次 RED:`projectWormToReplayEvents`/`forensicState`/typed schema 不存在 → 型別/import 錯。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:schema/projection/forensicState 在實作前紅。
-- [ ] `pnpm run verify` exit 0(DV1/DV2 + 既有 replay.ts/Personal 不變;forensic 單元綠;depcruise/secret-scan clean)。
-- [ ] **typed forensic foldedState**:`ForensicState` schema 取代 `unknown`;deterministic 純 fold;mutation(漏算 denied / 非 deterministic 排序)→ 測試紅。
-- [ ] **projection helper**:`projectWormToReplayEvents` typed + fail-closed(malformed → reject);DV1 inline 改用之。
-- [ ] **point-in-time**:`replayFold(uptoSeq)` as-of-N steps/state 正確 + 越界 ReplayError;mutation(忽略 uptoSeq / off-by-one)→ 紅。
-- [ ] **對齊 buildTaskTimeline**:同 WORM 的 replayFold steps 與 buildTaskTimeline 一致;mutation(replayFold 漏一步 / 亂序)→ 對齊測試紅。
-- [ ] timelineHash content-addressed 不變(redaction-blind);credential-blind。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:forensicState 漏算、uptoSeq 忽略、對齊偏差)。
+## (6) Definition of Done（實測）
+- [x] RED:`Failed to load ./forensic.js`(ForensicState/foldForensicState/projectWormToReplayEvents/forensicState 不存在)。
+- [x] `pnpm run verify` **exit 0**(916 passed + 18 skipped;forensic 單元〔10〕+ DV3 e2e blocks 綠;**DV1/DV2/Personal/Enterprise + replay.ts 引擎測試不變**;depcruise 135 modules clean〔reviewer 親測 deep-import → not-to-internal exit 1〕;secret-scan clean)。
+- [x] **typed forensic foldedState**:`ForensicState{eventCount, executed〔result success〕, denied〔policyDecision.effect deny OR result denied〕, byResource{lastAction,lastResult last-seen}}`(取代 `unknown`,落 Developer 層 §4-②;replay.ts generic 引擎不動);deterministic 純 fold、fail-closed(非-AuditEvent → throw);reviewer mutation(漏 denied OR-branch ×2 / first-vs-last / silent-skip)皆翻紅。
+- [x] **projection helper**:`projectWormToReplayEvents`(typed、sorted ascending、fail-closed malformed → throw);**DV1 replayFold 改用之**(inline .map 移除,bootstrap.ts:293)。
+- [x] **point-in-time**:`forensicState(uptoSeq)` 重用 `replayTimeline` 的 validated cut(as-of-k + 越界/非整數 ReplayError 傳遞,與 replayFold 一致);`replayFold` 仍回 TaskTimeline(DV1 不變,additive);reviewer mutation(忽略 uptoSeq)→ as-of-k + 越界 兩測試紅。
+- [x] **對齊 buildTaskTimeline(核心)**:同 WORM 的 `replayFold().steps` 與 `buildTaskTimeline(同 entries)` 1:1(length、per-index sequence vs buildTaskTimeline 獨立 re-sort、headline 含 action+resource、resource 順序);reviewer mutation(projection .slice(0,-1) / reverse-sort)→ 對齊測試紅;**驅動真實 production 投影**(非 local arrays)。
+- [x] timelineHash content-addressed 不變(replay.ts ZERO-diff → determinism/redaction 繼承非重寫);credential-blind(ForensicState 只 action/resource/result,無 args)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;7 mutation 翻紅;8 攻擊面 HELD/N/A;2 MINOR informational)。
+> **採納 reviewer MINOR**:移除第一個 alignment 測試的 2 行 same-object tautology(`replayEvent.action===builtEvent.action`),保留真 cross-check(buildTaskTimeline 的**獨立** headline 含 replay step 的 action+resource)。e2e 仍 11/11。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(ForensicState + projection + replayFold 升級 + 測試)。DV1/DV2 核心、replay.ts generic 引擎(若選 ②)不受影響。

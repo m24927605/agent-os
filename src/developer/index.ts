@@ -14,3 +14,11 @@ export {
   type ToolBinding,
   type VerifyResult,
 } from "./bootstrap.js";
+// SLICE-DV3: the typed forensic foldedState schema + the formalized WORM->ReplayEvent projection.
+// `DeveloperKit.forensicState` is surfaced via the `DeveloperKit` type above; these are the standalone
+// pure helpers + the public `ForensicState` contract an auditor/consumer addresses directly.
+export {
+  type ForensicState,
+  foldForensicState,
+  projectWormToReplayEvents,
+} from "./forensic.js";
