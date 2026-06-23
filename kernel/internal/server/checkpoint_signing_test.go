@@ -12,6 +12,7 @@ import (
 	"github.com/agent-os/kernel/internal/chain"
 	"github.com/agent-os/kernel/internal/client"
 	"github.com/agent-os/kernel/internal/ingestpb"
+	"github.com/agent-os/kernel/internal/signer"
 	"github.com/agent-os/kernel/internal/store"
 )
 
@@ -28,7 +29,7 @@ func newSignedTestServer(t *testing.T) (*IngestServer, ed25519.PublicKey) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := NewIngestServer(st, &auditSpy{}, WithSigner(priv))
+	srv, err := NewIngestServer(st, &auditSpy{}, WithSigner(signer.NewInProcessSigner(priv)))
 	if err != nil {
 		t.Fatal(err)
 	}

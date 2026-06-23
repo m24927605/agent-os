@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/base64"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,13 +23,16 @@ import (
 // for the infeasible ftruncate-to-N of design §49 correction 1). Empty log => head_entry_hash is the
 // genesis hash, length is 0, and per_source_next_seq is an empty map (fail-safe boundary).
 //
-// SIGNING (K1): under the SAME mutex, it signs CheckpointBytes(head, length) with the kernel's
-// Ed25519 key (chain.SignCheckpoint) and exposes the signature + the kernel's public key (SPKI/PKIX
-// DER) so a third party can verify the operator's ACTUAL chain head with chain.VerifyCheckpoint / the
-// released verifier. The signed bytes are CheckpointBytes(head_entry_hash, length) — the EXACT pair
-// returned — so the verifier reconstructs identical bytes. FAIL-CLOSED: with no signer configured it
-// returns an error and NEVER an unsigned checkpoint. The control plane (actor) holds no key and cannot
-// reach this path's key — attester != actor holds to the process boundary.
+// SIGNING (K1): it captures the head + length under the mutex, then signs via the CheckpointSigner
+// PORT — msg := chain.CheckpointBytes(head, length); raw, err := signer.Sign(msg); base64(raw) — so
+// the raw private key is NEVER touched here (the server holds only the interface; the key may even be
+// out of this process via CommandSigner). It exposes the signature + the kernel's public key (SPKI/
+// PKIX DER from signer.Public()) so a third party can verify the operator's ACTUAL chain head with
+// chain.VerifyCheckpoint / the released verifier. The signed bytes are CheckpointBytes(head_entry_hash,
+// length) — the EXACT pair returned — so the verifier reconstructs identical bytes. FAIL-CLOSED: with
+// no signer configured, OR if the signer errors (e.g. an out-of-process command failed), it returns an
+// error and NEVER an unsigned/fabricated checkpoint. The control plane (actor) holds no key and cannot
+// reach this path's signer — attester != actor holds to the process boundary.
 func (s *IngestServer) Checkpoint(_ context.Context, _ *ingestpb.CheckpointRequest) (*ingestpb.CheckpointResponse, error) {
 	s.mu.Lock()
 	// Copy the per-source map so the returned snapshot cannot be mutated by a later Append racing on
@@ -46,7 +49,7 @@ func (s *IngestServer) Checkpoint(_ context.Context, _ *ingestpb.CheckpointReque
 
 	// FAIL-CLOSED: never emit an UNSIGNED checkpoint. A misconfigured server (no signer) errors here
 	// rather than silently handing back an empty checkpoint_signature.
-	if len(signer) != ed25519.PrivateKeySize {
+	if signer == nil {
 		return nil, status.Error(codes.FailedPrecondition, "kernel has no signing key configured (fail-closed; refusing to emit an unsigned checkpoint)")
 	}
 	derPub, err := x509.MarshalPKIXPublicKey(signer.Public())
@@ -54,7 +57,13 @@ func (s *IngestServer) Checkpoint(_ context.Context, _ *ingestpb.CheckpointReque
 		// Cannot expose a usable public key -> fail closed (the signature would be unverifiable).
 		return nil, status.Error(codes.Internal, "marshal kernel public key failed")
 	}
-	sig := chain.SignCheckpoint(signer, head, length)
+	// Sign via the PORT over the EXACT bytes the verifier reconstructs. FAIL-CLOSED on any signer
+	// error (e.g. an out-of-process command failed) — never fabricate or emit an unsigned checkpoint.
+	raw, err := signer.Sign(chain.CheckpointBytes(head, length))
+	if err != nil {
+		return nil, status.Error(codes.Internal, "checkpoint signer failed (fail-closed; refusing to emit an unsigned checkpoint)")
+	}
+	sig := base64.StdEncoding.EncodeToString(raw)
 
 	return &ingestpb.CheckpointResponse{
 		HeadEntryHash:       head,

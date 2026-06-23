@@ -7,7 +7,6 @@ package server
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"sync"
 
@@ -16,6 +15,7 @@ import (
 
 	"github.com/agent-os/kernel/internal/chain"
 	"github.com/agent-os/kernel/internal/ingestpb"
+	"github.com/agent-os/kernel/internal/signer"
 	"github.com/agent-os/kernel/internal/store"
 )
 
@@ -34,23 +34,26 @@ type IngestServer struct {
 	head    string            // current chain head entryHash (genesis if empty)
 	headSeq uint64            // source-sequence of the head record (0 if empty log)
 	length  int               // total committed entry COUNT (checkpoint length; distinct from headSeq)
-	// signer is the kernel's Ed25519 private key used to SIGN the chain checkpoint over
-	// CheckpointBytes(head, length). It is held in memory only (runtime-provided via WithSigner); it
-	// is never serialized to source/log/fixture/testdata. HONEST BOUNDARY: the kernel PROCESS holds
-	// this key (operator-held — generated in-memory or loaded from an operator file), so attester !=
-	// actor holds TO THE PROCESS BOUNDARY (the control plane cannot sign). Real key externalization
-	// (HSM/KMS/remote attestation, so the operator also cannot forge) is P4 and is NOT solved here.
-	signer ed25519.PrivateKey
+	// signer is the kernel's CheckpointSigner PORT — it SIGNS the chain checkpoint over
+	// CheckpointBytes(head, length) WITHOUT the server ever holding a raw ed25519.PrivateKey. The field
+	// is an interface, so the kernel PROCESS is structurally unable to hold private key bytes: it can
+	// only call Sign/Public. Provided via WithSigner (runtime-provided; never serialized).
+	// HONEST BOUNDARY: with the InProcessSigner impl the private key still lives in this process
+	// (operator-held), so attester != actor holds TO THE PROCESS BOUNDARY (the control plane cannot
+	// sign). With the CommandSigner impl the private key is OUT of this process. Real
+	// operator-inaccessible externalization (HSM/KMS/remote attestation) is TR2 / deployment.
+	signer signer.CheckpointSigner
 }
 
 // IngestOption configures an IngestServer at construction (functional-option, so adding the signer
 // does not break unrelated callers noisily).
 type IngestOption func(*IngestServer)
 
-// WithSigner installs the kernel's Ed25519 signing key. Checkpoint signing requires a signer; a server
-// built WITHOUT one fails closed at Checkpoint time (it never emits an UNSIGNED checkpoint silently).
-func WithSigner(priv ed25519.PrivateKey) IngestOption {
-	return func(s *IngestServer) { s.signer = priv }
+// WithSigner installs the kernel's CheckpointSigner (in-process OR out-of-process — the server cannot
+// tell, and holds no raw key either way). Checkpoint signing requires a signer; a server built WITHOUT
+// one fails closed at Checkpoint time (it never emits an UNSIGNED checkpoint silently).
+func WithSigner(s signer.CheckpointSigner) IngestOption {
+	return func(srv *IngestServer) { srv.signer = s }
 }
 
 // NewIngestServer wires the durable store + audit sink, rebuilding per-source next-sequence + head +

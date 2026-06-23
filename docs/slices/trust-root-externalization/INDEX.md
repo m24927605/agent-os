@@ -16,7 +16,7 @@
 ## 1. 切片分解
 | Slice | 範圍 | 狀態 |
 |---|---|---|
-| **TR1** | `CheckpointSigner` port(`Sign(msg)→sig`+`Public()`)+ `InProcessSigner`(今日)+ refactor K1/PK1/main 改持 port(raw key 不再是 kernel/server/partition 欄位)+ **out-of-process `CommandSigner`**(kernel 以 `-signer-command` 外部命令簽,key 不進 kernel 行程;in-tree fake 簽章命令證 seam)+ KMS/HSM adapter 契約 + Go conformance(經 port 簽且可驗;kernel 結構性不持 raw key;command signer 的 key 不在 kernel 行程)| DRAFT(先建)|
+| **TR1** | `CheckpointSigner` port(`Sign(msg)→sig`+`Public()`)+ `InProcessSigner`(今日)+ refactor K1/PK1/main 改持 port(raw key 不再是 kernel/server/partition 欄位)+ **out-of-process `CommandSigner`**(kernel 以 `-signer-command` 外部命令簽,key 不進 kernel 行程;in-tree fake 簽章命令證 seam)+ KMS/HSM adapter 契約 + Go conformance(經 port 簽且可驗;kernel 結構性不持 raw key;command signer 的 key 不在 kernel 行程)| ✅ **DONE**(structural no-raw-key + byte-equiv drop-in + fail-closed,4 mutation 證實;wire sig byte-identical;proto/verifier 不變;獨立 Opus4.8 review PASS)|
 | **TR2(部署/後續)** | **真** KMS/HSM/remote-attestation adapter(target 依你的部署:AWS KMS / GCP KMS / HSM / TPM / SGX)——key 真正 operator-inaccessible + live 驗證。**需你的雲端/硬體環境,非純 in-repo** | OPEN(待 target 決定 + 環境)|
 
 ## 2. 待你決定（open decision,影響 TR2,不影響 TR1）

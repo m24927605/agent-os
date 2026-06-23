@@ -10,6 +10,7 @@ import (
 	"github.com/agent-os/kernel/internal/chain"
 	"github.com/agent-os/kernel/internal/ingestpb"
 	"github.com/agent-os/kernel/internal/partition"
+	"github.com/agent-os/kernel/internal/signer"
 	"github.com/agent-os/kernel/internal/store"
 )
 
@@ -52,7 +53,7 @@ func newTestPartitionServer(t *testing.T) (*PartitionAppendServer, *partition.Pa
 			t.Fatalf("genkey %s: %v", id, err)
 		}
 		pubs[id] = pub
-		cfg[id] = partition.PartitionConfig{Store: st, Signer: priv}
+		cfg[id] = partition.PartitionConfig{Store: st, Signer: signer.NewInProcessSigner(priv)}
 	}
 	pi, err := partition.NewPartitionedIngest(cfg)
 	if err != nil {

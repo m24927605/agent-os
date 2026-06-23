@@ -9,6 +9,7 @@ import (
 
 	"github.com/agent-os/kernel/internal/chain"
 	"github.com/agent-os/kernel/internal/ingestpb"
+	"github.com/agent-os/kernel/internal/signer"
 	"github.com/agent-os/kernel/internal/store"
 )
 
@@ -30,7 +31,7 @@ func newTestPartition(t *testing.T) (*PartitionedIngest, map[string]ed25519.Publ
 			t.Fatalf("genkey %s: %v", id, err)
 		}
 		pubs[id] = pub
-		cfg[id] = PartitionConfig{Store: st, Signer: priv}
+		cfg[id] = PartitionConfig{Store: st, Signer: signer.NewInProcessSigner(priv)}
 	}
 	p, err := NewPartitionedIngest(cfg)
 	if err != nil {
@@ -170,7 +171,7 @@ func TestCommitBeforeEffect(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewPartitionedIngest(map[string]PartitionConfig{"a": {Store: st, Signer: priv}})
+	p, err := NewPartitionedIngest(map[string]PartitionConfig{"a": {Store: st, Signer: signer.NewInProcessSigner(priv)}})
 	if err != nil {
 		t.Fatal(err)
 	}
