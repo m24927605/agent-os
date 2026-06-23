@@ -242,9 +242,16 @@ export function encodeListEntriesRequest(req: ListEntriesRequest): Buffer {
     writeTag(out, 1, 0);
     writeVarint(out, req.fromSequence);
   }
-  // partition_id (field 2) is the PARTITIONED (Enterprise) tenant selector. This is the single-chain
-  // (Personal) client; it NEVER sends a partition_id, so the field is intentionally omitted — the
-  // single-chain wire stays byte-identical. The Enterprise per-tenant TS reader is PK2.
+  // partition_id (field 2) is the PARTITIONED (Enterprise) tenant selector.
+  //
+  // PK2 — the field-2 branch (mirrors the ES2b field-4 precedent): PK1's
+  // PartitionAppendServer.ListEntries REQUIRES a non-empty partition_id (empty => InvalidArgument deny).
+  // The single-chain (Personal) client NEVER sets it, so with the SAME `length > 0` proto3-default guard
+  // the field is OMITTED and the single-chain wire stays byte-identical. The Enterprise per-tenant reader
+  // (PK2) sets it, so the partitioned kernel returns ONLY that tenant's entries.
+  if (req.partitionId && req.partitionId.length > 0) {
+    writeLenDelim(out, 2, new TextEncoder().encode(req.partitionId));
+  }
   return Buffer.from(out);
 }
 
@@ -286,13 +293,24 @@ export function decodeListEntriesResponse(bytes: Buffer): ListEntriesResponse {
 // --- Checkpoint codecs (SLICE-K2: signed read-back; same hand-written proto3 path) ------------------
 
 /**
- * Encode a `CheckpointRequest`. partition_id (field 1) is the PARTITIONED (Enterprise) tenant selector;
- * this is the single-chain (Personal) client, which NEVER sends a partition_id — the anchor is the
- * kernel's single global chain head — so the wire is always ZERO bytes (byte-identical to pre-PK1). The
- * Enterprise per-tenant TS reader is PK2. Exported for the K2 codec unit test (no kernel needed).
+ * Encode a `CheckpointRequest`. partition_id (field 1) is the PARTITIONED (Enterprise) tenant selector.
+ *
+ * PK2 — the field-1 branch (mirrors the ES2b field-4 precedent on AppendRequest): PK1's
+ * PartitionAppendServer.Checkpoint REQUIRES a non-empty partition_id (empty => InvalidArgument deny). The
+ * single-chain (Personal) client NEVER sets it — the anchor is the kernel's single global chain head —
+ * so with the SAME `length > 0` proto3-default guard the field is OMITTED and the wire stays ZERO bytes
+ * (byte-identical to pre-PK1). The Enterprise per-tenant reader (PK2) sets it, so the partitioned kernel
+ * routes Checkpoint to that tenant's chain + reports that tenant's signing key. Exported for the wire
+ * unit test (no kernel needed).
  */
-export function encodeCheckpointRequest(_req: CheckpointRequest): Buffer {
-  return Buffer.from([]);
+export function encodeCheckpointRequest(req: CheckpointRequest): Buffer {
+  const out: number[] = [];
+  if (req.partitionId && req.partitionId.length > 0) {
+    // proto field 1 (partition_id), len-delimited UTF-8. Empty => omitted (proto3 default), so the
+    // single-chain Personal CheckpointRequest stays ZERO bytes and the partitioned server denies empty.
+    writeLenDelim(out, 1, new TextEncoder().encode(req.partitionId));
+  }
+  return Buffer.from(out);
 }
 
 /**
