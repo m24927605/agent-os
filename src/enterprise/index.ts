@@ -12,6 +12,7 @@ export type {
   ConsoleResult,
   EnterpriseFleet,
   EnterpriseFleetOpts,
+  LifecycleResult,
   OperatorAction,
   OperatorEvent,
   OperatorResult,
