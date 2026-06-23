@@ -4,7 +4,7 @@
 - **Branch**: slice/dvx-unified-tool-registry-authorize
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；TS only;新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;backward-compat byte-identical / injected deny-by-default / 跨面 unified / 租戶隔離不變 經 mutation 證實;3 impl 檔 additive）
 
 ## (0) 動機 + 現況（grounded）
 三面已共用**治理引擎**(`runGovernedToolCall` screen→authorize→cost→commit-before-effect→effect + WORM + PDP `evaluatePolicy`),但 **authorize 准入合約三套不同**:
@@ -43,15 +43,16 @@ SLICE-DVx — 在 `createPersonalShell` 與 `createEnterpriseFleet` 的 opts 加
 - **跨面統一 e2e**:一份 registry + 一 tool 注入三面 → 已註冊三面 executed、未註冊三面 denied@authorize。
 - 缺省 byte-identical:無 toolRegistry → Personal/Enterprise/Developer 既有 e2e 全綠不變。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:Personal/Enterprise `opts.toolRegistry` + 跨面 e2e 在實作前紅。
-- [ ] `pnpm run verify` exit 0(含 verify:cross-tenant 綠;Personal/Enterprise/Developer **既有 e2e byte-identical 不變**;新 unified e2e 綠;depcruise/secret-scan clean)。
-- [ ] **registry-backed deny-by-default(注入時)**:Personal/Enterprise 注入空/缺工具的 registry → denied@authorize;mutation(注入卻略過 registry / 仍走 wildcard)→ deny 測試紅。
-- [ ] **缺省 byte-identical**:無 toolRegistry → 三面今日行為不變(既有 e2e 綠;mutation〔缺省也走 registry〕→ 既有 e2e 紅)。
-- [ ] **跨面統一**:同一 registry 注入三面 → 已註冊工具三面 executed、未註冊三面 denied@authorize;mutation(某面不套 registry)→ 統一 e2e 紅。
-- [ ] tenant 隔離不變(Enterprise 注入 registry 後 `verify:cross-tenant` 仍綠;registry 為平台級、不破租戶 routing/WORM/per-tenant rule)。
-- [ ] depcruise(無 cycle、Personal/Enterprise 經 tools barrel)、secret-scan clean。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:注入略過 registry、缺省改走 registry、某面不統一)。
+## (6) Definition of Done（實測）
+- [x] RED:Personal/Enterprise `opts.toolRegistry` + 跨面 e2e 前紅(5 failed:注入 registry 被忽略 → unregistered 仍 executed)。
+- [x] `pnpm run verify` **exit 0**(929 passed + 18 skipped;**Personal〔8〕/Enterprise〔cross-tenant 4 + operator 5〕/Developer〔11〕既有 e2e byte-identical 不變**;新 registry-authorize〔Personal 3 + Enterprise 3〕+ unified〔3〕綠;verify:cross-tenant 綠;depcruise 135 modules clean;secret-scan clean)。
+- [x] **registry-backed deny-by-default(注入時)**:Personal/Enterprise 注入空/缺工具 registry → denied@policy(無 effect、無 WORM);reviewer mutation(注入卻 bypass registry / 走 wildcard)→ 各面 deny 測試紅。
+- [x] **缺省 byte-identical**:無 toolRegistry → 條件式取 `evaluatePolicy`(Personal/Enterprise)/ 內建 registry(Developer)= 今日;reviewer mutation(缺省也走 registry,`?? new ToolRegistry()`)→ 既有 e2e 翻紅(空 registry 拒全部)。
+- [x] **跨面統一(核心)**:`unified-governance.e2e` 建**一份** ToolRegistry instance(by-reference)注入三 composition root → 已註冊三面 executed、未註冊三面 denied@policy、partial(只註一面)只該面 executed;reviewer mutation(某面 unwire)→ unified e2e 該面紅。
+- [x] tenant 隔離不變:Enterprise registry **僅在 perTenantDeps authorize**(bootstrap.ts:436)被諮詢;per-tenant `fleet:*` allow/`wormByPartition`/per-tenant inbox/routing **不動**;`operatorAction` 走獨立 `enforceMakerChecker`(registry 不見);`verify:cross-tenant` 綠;Enterprise registry-authorize e2e 再證 per-tenant WORM 隔離 + B 不能核准 A 的 id。
+- [x] depcruise exit 0(reviewer 以 deep-import 注入 → not-to-internal exit 1 實證邊界 bites;Personal/Enterprise 經 `src/tools` barrel);secret-scan clean(deny reason 靜態無值)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;default-also-registry / bypass-registry〔per surface〕/ surface-unwire 五 mutation 翻紅;8 攻擊面 HELD/N/A;WORM/commit-before-effect/PDP git-diff 未觸)。
+> **deviation(reviewer 判定 sound)**:加 `DeveloperKitOpts.toolRegistry?`(缺省 `?? new ToolRegistry()` byte-identical;unified proof 需把**同一** registry 注入三面,Developer 本就 registry-backed,此 opt 只使其可注入)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 opts.toolRegistry + 條件式 authorize + 統一 e2e)。三面缺省路徑不變、可逆。

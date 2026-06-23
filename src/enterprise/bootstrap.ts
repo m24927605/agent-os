@@ -71,6 +71,7 @@ import {
   TenantRouter,
   enforceMakerChecker,
 } from "../tenant/index.js";
+import { type ToolRegistry, authorizeToolInvoke } from "../tools/index.js";
 
 /** Options for the in-memory Enterprise fleet. `tenants` are pre-registered at construction (ES1). */
 export interface EnterpriseFleetOpts {
@@ -110,6 +111,19 @@ export interface EnterpriseFleetOpts {
    * binding, so the resulting sink can only ever write THAT tenant.
    */
   readonly wormSinkFor?: (binding: TenantBinding) => (event: AuditEvent) => Promise<AppendReceipt>;
+  /**
+   * SLICE-DVx — a PLATFORM-WIDE, developer-registered tool catalog shared by EVERY tenant's authorize.
+   * When provided, each tenant's per-tenant authorize gains a registry deny-by-default PRE-SCREEN in
+   * front of the EXISTING per-tenant `fleet:*` PDP: a `tool:invoke` whose tool name is NOT in this
+   * registry is denied@authorize (deny-by-default), and a REGISTERED tool is delegated to the SAME
+   * per-tenant PDP as today (`authorizeToolInvoke(req, toolRegistry, perTenantAllow)`). The registry can
+   * ONLY deny more — it NEVER grants. It is a platform-level admission gate ONLY: it does NOT touch
+   * routing, per-tenant WORM, per-tenant inboxes, or the per-tenant allow rules — TENANT ISOLATION is
+   * unchanged (`verify:cross-tenant` stays green). ABSENT => BYTE-IDENTICAL to ES1/ES3: per-tenant
+   * authorize is `evaluatePolicy(req, allow)` (the existing path), so the ES1 cross-tenant + ES3
+   * operator e2e stay green unchanged.
+   */
+  readonly toolRegistry?: ToolRegistry;
 }
 
 /** A console resolved for a routed tenant, or a deny when the ctx does not route (fail-closed). */
@@ -413,7 +427,16 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
           action: "tool:invoke",
           resource: tc.tool,
         } as PolicyRequest;
-        const combined = combineDecisions(evaluatePolicy(req, allow), []);
+        // SLICE-DVx: with an injected PLATFORM registry, the registry deny-by-default runs IN FRONT of
+        // the EXISTING per-tenant `fleet:*` PDP (`authorizeToolInvoke` = deny-by-default pre-screen ->
+        // evaluatePolicy over THIS tenant's `allow`); an UNREGISTERED tool is denied before the PDP. It
+        // adds ONLY a deny gate — `allow` (per-tenant, tenantId-scoped) is unchanged, so cross-tenant
+        // deny-by-default is preserved. WITHOUT a registry, this is BYTE-IDENTICAL to ES1:
+        // `evaluatePolicy(req, allow)`. Either branch folds through `combineDecisions(_, [])` as before.
+        const decision = opts.toolRegistry
+          ? authorizeToolInvoke(req, opts.toolRegistry, allow)
+          : evaluatePolicy(req, allow);
+        const combined = combineDecisions(decision, []);
         return { effect: combined.effect, reason: combined.reason };
       },
       cost,

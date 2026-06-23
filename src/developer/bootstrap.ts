@@ -120,6 +120,16 @@ export interface DeveloperKitOpts {
    * authored in that namespace passes the PDP. An empty array (`[]`) => every tool denied@policy.
    */
   readonly rules?: readonly AllowRule[];
+  /**
+   * SLICE-DVx — an INJECTABLE shared tool catalog. ABSENT (the default) => the kit builds its OWN
+   * internal `ToolRegistry` exactly as before (byte-identical: `authorTool` registers into it,
+   * `registeredTools()` lists it, the registry-backed authorize deny-by-defaults everything else). When
+   * provided, the kit uses THIS registry as its catalog instead — the same instance can be shared with
+   * `createPersonalShell` / `createEnterpriseFleet` so all three surfaces consult ONE developer-registered
+   * catalog (the three-surface UNIFIED registry-backed admission). Developer already does registry-backed
+   * authorize; this opt only makes the registry an INJECTABLE (shareable) seam.
+   */
+  readonly toolRegistry?: ToolRegistry;
 }
 
 /** The composed Developer-surface facade a developer (or a test) drives end-to-end. */
@@ -187,8 +197,10 @@ export function createDeveloperKit(opts: DeveloperKitOpts = {}): DeveloperKit {
   // ── The kit's WORM the appender writes and replayFold/verifyEvidenceChain read (ed25519, like Personal) ──
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const worm = new InMemoryAppendOnlyLog({ publicKey, privateKey });
-  // The single authoritative source for "which tools exist" (deny-by-default for everything else).
-  const registry = new ToolRegistry();
+  // The single authoritative source for "which tools exist" (deny-by-default for everything else). With
+  // NO `opts.toolRegistry` this is a fresh internal registry (byte-identical to DV1); when injected, the
+  // kit shares the SAME catalog as the other surfaces (SLICE-DVx three-surface unified admission).
+  const registry = opts.toolRegistry ?? new ToolRegistry();
   const fake = new FakeSandboxAdapter();
   const cost: CostGate = new InMemoryCostGate(budget);
 
