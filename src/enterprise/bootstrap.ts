@@ -74,7 +74,11 @@ import {
 
 /** Options for the in-memory Enterprise fleet. `tenants` are pre-registered at construction (ES1). */
 export interface EnterpriseFleetOpts {
-  /** The tenants pre-provisioned into the router + store. Dynamic onboarding is out-of-scope (ES4). */
+  /**
+   * The tenants pre-provisioned into the router + store at construction (the static ES1 path). Dynamic
+   * runtime onboarding/offboarding is now `registerTenant` / `deprovisionTenant` (SLICE-ES4); both the
+   * static loop and the dynamic ops share the SAME `provisionTenant` step (byte-identical provisioning).
+   */
   readonly tenants: readonly string[];
   /** Per-tenant token budget for each tenant's independent InMemoryCostGate. */
   readonly budgetPerTenant?: number;
@@ -110,6 +114,14 @@ export interface EnterpriseFleetOpts {
 
 /** A console resolved for a routed tenant, or a deny when the ctx does not route (fail-closed). */
 export type ConsoleResult = { ok: true; console: TenantConsole } | { ok: false; reason: string };
+
+/**
+ * SLICE-ES4 — the result of a dynamic tenant lifecycle op (`registerTenant` / `deprovisionTenant`).
+ * `ok` => the fleet mutated (a tenant was onboarded / offboarded). `denied` => fail-closed: the op was
+ * REFUSED before any mutation (malformed/empty tenantId, a duplicate register, or an unknown tenant on
+ * deprovision). `reason` is STATIC (an error code) — never an interpolated tenantId (credential-blind).
+ */
+export type LifecycleResult = { status: "ok" } | { status: "denied"; reason: string };
 
 /** A privileged operator action: `kind` names the action, `resource` its target (e.g. `agent:<id>`). */
 export interface OperatorAction {
@@ -164,6 +176,23 @@ export interface EnterpriseFleet {
    * Exposes the per-tenant-independence invariant to the combined-whole test (A's log !== B's log).
    */
   wormLogFor(ctx: unknown): InMemoryAppendOnlyLog | undefined;
+  /**
+   * SLICE-ES4 — onboard a tenant at RUNTIME (dynamic, in-memory). Fail-closed validate FIRST (empty /
+   * whitespace tenantId => denied; already-registered => denied — no mutation), then provision the
+   * tenant's INDEPENDENT deps (binding, WORM log/sink, CostGate, inbox), ADDITIVELY register its
+   * partition in the SAME store, and IMMUTABLY REBUILD the TenantRouter so its no-mutation-API
+   * structural isolation is preserved. `registerTenant` is a fleet-admin op; operator authorization for
+   * it is deferred (P4) — no ctx is taken.
+   */
+  registerTenant(tenantId: string): LifecycleResult;
+  /**
+   * SLICE-ES4 — offboard a tenant at RUNTIME. Fail-closed validate FIRST (not-registered => denied),
+   * then remove the binding and IMMUTABLY REBUILD the router so `route(ctx)` for that tenant now
+   * fail-closed denies (and submit/approve/operatorAction/console with it). The tenant's append-only
+   * WORM log is NOT erased (deprovision revokes routing/action capability, it does NOT delete history;
+   * by design) — it simply becomes unreachable via `route`.
+   */
+  deprovisionTenant(tenantId: string): LifecycleResult;
 }
 
 /** The repo's real secret detector: redaction-changed-anything ⇒ a secret was present (pipeline.e2e:31). */
@@ -191,22 +220,23 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
   // Defaults to never-fault: ES1's path and production behaviour are untouched (ES3 test hook only).
   const failWormAppendFor = opts.failWormAppendFor ?? (() => false);
 
-  // ── ONE router, ONE store, ONE console projection over per-tenant partitions ──
+  // ── ONE store, ONE console projection over per-tenant partitions; the router is REBUILT per
+  //    register/deprovision (ES4) so its no-mutation-API structural isolation is always preserved ──
   // Per tenant: binding{tenantId, partitionId: partition-${tenantId}, storeRef: store-${tenantId}}.
+  // The `bindings` Map is the fleet's mutable registry of who-is-onboarded; the ROUTER is a defensive
+  // immutable snapshot of it (TenantRouter copies on construction). `store` is the SINGLE concrete
+  // InMemoryTenantStore instance for the whole fleet lifetime — register() ADDS a partition IN PLACE
+  // (never rebuilt; rebuilding would lose existing tenants' data). The ConsoleProjection holds THIS
+  // store, so a newly-registered partition is immediately visible through `console(ctx)`.
   const bindings = new Map<string, TenantBinding>();
-  const partitionIds = new Set<string>();
-  for (const tenantId of opts.tenants) {
-    const binding: TenantBinding = {
-      tenantId,
-      partitionId: `partition-${tenantId}`,
-      storeRef: `store-${tenantId}`,
-    };
-    bindings.set(tenantId, binding);
-    partitionIds.add(binding.partitionId);
-  }
-  const router = new TenantRouter(bindings);
-  const store = new InMemoryTenantStore(partitionIds);
+  // The store starts EMPTY; the per-tenant provisioning loop below (and registerTenant) populate it
+  // via store.register — one code path for static AND dynamic onboarding (byte-identical provisioning).
+  const store = new InMemoryTenantStore(new Set<string>());
   const projection = new ConsoleProjection(store);
+  // `router` is a `let`: registerTenant/deprovisionTenant reassign it to a fresh TenantRouter built
+  // from the current `bindings` (IMMUTABLE REBUILD). The facade closures below read THIS `router`
+  // binding, so they always route against the latest snapshot.
+  let router = new TenantRouter(bindings);
 
   // ── PER-TENANT INDEPENDENT INSTANCES (the load-bearing isolation; NOT shared + param) ──
   // One INDEPENDENT WORM log per partition. NEVER one shared log: a shared log would make
@@ -396,14 +426,31 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
     };
   }
 
-  // Provision the per-tenant INDEPENDENT instances. The inbox runner is the SOLE pipeline entry and is
-  // closure-bound to its tenant's binding via perTenantDeps — so approve in tenant-T runs T's pipeline
-  // against T's cost/log only.
-  for (const binding of bindings.values()) {
+  /**
+   * SLICE-ES4 — the REUSABLE per-tenant provisioning step (extracted from the ES1 ctor loop, BEHAVIOUR
+   * BYTE-IDENTICAL). Builds tenant-T's binding{tenantId, partition-${T}, store-${T}}, its INDEPENDENT
+   * WORM log + sink, its INDEPENDENT CostGate, and its INDEPENDENT inbox (the inbox runner is
+   * closure-bound to T's binding via perTenantDeps — the SOLE pipeline entry, T's pipeline over T's
+   * cost/log only). It also ADDITIVELY registers T's partition in the shared store. It registers the
+   * binding into `bindings` but does NOT rebuild the router — the caller (ctor loop / registerTenant)
+   * decides when to snapshot the router (the ctor builds it once after the loop; registerTenant rebuilds
+   * per call). The PER-TENANT INDEPENDENCE here is the load-bearing isolation: never one shared
+   * instance + a tenantId parameter.
+   */
+  function provisionTenant(tenantId: string): TenantBinding {
+    const binding: TenantBinding = {
+      tenantId,
+      partitionId: `partition-${tenantId}`,
+      storeRef: `store-${tenantId}`,
+    };
+    // ADDITIVELY register THIS tenant's partition (fail-closed throw on a duplicate — but callers
+    // validate against `bindings` first, so a duplicate never reaches here on the happy path).
+    store.register(binding.partitionId);
     // A fresh Ed25519 keypair per partition — per-tenant independent signing material (honest
-    // enterprise posture; ES1 generates in-process, real per-tenant key provision is ES4/P4). When the
-    // LIVE partitioned sink is injected, the kernel holds the real signing key per partition; this
-    // in-memory key still backs the default (no-wormSinkFor) byte-identical-to-ES1 path + `wormLogFor`.
+    // enterprise posture; ES1 generates in-process, real per-tenant key provision is ES4/P4 — see the
+    // HONEST SCOPE note: attester == operator). When the LIVE partitioned sink is injected, the kernel
+    // holds the real signing key per partition; this in-memory key still backs the default
+    // (no-wormSinkFor) byte-identical-to-ES1 path + `wormLogFor`.
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const log = new InMemoryAppendOnlyLog({ publicKey, privateKey });
     wormByPartition.set(binding.partitionId, log);
@@ -422,7 +469,18 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         runGovernedToolCall(perTenantDeps(binding), tc),
       ),
     );
+    bindings.set(tenantId, binding);
+    return binding;
   }
+
+  // Provision the per-tenant INDEPENDENT instances for the build-time tenants (ES1 static path). The
+  // router was snapshotted from an EMPTY `bindings` above; re-snapshot it ONCE after the loop so the
+  // pre-registered tenants route. This is byte-identical to the ES1 ctor (one router, built from the
+  // fully-populated bindings) — the cross-tenant + operator e2e stay green unchanged.
+  for (const tenantId of opts.tenants) {
+    provisionTenant(tenantId);
+  }
+  router = new TenantRouter(bindings);
 
   return {
     route: (ctx) => router.resolve(ctx),
@@ -523,6 +581,52 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         return undefined;
       }
       return wormByPartition.get(routed.binding.partitionId);
+    },
+
+    registerTenant: (tenantId) => {
+      // 1. Fail-closed VALIDATE before any mutation. Empty / whitespace tenantId => denied (a blank id
+      //    would also fail parseAgentContext at route time, but reject it up-front, deny-by-default).
+      if (tenantId.trim().length === 0) {
+        return { status: "denied", reason: "invalid tenant id (deny-by-default)" };
+      }
+      // 2. Duplicate => denied, NO mutation: the existing tenant's binding/log/inbox are untouched
+      //    (we never call provisionTenant, so store.register — which would throw and clobber nothing —
+      //    is never even reached, and no instance is overwritten).
+      if (bindings.has(tenantId)) {
+        return { status: "denied", reason: "tenant already registered (deny-by-default)" };
+      }
+      // 3. Provision THIS tenant's INDEPENDENT deps + ADDITIVELY register its partition in the shared
+      //    store (the ConsoleProjection already holds that store, so the new partition is visible), then
+      //    IMMUTABLY REBUILD the router from the now-larger bindings — preserving the no-mutation-API
+      //    structural isolation (TenantRouter defensively copies; there is no add-binding API to abuse).
+      //    RE-REGISTRATION of a previously-deprovisioned id: deprovision revokes routing but, by the
+      //    append-only WORM invariant, NEVER erases the tenant's partition/history — so store.register
+      //    (provisionTenant's first step) throws on the still-present partition. We translate that into a
+      //    clean fail-closed `denied` (a retired id is not re-onboardable in-process; that would risk
+      //    silently reusing the old tenant's WORM/inbox state). store.register throws BEFORE any other
+      //    per-tenant set and before bindings.set/the router rebuild, so the fleet stays consistent.
+      try {
+        provisionTenant(tenantId);
+      } catch {
+        return { status: "denied", reason: "tenant id retired (deny-by-default)" };
+      }
+      router = new TenantRouter(bindings);
+      return { status: "ok" };
+    },
+
+    deprovisionTenant: (tenantId) => {
+      // 1. Fail-closed VALIDATE: a tenant that was never registered cannot be offboarded => denied.
+      if (!bindings.has(tenantId)) {
+        return { status: "denied", reason: "unknown tenant (deny-by-default)" };
+      }
+      // 2. Remove the binding and IMMUTABLY REBUILD the router WITHOUT it — `route(ctx)` for this tenant
+      //    now fail-closed denies (and submit/approve/operatorAction/console with it, all route-first).
+      bindings.delete(tenantId);
+      router = new TenantRouter(bindings);
+      // The tenant's append-only WORM log in `wormByPartition` is INTENTIONALLY NOT erased (deprovision
+      // = revoke routing/action capability, NOT delete history; append-only, by design). Its cost/inbox
+      // entries may also remain (now unreachable, since route denies). We never touch the WORM.
+      return { status: "ok" };
     },
   };
 }

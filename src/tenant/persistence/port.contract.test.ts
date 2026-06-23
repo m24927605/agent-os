@@ -27,6 +27,12 @@ const bindingUnregistered: TenantBinding = {
   partitionId: "partition-z",
   storeRef: "store-z",
 };
+// SLICE-ES4 — a tenant onboarded at runtime via InMemoryTenantStore.register.
+const bindingC: TenantBinding = {
+  tenantId: "tenant-c",
+  partitionId: "partition-c",
+  storeRef: "store-c",
+};
 
 // Factory: builds a store registered for exactly partition-a and partition-b.
 type StoreFactory = () => TenantStore;
@@ -121,3 +127,72 @@ runContract(
   "DelegatingTenantStore",
   () => new DelegatingTenantStore(new Set(["partition-a", "partition-b"])),
 );
+
+/**
+ * SLICE-ES4 — `InMemoryTenantStore.register(partitionId)`: the ADDITIVE, FAIL-CLOSED counterpart of
+ * the ctor's pre-provisioning, used by `EnterpriseFleet.registerTenant` to onboard a tenant at
+ * runtime. It must add a NEW INDEPENDENT empty Map (preserving the per-partition isolation the
+ * contract above proves) and THROW on a partition that already exists (never overwrite an existing
+ * partition's data — the same no-overwrite fail-closed discipline as tools/registry.register).
+ *
+ * register() is on the CONCRETE class, NOT the vendor-neutral `TenantStore` port (so the port stays a
+ * pure read surface). These cases therefore exercise `InMemoryTenantStore` directly.
+ */
+describe("InMemoryTenantStore.register (SLICE-ES4 dynamic onboarding)", () => {
+  it("ADDITIVE: a dynamically-registered partition becomes a working, INDEPENDENT repo", async () => {
+    // Start registered for A only; register C at runtime.
+    const store = new InMemoryTenantStore(new Set([bindingA.partitionId]));
+    store.register(bindingC.partitionId);
+
+    const repoA = store.forTenant(bindingA);
+    const repoC = store.forTenant(bindingC);
+
+    await repoA.put("k", "va");
+    await repoC.put("k", "vc");
+
+    // Per-partition independence holds for the DYNAMICALLY-registered partition exactly as for a
+    // ctor-provisioned one: C's data is invisible to A and vice-versa.
+    expect(await repoA.get("k")).toBe("va");
+    expect(await repoC.get("k")).toBe("vc");
+    await repoC.put("c-only", 1);
+    expect(await repoA.list()).not.toContain("c-only");
+    expect(await repoC.list()).toContain("c-only");
+    expect(await repoA.get("c-only")).toBeUndefined();
+  });
+
+  it("FAIL-CLOSED: registering an ALREADY-REGISTERED partition throws (never overwrites prior data)", async () => {
+    const store = new InMemoryTenantStore(new Set([bindingA.partitionId]));
+    // Seed A's partition with data so we can prove a re-register would clobber it if it overwrote.
+    await store.forTenant(bindingA).put("persisted", "yes");
+
+    expect(() => store.register(bindingA.partitionId)).toThrow();
+
+    // The original partition's data SURVIVES the rejected re-register (no overwrite, no reset).
+    expect(await store.forTenant(bindingA).get("persisted")).toBe("yes");
+  });
+
+  it("FAIL-CLOSED throw never echoes the partition id (no leak into errors/logs)", () => {
+    const store = new InMemoryTenantStore(new Set([bindingA.partitionId]));
+    let message = "";
+    try {
+      store.register(bindingA.partitionId);
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).not.toContain(bindingA.partitionId);
+  });
+
+  it("re-registering does NOT disturb OTHER partitions (isolation preserved across the throw)", async () => {
+    const store = new InMemoryTenantStore(new Set([bindingA.partitionId, bindingB.partitionId]));
+    await store.forTenant(bindingA).put("a", 1);
+    await store.forTenant(bindingB).put("b", 2);
+
+    expect(() => store.register(bindingA.partitionId)).toThrow();
+
+    // B is untouched; A is untouched; and C can still be added afterwards.
+    expect(await store.forTenant(bindingB).get("b")).toBe(2);
+    expect(await store.forTenant(bindingA).get("a")).toBe(1);
+    store.register(bindingC.partitionId);
+    expect(await store.forTenant(bindingC).list()).toEqual([]);
+  });
+});

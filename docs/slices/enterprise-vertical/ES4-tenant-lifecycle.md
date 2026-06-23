@@ -4,7 +4,7 @@
 - **Branch**: slice/es4-tenant-lifecycle
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；TS（fleet 動態 API + InMemoryTenantStore 附加 register）；新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8 + re-register-fix=main-loop/Opus4.8;獨立 Opus4.8 reviewer = PASS;動態註冊隔離 + deprovision fail-closed 經 mutation 證實;verify:cross-tenant 綠;採納 reviewer MINOR〔re-register→clean denied〕）
 
 ## (0) 動機 + 現況（grounded）
 ES1–ES3 的 `createEnterpriseFleet` 在 **ctor 從 `opts.tenants` 靜態預註冊**租戶。真實 fleet 需 runtime onboarding。現況:
@@ -46,15 +46,16 @@ SLICE-ES4 — `EnterpriseFleet` 加 `registerTenant(ctx?, tenantId): LifecycleRe
 - `pnpm run verify:cross-tenant` **仍綠**(動態 API 不破壞三邊界閘)。
 - 首次 RED:`registerTenant`/`deprovisionTenant`/`store.register` 不存在 → 型別/import 錯。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:registerTenant/deprovisionTenant/store.register 在實作前紅。
-- [ ] `pnpm run verify` exit 0(含 `verify:cross-tenant` 綠;ES1/ES2b/ES3 既有 e2e 不變;新動態 e2e 綠)。
-- [ ] **動態註冊後隔離非 vacuous**:動態 register 的 tenant-C 與既有 tenant-A 互不可讀/寫/核准;mutation(register 共用既有 log/inbox/partition 或不 rebuild router)→ 隔離斷言紅。
-- [ ] **deprovision fail-closed**:deprovision 後該租戶 route/submit/approve/operatorAction 皆 deny(mutation:deprovision 不 rebuild router → 仍可 route → 紅);WORM 不抹除。
-- [ ] `InMemoryTenantStore.register` 附加/fail-closed/獨立(重複 → throw);R8 conformance gate 綠;每租戶獨立實例(非共用+參數)。
-- [ ] depcruise/secret-scan clean;credential-blind(deny reason 靜態)。
-- [ ] **誠實標記**:動態 LIVE kernel partition = P4(kernel -partitions 啟動固定);per-tenant key 記憶體生 = attester==operator/P4;deprovision 不刪 WORM(append-only)。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8)。
+## (6) Definition of Done（實測）
+- [x] RED:`fleet.registerTenant is not a function` + `store.register is not a function` + TS2339(12 errors)→ 實作前紅。
+- [x] `pnpm run verify` **exit 0**(874→875 passed〔含 3c re-register〕+ 11 skipped;`verify:cross-tenant: ok`;ES1〔4〕/ES3〔5〕/persistence-contract/conformance/console 既有 e2e **不變**綠;static ctor path byte-identical)。
+- [x] **動態註冊後隔離非 vacuous**:動態 register 的 tenant-C 與 tenant-A 互不可讀/寫/核准(組合後 matrix);reviewer mutation:① register 共用既有 log/inbox → 隔離紅;② register 不 rebuild router → register-happy 紅;③ deprovision 不 rebuild router → deprovision-deny 紅。
+- [x] **deprovision fail-closed**:deprovision 後該租戶 route/submit/approve/operatorAction/console 皆 deny;未註冊 deprovision → denied;**WORM 既有事件仍可讀**(append-only 不抹除,測試持 instance 證 entries 不變 + suspend-agent event 仍在)。
+- [x] `InMemoryTenantStore.register` 附加/fail-closed(重複 → throw `REASON_DUPLICATE_PARTITION` 靜態不洩值)/獨立 Map;**port 未加寬**(fleet 持 concrete class);R8 conformance/contract gate 綠;每租戶獨立實例(provisionTenant fresh key/log/CostGate/inbox)。
+- [x] depcruise exit 0(129 modules);secret-scan clean;credential-blind(register/deprovision deny reason 靜態)。
+- [x] **誠實標記**:動態 LIVE kernel partition = P4(kernel -partitions 啟動固定);per-tenant key 記憶體生 = attester==operator/P4;deprovision 不刪 WORM(append-only)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;3 隔離 mutation 翻紅;8 攻擊面 HELD/N/A;static ctor byte-identical)。
+> **採納 reviewer MINOR(edge case)**:`register→deprovision→re-register 同 id` 原本拋未捕例外(store.register 撞仍存在的 partition,append-only 不抹除)。修:registerTenant `try{provisionTenant}catch{→denied "tenant id retired"}`——退役 id 不可在進程內重新 onboard(避免靜默重用舊 WORM/inbox),clean fail-closed denied 而非 throw。新增測試 (3c) 證實 + 狀態一致(retired id 不可 route、A 不受影響)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(移除 registerTenant/deprovisionTenant + store.register)。靜態 ctor 預註冊路徑不變、可逆。
