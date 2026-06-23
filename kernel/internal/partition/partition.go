@@ -16,6 +16,7 @@ package partition
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,21 +24,25 @@ import (
 
 	"github.com/agent-os/kernel/internal/chain"
 	"github.com/agent-os/kernel/internal/ingestpb"
+	"github.com/agent-os/kernel/internal/signer"
 	"github.com/agent-os/kernel/internal/store"
 )
 
-// PartitionConfig is the per-tenant durable store + Ed25519 signing key. The private key is held in
-// memory only (runtime-provided); it is never serialized to source/log/fixture/testdata.
+// PartitionConfig is the per-tenant durable store + CheckpointSigner PORT. The Signer is an interface,
+// so a partition is structurally unable to hold a raw ed25519.PrivateKey field: the private key is
+// either in-process behind an InProcessSigner (operator-held) or out of process behind a CommandSigner
+// — never a private-key field here, and never serialized to source/log/fixture/testdata.
 type PartitionConfig struct {
 	Store  *store.Store
-	Signer ed25519.PrivateKey
+	Signer signer.CheckpointSigner
 }
 
 // partitionState is one tenant's independent chain state: its own head, its own per-source expected
-// next sequence, its own durable store, its own signer, and its own entry count (checkpoint length).
+// next sequence, its own durable store, its own signer PORT, and its own entry count (checkpoint
+// length). The signer is an interface — no raw private key is held per tenant.
 type partitionState struct {
 	store  *store.Store
-	signer ed25519.PrivateKey
+	signer signer.CheckpointSigner
 	next   map[string]uint64 // expected next sequence per source within THIS tenant (0 if unseen)
 	head   string            // this tenant's chain head entryHash (genesis if empty)
 	length int               // number of committed entries in this tenant's chain (checkpoint length)
@@ -62,8 +67,8 @@ func NewPartitionedIngest(parts map[string]PartitionConfig) (*PartitionedIngest,
 		if cfg.Store == nil {
 			return nil, fmt.Errorf("partition %q: store is required", id)
 		}
-		if len(cfg.Signer) != ed25519.PrivateKeySize {
-			return nil, fmt.Errorf("partition %q: a valid Ed25519 signer is required", id)
+		if cfg.Signer == nil {
+			return nil, fmt.Errorf("partition %q: a CheckpointSigner is required", id)
 		}
 		records, head, err := cfg.Store.Load()
 		if err != nil {
@@ -138,10 +143,13 @@ func (p *PartitionedIngest) Append(partitionID string, req *ingestpb.AppendReque
 	}}}, nil
 }
 
-// Checkpoint signs THIS tenant's current head (over CheckpointBytes(head, length)) with THIS tenant's
-// Ed25519 key. An unknown partitionId fails closed (no default tenant). A checkpoint produced here
-// verifies only under the SAME tenant's public key — verifying it under another tenant's key returns
-// false (chain.VerifyCheckpoint), which is the cross-tenant unforgeability invariant.
+// Checkpoint signs THIS tenant's current head (over CheckpointBytes(head, length)) via THIS tenant's
+// CheckpointSigner PORT — base64(signer.Sign(CheckpointBytes(head, length))) — so no raw private key is
+// touched here. An unknown partitionId fails closed (no default tenant). FAIL-CLOSED: if the tenant's
+// signer errors (e.g. an out-of-process command failed) it returns an error and NEVER a fabricated /
+// unsigned checkpoint. A checkpoint produced here verifies only under the SAME tenant's public key —
+// verifying it under another tenant's key returns false (chain.VerifyCheckpoint), which is the
+// cross-tenant unforgeability invariant.
 func (p *PartitionedIngest) Checkpoint(partitionID string) (chain.Checkpoint, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -154,10 +162,16 @@ func (p *PartitionedIngest) Checkpoint(partitionID string) (chain.Checkpoint, er
 	if head == "" {
 		head = chain.GenesisPrevHash
 	}
+	raw, err := st.signer.Sign(chain.CheckpointBytes(head, st.length))
+	if err != nil {
+		// FAIL-CLOSED: a signer failure (e.g. out-of-process command failed) must not yield an
+		// unsigned/fabricated checkpoint.
+		return chain.Checkpoint{}, fmt.Errorf("partition %q: checkpoint signer failed (fail-closed): %w", partitionID, err)
+	}
 	return chain.Checkpoint{
 		Length:        st.length,
 		HeadEntryHash: head,
-		Signature:     chain.SignCheckpoint(st.signer, head, st.length),
+		Signature:     base64.StdEncoding.EncodeToString(raw),
 	}, nil
 }
 
@@ -165,7 +179,8 @@ func (p *PartitionedIngest) Checkpoint(partitionID string) (chain.Checkpoint, er
 // expose the verifying key alongside the Checkpoint signature — letting each tenant be verified
 // INDEPENDENTLY (a's signature verifies only under a's key; under b's key it returns false). An
 // unknown partitionId fails closed (no default tenant; mirrors Append/Checkpoint). The PRIVATE key is
-// never returned — only the public half, which is safe to publish to a release verifier.
+// never accessible through the CheckpointSigner port — only the public half, which is safe to publish
+// to a release verifier.
 func (p *PartitionedIngest) PublicKey(partitionID string) (ed25519.PublicKey, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -174,11 +189,11 @@ func (p *PartitionedIngest) PublicKey(partitionID string) (ed25519.PublicKey, er
 	if !ok {
 		return nil, fmt.Errorf("partition %q: unknown partition (deny-by-default)", partitionID)
 	}
-	pub, ok := st.signer.Public().(ed25519.PublicKey)
-	if !ok {
-		// signer is constructed as an ed25519.PrivateKey in NewPartitionedIngest; this never happens,
-		// but fail-closed rather than hand back a key that cannot verify the signature.
-		return nil, fmt.Errorf("partition %q: signer public key is not Ed25519", partitionID)
+	pub := st.signer.Public()
+	if len(pub) != ed25519.PublicKeySize {
+		// The signer must expose a valid Ed25519 public key; fail-closed rather than hand back a key
+		// that cannot verify the signature.
+		return nil, fmt.Errorf("partition %q: signer public key is not a valid Ed25519 key", partitionID)
 	}
 	return pub, nil
 }

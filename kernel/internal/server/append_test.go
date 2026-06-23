@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/agent-os/kernel/internal/ingestpb"
+	"github.com/agent-os/kernel/internal/signer"
 	"github.com/agent-os/kernel/internal/store"
 )
 
@@ -37,7 +38,7 @@ func newTestServer(t *testing.T) (*IngestServer, *auditSpy) {
 		t.Fatal(err)
 	}
 	spy := &auditSpy{}
-	srv, err := NewIngestServer(st, spy, WithSigner(priv))
+	srv, err := NewIngestServer(st, spy, WithSigner(signer.NewInProcessSigner(priv)))
 	if err != nil {
 		t.Fatal(err)
 	}
