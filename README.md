@@ -1,47 +1,167 @@
 # Agent OS
 
-**An operating system for untrusted, autonomous AI agents.** Agent OS hosts existing third-party agents (Claude Code, OpenClaw, Codex, …) — it does **not** build its own agent — and lets *any* autonomous agent do real work (processes, files, network, credentials, inference) under deny-by-default policy, with every privileged action auditable, approvable, and credential-safe.
+> **A computer that operates itself by intent.** You say what you want — the whole machine does it.
 
-It is **API/SDK-first** (CLI/UI are secondary consumers of the same API) and is built as a **layer above [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell)** (integration strategy B — we do not fork OpenShell). Two deployment modes: a local-first **Personal Agent Workstation** and a multi-tenant **Enterprise Agent Runtime Platform**.
+![TypeScript](https://img.shields.io/badge/core-TypeScript-3178c6)
+![Go](https://img.shields.io/badge/evidence%20kernel-Go-00add8)
+![Python](https://img.shields.io/badge/agent%20shim-Python-3776ab)
+![verify](https://img.shields.io/badge/gate-pnpm%20run%20verify%20(13--leg)-2ea44f)
+![evidence](https://img.shields.io/badge/evidence-attester%E2%89%A0actor%20WORM-6f42c1)
 
-Core principles: deny-by-default for every capability, credentials never persisted to the sandbox/logs/artifacts, and every privileged action is auditable.
+Agent OS is an **operating system for the agent era**. You type (and eventually speak) plain-language
+intent; a swappable **brain** drives a **real computer** to do the work — turning intent into a clarified
+plan, an approval, real effects, and a timeline you can read back. The skill of "using a computer" is
+meant to dissolve into "telling a computer what you want."
 
-## Status
+- **Brain** — the agent that proposes the work (default **Hermes**, swappable via the Brain Port).
+- **Body** — **NVIDIA OpenShell**: a real sandboxed computer the brain operates.
+- **Spine** — `agent-os`: one small ordered orchestration pipeline + vendor-neutral contracts that route
+  every proposed action to a real effect, across three co-equal surfaces.
+- **Seatbelt** — a fail-closed safety subsystem (deny-by-default, credential-blind, commit-before-effect,
+  and an **independently-verifiable** evidence chain) that makes it *safe* to let an autonomous agent run
+  your computer — or your company. It is load-bearing support, never the headline.
 
-Early scaffold. The first slice is the security core of the product/orchestration layer:
+> **Status:** the **spine + the three surfaces + the seatbelt** are built and pass a 13-leg `verify`
+> gate (~851 tests); the real-vendor wires (OpenShell / NemoClaw / SpendGuard / Hermes / the Go kernel)
+> are proven by **opt-in, infra-gated** live e2e scripts. The full "say anything, the whole computer does
+> it" experience is the **north star**; what ships today is the governed spine + surfaces + verifiable
+> evidence. See [Status](#status-honest).
 
-- `src/iam` — branded identity primitives + the `AgentContext` aggregate (the OCSF AgentContext mapping start; fail-closed, and the single source of identity for every `AuditEvent`).
-- `src/policy` — `PolicyRequest` / `PolicyDecision` and a **deny-by-default, fail-closed** PDP-seed evaluator (explicit allow + deny rules with **deny-precedence**; a matching deny always wins).
-- `src/audit` — a complete, schema-validated `AuditEvent` (identity drawn from `AgentContext`), **redaction-safe** serialization (by-key **and** by-value secret scrubbing, applied before hashing), and deterministic **canonical serialization + `sha256:` content-addressing** (the verifier-reproducible, chain-ready path for the evidence kernel; the `sha256:` prefix is versioned so P1 can move to `blake3:`).
-- `src/audit/kernel` — evidence-kernel **v0 contract**: an append-only, hash-chained, Ed25519-checkpointed `AppendOnlyLog` + a standalone `verifyChain` (tamper / reorder / gap / bad-signature → `broken`). In-memory reference only; the durable, process-isolated Go Tessera kernel is P1.
-- Dev gate `pnpm run verify` includes `deps:check` (dependency-cruiser) enforcing low coupling / high cohesion.
+---
 
-The OpenShell runtime adapter (CLI/SDK/gRPC) lands in a later task under `src/runtime/openshell`.
+## How it works
 
-## Develop
-
-```bash
-pnpm install
-pnpm run verify   # typecheck + lint + build + test + deps:check + verify:go + verify:py + secret-scan
-pnpm test         # unit tests only
+```
+            you (intent)                          you / auditor (verify)
+                 │                                          ▲
+                 ▼                                          │  spawn the released
+        ┌──────────────────┐   proposes   ┌─────────────────┴───────────┐  verifier (offline,
+        │  BRAIN (Hermes,   │ ───────────► │  SPINE — agent-os            │  process-isolated)
+        │  swappable)       │  tool calls  │  runGovernedToolCall:        │
+        └──────────────────┘              │   screen ▸ authorize ▸ cost  │
+                                          │   ▸ commit-before-effect ▸   │
+        ┌──────────────────┐   effects    │   effect                     │
+        │  BODY — OpenShell │ ◄─────────── │                              │
+        │  (real sandbox)   │              └──────────────┬───────────────┘
+        └──────────────────┘                              │ append (await receipt)
+                                                          ▼
+                                          ┌──────────────────────────────┐
+              SEATBELT wraps it all  ───► │  WORM evidence kernel (Go,    │
+              deny-by-default · credential│  separate process, Ed25519,   │
+              -blind · commit-before-     │  hash-chained, per-tenant)    │
+              effect · attester ≠ actor   └──────────────────────────────┘
 ```
 
-`verify` is a **polyglot cascade**: `verify:go` / `verify:py` are fail-closed — they skip cleanly
-when that language plane is absent, but FAIL if a plane is present with its gate unconfigured (so a
-plane cannot silently bypass the gate). The **Go plane (`kernel/`) now exists**, so `verify:go` is
-**enforcing** (`go vet` + `go test` + `golangci-lint`/depguard); `verify:py` still skips (no Python
-plane yet). `deps:check` (dependency-cruiser) enforces low coupling / high cohesion.
+The **spine** is one ~55-line fail-closed pipeline (`src/orchestration/pipeline.ts`): a brain-proposed
+tool call becomes a real effect only after `screen` (credential-blind) → `authorize` (deny-by-default
+PDP) → `cost.reserve` (budget hard-cap) → **commit-before-effect** (append the audit record and *await
+the receipt*) → `effect` → `cost.commit`. The effect runs **only** after every gate passes **and** the
+evidence is durably recorded. Five collaborators are injected as **vendor-neutral ports**, so the spine
+names no vendor and reaches no module's internals — enforced by the build, not by etiquette.
 
-> Go toolchain note: this dev env has a gvm/brew `GOROOT` mismatch (PATH `go` is 1.22.4 but `GOROOT`
-> points at a 1.24.3 stdlib). `verify:go` runs `scripts/verify-go.sh` under `env -u GOROOT CGO_ENABLED=0`
-> so Go uses its own bundled stdlib and the internal linker (macOS `crypto/x509` cgo otherwise emits a
-> binary without `LC_UUID` that dyld rejects); `golangci-lint` v1.60.3 is a prebuilt binary on PATH.
+## Three surfaces, one core
 
-A `pre-commit` guard runs `pnpm run verify` and blocks commits that don't pass
-(`git config core.hooksPath .githooks`). Never skip it.
+| Surface | What you get |
+|---|---|
+| **Personal** | A computer that operates itself by intent: type intent → the brain clarifies → renders a plain-language plan → **you approve** (the "sudo" step) → the governed pipeline runs it → a plain-language **timeline** reads the evidence back. |
+| **Enterprise** | *One person runs the company.* Gateway-per-tenant fleet with **per-tenant independent** log / budget / approval instances (cross-tenant read/write/approve is structurally impossible), operator **maker-checker**, and runtime tenant onboarding/offboarding. |
+| **Developer** | The surface that exposes **independent verifiability**: author a tool (registry-backed, deny-by-default), run it through the same governed pipeline, replay the evidence as a deterministic fold, and **verify the chain yourself** with a separately-released binary. |
 
-## Docs
+All three are runnable composition roots over the **same** spine, and (via DVx) share **one**
+registry-backed deny-by-default authorize contract.
 
-- [docs/dev-loops.md](./docs/dev-loops.md) — the Looping Engineering process we develop with.
-- [docs/research/](./docs/research/) — OpenShell foundation analysis, loop research, and the
-  [integration-strategy decision record](./docs/research/decision-integration-strategy.md).
+## What makes it different
+
+- **The spine is a pipeline, not a framework** — ~55 lines, fail-closed, every collaborator injected.
+- **Capability × experience is real code** — the Personal loop (intent → clarify → plan → approve →
+  govern → effect → timeline) is wired end-to-end, not a slogan.
+- **Independent verifiability — "reading ≠ attesting"** — the SDK and CLI **spawn a separately-released,
+  checksum-verified verifier across a process boundary** and relay its verdict; the chain hash is *never*
+  recomputed in the app. A third party verifies what the operator actually did **without trusting the
+  operator** — proven live against a real cross-language chain, and per-tenant.
+- **No vendor in the core, enforced by the build** — `dependency-cruiser` errors on any vendor token
+  (`hermes|nemoclaw|openshell|agt|spendguard`) outside its adapter; Go `depguard` + Python `import-linter`
+  extend it. The OS identity can't quietly collapse into a vendor.
+- **A real separate-process Go WORM kernel** — append-only, hash-chained, Ed25519-checkpointed, per-tenant
+  partitions, fsync + torn-tail rejection, an offline verifier (incl. WASM) that does **not** import the
+  producer, and a conformance suite proving Go matches the TS reference **byte-for-byte**.
+- **Proof is visible, not asserted** — `pnpm run verify` is a 13-leg polyglot cascade; the exit code is
+  the only accepted proof of "works." Every change landed doc-first → failing test → green gate →
+  independent adversarial review → merge.
+
+## Integrations
+
+Agent OS is a **layer above** existing vendors (no forks) — they plug into vendor-neutral ports; the core
+stays vendor-free.
+
+| Integration | Role | Status |
+|---|---|---|
+| **OpenShell** (NVIDIA) | **Body** — the real-computer sandbox (default `ExecutionSubstrate`) | **Live, infra-gated** — real mTLS gRPC gateway, 6 pinned RPCs (`e2e:live-kernel`, `e2e:live-nemoclaw`). The most mature wire. |
+| **Hermes** (NVIDIA) | **Brain** — the agent that proposes work (default, via the Brain Port) | In-repo `HermesBrainShim` (LLM turns via an injected seam; the live model SDK is not wired) + a gated **adopt** path (`e2e:live-hermes`). |
+| **NemoClaw** (NVIDIA) | **Hosting** — launches/probes/reconciles the brain inside the sandbox | Live, infra-gated (`e2e:live-nemoclaw`). Documented as single-operator — its *lack* of tenant isolation is exactly what the Enterprise surface adds. |
+| **[agentic-spendguard](https://github.com/m24927605/agentic-spendguard)** (SpendGuard) | **Cost gate** — reserve-before-effect budget hard-cap (default `CostGate`) | Live, infra-gated (`e2e:live-spendguard`: real sidecar + Rust ledger + Postgres). |
+| **Microsoft Agent Governance Toolkit** (AGT) | **Advisory policy** input | In-repo adapter (`src/policy/adapters/agt`) + tests, **demoted to advisory** — our deny-by-default PDP stays the sole grant authority; the live AGT engine is an injected seam (not bundled, not wired live). |
+
+## Quickstart
+
+```bash
+# Node >= 22, pnpm 9.15.4
+pnpm install
+
+# The gate — the only accepted proof of "works" (13-leg polyglot cascade:
+# typecheck · lint · build · test · deps:check · 3× proto:check · verify:go · verify:py
+# · verify:cross-tenant · launcher:check · secret-scan)
+pnpm run verify
+
+# Unit + contract tests only (~851 cases) — what a bare checkout shows green
+pnpm test
+```
+
+**Try the live wires** (opt-in, infra-gated, self-cleaning — each *blocks cleanly* if its infra is absent):
+
+```bash
+pnpm run e2e:live-kernel            # TS → real Go WORM kernel round-trip + offline verifier
+pnpm run e2e:live-nemoclaw          # host a gateway in a real OpenShell sandbox (the body, mTLS gateway)
+pnpm run e2e:live-hermes            # adopt a real Hermes sandbox → status → reconcile (the brain)
+pnpm run e2e:live-spendguard        # real SpendGuard sidecar + Rust ledger + Postgres (the cost gate)
+pnpm run e2e:live-enterprise        # per-tenant WORM partitions vs the real kernel
+pnpm run e2e:live-developer         # the released verifier verifies a kit-signed chain
+pnpm run e2e:live-partition-verify  # each tenant independently verifies ITS OWN chain
+pnpm run e2e:live-kernel-verify     # the released verifier verifies the REAL kernel chain
+```
+
+**Verify an evidence chain as an auditor would** — build the released, checksum-pinned verifier and
+check a chain with only the chain bytes + the signer's public key (you don't have to trust the operator):
+
+```bash
+pnpm run verifier:release           # builds the standalone + WASM verifier, with SHA-256SUMS
+# then: <verifier> --chain <chain.json> --pubkey <key>  → exit 0 = intact, 1 = broken
+```
+
+## Status (honest)
+
+- **Built & proven hermetically.** All three surfaces are runnable composition roots; the spine, the 5
+  vendor-neutral ports (each with ≥2 implementations + a contract test), the 3 monopolies (deny-by-default
+  PDP / credential-blind secret model / Go WORM kernel), the offline verifier, and the
+  no-vendor-in-core + cross-tenant gates all pass `pnpm run verify` (~851 tests). 305+ commits.
+- **Live, but infra-gated.** The opt-in `e2e:live-*` scripts prove the real wires (OpenShell, NemoClaw,
+  SpendGuard, Hermes-adopt, the Go kernel + offline verifier + per-tenant isolation). They live *outside*
+  `verify`, self-clean, and exit cleanly when the infra is absent; reproducing them needs your infra.
+- **Default runtime is in-memory.** The composition roots default to in-memory log / cost / sandbox fakes,
+  so everything runs without external services; the live adapters are injected when you point at real infra.
+- **North star vs today.** "Say anything, the whole computer does it" is the vision. What ships is the
+  governed spine + the three surfaces + verifiable evidence. Honest gaps are tracked in `docs/slices/`
+  (e.g. real STT vendor; the live Hermes model SDK; **operator-unforgeable trust-root** — the kernel
+  process no longer holds the signing key, but a hardware/KMS root that even the operator can't forge is a
+  deployment step, not yet wired).
+
+## Built with Looping Engineering
+
+Every slice: **doc-first** → a **failing test** seen to fail → `pnpm run verify` green → an **independent,
+fresh-context adversarial code review** → `--no-ff` merge. Only command output counts as proof. A
+pre-commit guard runs the full gate and is never bypassed. See [`AGENTS.md`](./AGENTS.md) (the binding
+operating contract) and [`docs/`](./docs/).
+
+## License
+
+Not yet licensed — all rights reserved (a `LICENSE` will be added). Open an issue before relying on it.
