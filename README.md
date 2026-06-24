@@ -97,7 +97,7 @@ stays vendor-free.
 | Integration | Role | Status |
 |---|---|---|
 | **OpenShell** (NVIDIA) | **Body** — the real-computer sandbox (default `ExecutionSubstrate`) | **Live, infra-gated** — real mTLS gRPC gateway, 6 pinned RPCs (`e2e:live-kernel`, `e2e:live-nemoclaw`). The most mature wire. |
-| **Hermes** ([Nous Research](https://hermes-agent.nousresearch.com/)) | **Brain** — the agent that proposes work (default, via the Brain Port) | **Live (desktop ACP) — verified.** A locally-run desktop Hermes drives Agent OS over ACP (`hermes acp`, JSON-RPC/stdio): `e2e:live-desktop-hermes` is GREEN against the real agent — intent → proposal → governance, **propose-only** (Hermes never self-executes) + **credential-blind** (its key never leaves `~/.hermes`). Also: an in-repo `HermesBrainShim` + a NemoClaw-sandbox **adopt** path (`e2e:live-hermes`). |
+| **Hermes** ([Nous Research](https://hermes-agent.nousresearch.com/)) | **Brain** — the agent that proposes work (default, via the Brain Port) | **Live (desktop ACP) — verified, incl. the multi-turn closed loop.** A locally-run desktop Hermes drives Agent OS over ACP (`hermes acp`, JSON-RPC/stdio): `e2e:live-desktop-hermes` is GREEN against the real agent — intent → proposal → governance → **the governed result is fed back over the same ACP session and Hermes continues** (multi-turn closed loop, live-verified), **propose-only** (Hermes never self-executes) + **credential-blind** (its key never leaves `~/.hermes`). Also: an in-repo `HermesBrainShim` + a NemoClaw-sandbox **adopt** path (`e2e:live-hermes`). |
 | **NemoClaw** (NVIDIA) | **Hosting** — launches/probes/reconciles the brain inside the sandbox | Live, infra-gated (`e2e:live-nemoclaw`). Documented as single-operator — its *lack* of tenant isolation is exactly what the Enterprise surface adds. |
 | **[agentic-spendguard](https://github.com/m24927605/agentic-spendguard)** (SpendGuard) | **Cost gate** — reserve-before-effect budget hard-cap (default `CostGate`) | Live, infra-gated (`e2e:live-spendguard`: real sidecar + Rust ledger + Postgres). |
 | **Microsoft Agent Governance Toolkit** (AGT) | **Advisory policy** input | In-repo adapter (`src/policy/adapters/agt`) + tests, **demoted to advisory** — our deny-by-default PDP stays the sole grant authority; the live AGT engine is an injected seam (not bundled, not wired live). |
@@ -153,8 +153,9 @@ pnpm run verifier:release           # builds the standalone + WASM verifier, wit
   so everything runs without external services; the live adapters are injected when you point at real infra.
 - **North star vs today.** "Say anything, the whole computer does it" is the vision. What ships is the
   governed spine + the three surfaces + verifiable evidence. Honest gaps are tracked in `docs/slices/`
-  (e.g. real STT vendor; the **closed Hermes agentic loop** — the live ACP drive is governed *propose-only* today, so
-  feeding a governed effect's result back to the desktop Hermes for a multi-turn task is not yet wired; **operator-unforgeable trust-root** — the kernel
+  (e.g. real STT vendor; a **substrate exec primitive** — the desktop-Hermes closed loop is live-verified, but the
+  governed effect's result is a canned stub today because the ExecutionSubstrate port has no run/exec method yet, so
+  real command output can't be fed back to Hermes until that lands; **operator-unforgeable trust-root** — the kernel
   process no longer holds the signing key, but a hardware/KMS root that even the operator can't forge is a
   deployment step, not yet wired).
 

@@ -48,7 +48,7 @@ SLICE-DHB3 = **對話式結果回饋,雙工 ACP session**(留 result-serializati
 - [x] **6 不變量 HELD**:propose-only **每輪**(duplex `session/request_permission`→cancelled 逐字同 one-shot,reviewer 證第 2 輪仍 deny)/ deny-不執行且回報 "DENIED" / **credential-blind 回饋(redactSecrets 才出,無 raw-args echo)** / brain-untrusted / commit-before-effect 不改(abort→deny 非假結果)/ fail-closed + **maxTurns=12 cap(Infinity→hang 證 load-bearing)**。
 - [x] **duplex fail-closed committed tests(採納 reviewer MINOR)**:malformed/nonzero/EOF→`nextTurn` reject、spawn-fail→`openSession` reject、early-stop teardown 無 hang/orphan + feed-after-close reject(各帶 non-vacuity mutation);+ 硬化:child exit 在 handshake pending 時即 reject(test d 10s→77ms)。無 orphan(ps 全表精確證)。
 - [x] DHB3a:**獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A;每不變量 mutation 翻紅;1 MINOR〔duplex fail-closed 無 committed test〕已採納補)。
-- [ ] DHB3b(你親跑後填):`AGENTOS_LIVE_DESKTOP_HERMES=1 pnpm run e2e:live-desktop-hermes` 多輪 live 綠 / 或揭露 dialect 分歧(fail-closed 診斷)→ 必要時修 DRIVER/transport mapping 回 verify 重證。
+- [x] **DHB3b harness DONE + LIVE 通過(2026-06-24,user-authorized 代跑)**:`AGENTOS_LIVE_DESKTOP_HERMES=1 pnpm run e2e:live-desktop-hermes` 對真 `hermes acp` **2 tests 綠**(DHB2b 單次 + DHB3b 閉環,各 ~13s):**閉環 stoppedBy=terminal、turns=2、governedTurns=2、effectRuns=2**;**✓ RETURN EDGE CONTINUED**——真 Hermes 在同 sessionId 收到 governed 結果後**產生第 2 輪**,**Design B 在真 dialect 成立、無需修 mapping**;per-outcome `["executed","executed"]`;**propose-only 守住**(cwd 結束 `[]`、Hermes 未自跑);credential-blind(無 denied);模型自然結束(非撞 maxTurns)。harness 為 gated 第二個 live test(skip-under-verify)+ 升級 e2e 腳本。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(DRIVER + transport 多輪化 + desktop.ts 介面擴充 + Fake loop scenario)。pipeline/guard/DHB1-2 不受影響;transport 單向用法向後相容。
