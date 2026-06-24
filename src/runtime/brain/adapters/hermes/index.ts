@@ -60,3 +60,9 @@ export {
   type ExecMcpServerDescriptor,
   startExecMcpLoopbackServer,
 } from "./mcp/exec-mcp-loopback.js";
+export {
+  type ExecMcpStdioDescriptor,
+  type ExecMcpStdioIo,
+  execMcpStdioDescriptor,
+  runExecMcpStdio,
+} from "./mcp/exec-mcp-stdio.js";
