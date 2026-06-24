@@ -102,6 +102,46 @@ stays vendor-free.
 | **[agentic-spendguard](https://github.com/m24927605/agentic-spendguard)** (SpendGuard) | **Cost gate** — reserve-before-effect budget hard-cap (default `CostGate`) | Live, infra-gated (`e2e:live-spendguard`: real sidecar + Rust ledger + Postgres). |
 | **Microsoft Agent Governance Toolkit** (AGT) | **Advisory policy** input | In-repo adapter (`src/policy/adapters/agt`) + tests, **demoted to advisory** — our deny-by-default PDP stays the sole grant authority; the live AGT engine is an injected seam (not bundled, not wired live). |
 
+### Enabling SpendGuard / AGT (config-driven)
+
+The surfaces default to an in-memory budget gate + no advisory policy. To turn the integrations **on**, build the
+injection opts from env with `integrationsFromEnv` (from `src/runtime/spendguard`) and pass them into a surface
+(`createPersonalShell` / `createDeveloperKit` / `createEnterpriseFleet`). The surfaces themselves stay vendor-free —
+this composition root is the only place a vendor is named.
+
+**SpendGuard (cost gate)** — run the real sidecar, then set (all **non-secret** identifiers):
+
+```bash
+# 1. bring up the real SpendGuard sidecar (its repo): docker compose -f deploy/demo/compose.yaml up -d sidecar
+# 2. point Agent OS at it (set => SpendGuard ON; unset => in-memory budget gate):
+export SPENDGUARD_UDS_PATH=/path/to/sidecar.sock
+export SPENDGUARD_BUDGET_ID=...        # required when UDS is set
+export SPENDGUARD_UNIT_ID=...          # required
+export SPENDGUARD_WINDOW_INSTANCE_ID=...   # required (the accounting window)
+export SPENDGUARD_TENANT_ASSERTION=... # optional (single-tenant surfaces)
+```
+
+```ts
+import { integrationsFromEnv, costGateForFromEnv } from "agent-os/runtime/spendguard";
+const shell = createPersonalShell(integrationsFromEnv());                 // Personal / Developer
+const fleet = createEnterpriseFleet({ costGateFor: costGateForFromEnv() }); // Enterprise: per-tenant gate
+```
+
+**Fail-closed by design:** if `SPENDGUARD_UDS_PATH` is set but any required topology key is missing/blank, startup
+**throws** — it never silently falls back to the in-memory gate (so you can't believe SpendGuard is enforcing when
+it isn't). Honest caveats: needs the external sidecar running; `release()` is unwired (deny-by-default); the real
+budget proof is the gated `e2e:live-spendguard`.
+
+**AGT (advisory policy)** — the adapter is in-repo; you inject **your** AGT engine (the `evaluate` seam) and pass it
+as an advisory secondary. It can only **narrow** — the PDP stays the sole grant authority (any-deny-wins; a
+malformed/throwing advisory = deny):
+
+```ts
+import { AgtSecondaryPolicy } from "agent-os/policy/adapters/agt";
+const agt = new AgtSecondaryPolicy(myAgtEvaluate);   // myAgtEvaluate = your live AGT engine
+const shell = createPersonalShell(integrationsFromEnv(process.env, { secondaries: [agt] }));
+```
+
 ## Quickstart
 
 ```bash

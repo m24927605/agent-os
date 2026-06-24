@@ -24,3 +24,12 @@ export {
   DECISION_SIDECAR_ADAPTER_SERVICE,
   type DecisionLedgerTransportOpts,
 } from "./decision-transport.js";
+// SLICE-IT1b — the config-driven composition root (env -> IT1a injection opts). The vendor wiring
+// (imports SpendGuardCostGate + the decision transport) lives HERE in the runtime/<vendor> zone, NOT
+// in the vendor-neutral surfaces (no-vendor-in-core). Surfaces consume only the neutral opts returned.
+export {
+  costGateForFromEnv,
+  type Integrations,
+  type IntegrationsExtra,
+  integrationsFromEnv,
+} from "./config-root.js";
