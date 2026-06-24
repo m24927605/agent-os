@@ -97,7 +97,7 @@ stays vendor-free.
 | Integration | Role | Status |
 |---|---|---|
 | **OpenShell** (NVIDIA) | **Body** — the real-computer sandbox (default `ExecutionSubstrate`) | **Live, infra-gated** — real mTLS gRPC gateway, 6 pinned RPCs (`e2e:live-kernel`, `e2e:live-nemoclaw`). The most mature wire. |
-| **Hermes** (NVIDIA) | **Brain** — the agent that proposes work (default, via the Brain Port) | In-repo `HermesBrainShim` (LLM turns via an injected seam; the live model SDK is not wired) + a gated **adopt** path (`e2e:live-hermes`). |
+| **Hermes** ([Nous Research](https://hermes-agent.nousresearch.com/)) | **Brain** — the agent that proposes work (default, via the Brain Port) | **Live (desktop ACP) — verified.** A locally-run desktop Hermes drives Agent OS over ACP (`hermes acp`, JSON-RPC/stdio): `e2e:live-desktop-hermes` is GREEN against the real agent — intent → proposal → governance, **propose-only** (Hermes never self-executes) + **credential-blind** (its key never leaves `~/.hermes`). Also: an in-repo `HermesBrainShim` + a NemoClaw-sandbox **adopt** path (`e2e:live-hermes`). |
 | **NemoClaw** (NVIDIA) | **Hosting** — launches/probes/reconciles the brain inside the sandbox | Live, infra-gated (`e2e:live-nemoclaw`). Documented as single-operator — its *lack* of tenant isolation is exactly what the Enterprise surface adds. |
 | **[agentic-spendguard](https://github.com/m24927605/agentic-spendguard)** (SpendGuard) | **Cost gate** — reserve-before-effect budget hard-cap (default `CostGate`) | Live, infra-gated (`e2e:live-spendguard`: real sidecar + Rust ledger + Postgres). |
 | **Microsoft Agent Governance Toolkit** (AGT) | **Advisory policy** input | In-repo adapter (`src/policy/adapters/agt`) + tests, **demoted to advisory** — our deny-by-default PDP stays the sole grant authority; the live AGT engine is an injected seam (not bundled, not wired live). |
@@ -123,6 +123,7 @@ pnpm test
 pnpm run e2e:live-kernel            # TS → real Go WORM kernel round-trip + offline verifier
 pnpm run e2e:live-nemoclaw          # host a gateway in a real OpenShell sandbox (the body, mTLS gateway)
 pnpm run e2e:live-hermes            # adopt a real Hermes sandbox → status → reconcile (the brain)
+pnpm run e2e:live-desktop-hermes    # a local desktop Hermes drives Agent OS over ACP (the brain, propose-only)
 pnpm run e2e:live-spendguard        # real SpendGuard sidecar + Rust ledger + Postgres (the cost gate)
 pnpm run e2e:live-enterprise        # per-tenant WORM partitions vs the real kernel
 pnpm run e2e:live-developer         # the released verifier verifies a kit-signed chain
@@ -144,14 +145,15 @@ pnpm run verifier:release           # builds the standalone + WASM verifier, wit
   vendor-neutral ports (each with ≥2 implementations + a contract test), the 3 monopolies (deny-by-default
   PDP / credential-blind secret model / Go WORM kernel), the offline verifier, and the
   no-vendor-in-core + cross-tenant gates all pass `pnpm run verify` (~851 tests). 305+ commits.
-- **Live, but infra-gated.** The opt-in `e2e:live-*` scripts prove the real wires (OpenShell, NemoClaw,
-  SpendGuard, Hermes-adopt, the Go kernel + offline verifier + per-tenant isolation). They live *outside*
-  `verify`, self-clean, and exit cleanly when the infra is absent; reproducing them needs your infra.
+- **Live, but infra-gated.** The opt-in `e2e:live-*` scripts prove the real wires (OpenShell; NemoClaw;
+  SpendGuard; a local **desktop Hermes driving the brain over ACP** + the NemoClaw-sandbox Hermes-adopt path;
+  the Go kernel + offline verifier + per-tenant isolation). They live *outside* `verify`, self-clean, and exit
+  cleanly when the infra is absent; reproducing them needs your infra.
 - **Default runtime is in-memory.** The composition roots default to in-memory log / cost / sandbox fakes,
   so everything runs without external services; the live adapters are injected when you point at real infra.
 - **North star vs today.** "Say anything, the whole computer does it" is the vision. What ships is the
   governed spine + the three surfaces + verifiable evidence. Honest gaps are tracked in `docs/slices/`
-  (e.g. real STT vendor; the live Hermes model SDK; **operator-unforgeable trust-root** — the kernel
+  (e.g. real STT vendor; the in-process NemoClaw-hosted Hermes model SDK; **operator-unforgeable trust-root** — the kernel
   process no longer holds the signing key, but a hardware/KMS root that even the operator can't forge is a
   deployment step, not yet wired).
 
