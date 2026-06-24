@@ -41,7 +41,6 @@ import {
 } from "../../../../../orchestration/index.js";
 import type { ExecCapableSandboxAdapter, ExecSecretDetector } from "../../../../substrate/index.js";
 import { type ExecToolBinding, bindingWrappedExecEffect } from "../exec-closed-loop.js";
-import { echoManifest, lsManifest } from "../exec-seed-tools.js";
 
 // ------------------------------------------------------------------------------------------------
 // JSON-RPC envelope (transport-agnostic). The live transport (stdio/http) is EXEC4b.
@@ -177,8 +176,12 @@ export interface ExecMcpServerDeps {
   readonly sandboxId: string;
   /** The composer-held bindings (parallel to the registry). tools/list advertises EXACTLY these keys. */
   readonly bindings: ReadonlyMap<string, ExecToolBinding>;
-  /** The ToolRegistry the PDP admits against (deny-by-default for any unregistered name). */
-  readonly registry: { has(name: string): boolean };
+  /** The ToolRegistry the PDP admits against (deny-by-default for any unregistered name). `lookup` sources
+   * each advertised tool's description from its registered manifest (single source of truth, no drift). */
+  readonly registry: {
+    has(name: string): boolean;
+    lookup(name: string): { readonly description: string } | undefined;
+  };
   /** Credential-blind screen (deps.screen) — the FIRST governed gate. */
   readonly screen: (toolCall: BoundExecCall) => ScreenOutcome;
   /** The SOLE authorization decision (deps.authorize). */
@@ -219,7 +222,7 @@ export function createExecMcpServer(deps: ExecMcpServerDeps): ExecMcpServer {
   for (const [name, binding] of deps.bindings) {
     descriptors.push({
       name,
-      description: descriptionFor(name, binding),
+      description: descriptionFor(name, deps.registry),
       inputSchema: argSchemaToJsonSchema(binding.argSchema),
     });
   }
@@ -343,17 +346,16 @@ function toolResult(text: string, isError: boolean): McpToolResult {
 }
 
 /**
- * The advertised description for a seed tool — taken DIRECTLY from the shared seed manifests
- * (`exec-seed-tools.ts`), the SAME source the registry registers, so the advertised description cannot
- * drift from the registered manifest. A name with no known manifest falls back to the name (fail-safe).
+ * The advertised description for a tool — sourced from the registered ToolManifest (the SINGLE source of
+ * truth the registry holds, the SAME manifest the PDP admits + governs against), so the advertised
+ * description cannot drift from what is registered. Every seed tool (not just echo/ls) thus gets its real
+ * manifest description automatically. A name with no registered manifest falls back to the name (fail-safe).
  */
-const MANIFEST_DESCRIPTIONS: ReadonlyMap<string, string> = new Map([
-  [echoManifest.name, echoManifest.description],
-  [lsManifest.name, lsManifest.description],
-]);
-
-function descriptionFor(name: string, _binding: ExecToolBinding): string {
-  return MANIFEST_DESCRIPTIONS.get(name) ?? name;
+function descriptionFor(
+  name: string,
+  registry: { lookup(name: string): { readonly description: string } | undefined },
+): string {
+  return registry.lookup(name)?.description ?? name;
 }
 
 function okResponse(id: number | string | null, result: unknown): JsonRpcResponse {
