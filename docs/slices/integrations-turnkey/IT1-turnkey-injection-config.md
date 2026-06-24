@@ -36,8 +36,8 @@ SpendGuard(`SpendGuardCostGate`)與 AGT(advisory `SecondaryPolicyAdapter` + `com
 - IT1b(verify 內):env→adapter 構造(用 Fake transport 避免真 UDS);malformed→throw;無 env→{};無 secret。
 - live(選):`e2e:live-spendguard` 證真 sidecar 路徑(已存在)。
 
-## (5) Definition of Done（待實測填)
-- [ ] IT1a:RED → verify 綠(注入測綠;**缺省 byte-identical**——既有 personal/enterprise/developer e2e 不變;depcruise/secret-scan clean);per-tenant 隔離守住;injected 只能更嚴(mutation 證);獨立 Opus 4.8 review PASS。
+## (5) Definition of Done（實測)
+- [x] **IT1a DONE（merged)**:三面注入 `costGate?`/`secondaries?`(Personal/Developer)+ per-tenant `costGateFor?`/shared `secondaries?`(Enterprise),DVx 樣式。RED → `pnpm run verify` **exit 0**(1101 passed + 26 skipped;新 integration-injection e2e×3 + `fail-closed.test.ts`;**缺省 byte-identical**——既有 personal/enterprise/developer e2e **未改且綠**,default-gate mutation 翻既有+新測;depcruise 153 modules clean〔reviewer deep-import 親證 bite〕+ **no-vendor grep 空**〔surfaces 只 import cost/policy barrels〕;secret-scan clean;cross-tenant 11/11)。**injected 只能更嚴**(deny-cost/deny-secondary mutation 翻、allow-secondary 無法放寬 PDP deny);**per-tenant 隔離**(shared-gate mutation 翻、faulting factory 只拒 A、B 照常 provision);`pipeline.ts`/`dedup.ts`/`cost/port.ts` byte-unchanged。**額外安全強化(writer 自查 adversarial gate 發現,reviewer 證實)**:`failClosedCostGate`(注入 gate throw→structured deny、不洩 error 訊息、對非-throw gate 透明)、**write-side `redactSecrets(combined.reason)`**(不可信 secondary 的 reason 流進 committed AuditEvent——**developer 面證實 load-bearing:無它 canary 洩進 WORM**;clean reason identity)、fail-closed provisioning(costGateFor throw→該租戶 NullCostGate)。獨立 Opus4.8 review PASS(8 攻擊面 HELD/N/A;1 MINOR:personal 面 write-side redact 為 defense-in-depth〔timeline 亦 read-redact〕,測試註解略 over-claim,非缺陷)。
 - [ ] IT1b:RED → verify 綠(env→adapter、malformed→fail-closed〔mutation:靜默 fallback 翻紅〕、無 env→{}、無 secret);獨立 Opus 4.8 review PASS。
 - [ ] 文件:README/AGENTS 更新「如何接 SpendGuard/AGT」= 設這些 env + (AGT)提供 SecondaryPolicyAdapter;誠實標明 SpendGuard 需外部 sidecar + budgetClaim + release 未接,AGT 引擎自備。
 

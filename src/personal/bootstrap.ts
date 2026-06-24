@@ -36,7 +36,7 @@ import {
   redactSecrets,
 } from "../audit/index.js";
 import type { CommitAppender } from "../commitgate/index.js";
-import { type CostGate, InMemoryCostGate } from "../cost/index.js";
+import { type CostGate, InMemoryCostGate, failClosedCostGate } from "../cost/index.js";
 import type { AgentContext } from "../iam/ids.js";
 import {
   type GovernedCall,
@@ -46,8 +46,10 @@ import {
 import {
   type AllowRule,
   type PolicyRequest,
+  type SecondaryPolicyAdapter,
   combineDecisions,
   evaluatePolicy,
+  evaluateSecondaries,
 } from "../policy/index.js";
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { type AdapterResult, FakeSandboxAdapter } from "../runtime/substrate/index.js";
@@ -108,6 +110,24 @@ export interface PersonalShellOpts {
    * the SAME deny-by-default to Personal + Enterprise behind an optional opt).
    */
   readonly toolRegistry?: ToolRegistry;
+  /**
+   * SLICE-IT1a — an INJECTABLE, vendor-neutral CostGate (the spend slot). ABSENT (the default) => the
+   * S1-identical `new InMemoryCostGate(budget)` (byte-identical to today). When provided (e.g. a
+   * config-driven SpendGuardCostGate wired by IT1b), the governed pipeline reserves against THIS gate
+   * instead — and the injection can ONLY NARROW: a CostGate's `reserve` can DENY (deny@cost), it never
+   * grants more budget than the gate allows. The surface depends ONLY on the vendor-neutral `CostGate`
+   * PORT type here — never a vendor adapter (SpendGuard/AGT).
+   */
+  readonly costGate?: CostGate;
+  /**
+   * SLICE-IT1a — INJECTABLE, vendor-neutral ADVISORY secondary policy adapters (e.g. AGT). ABSENT (the
+   * default) => `[]` (byte-identical to today: `combineDecisions(decision, [])`). When provided, every
+   * adapter is folded into the decision via `combineDecisions(decision, opts.secondaries)`: PDP is the
+   * SOLE deny authority and the merge is any-deny-wins / fail-closed (a malformed/throwing advisory =
+   * deny), so a secondary can ONLY NARROW — it can NEVER grant/relax what the PDP denied. The surface
+   * depends ONLY on the vendor-neutral `SecondaryPolicyAdapter` PORT type — never a vendor adapter.
+   */
+  readonly secondaries?: readonly SecondaryPolicyAdapter[];
 }
 
 /** The composed Personal-surface facade a human (or a test) can drive end-to-end. */
@@ -152,7 +172,12 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const sharedLog = new InMemoryAppendOnlyLog({ publicKey, privateKey });
   const fake = new FakeSandboxAdapter();
-  const cost: CostGate = new InMemoryCostGate(budget);
+  // SLICE-IT1a: the INJECTED CostGate or — ABSENT — the S1-identical `new InMemoryCostGate(budget)`.
+  // The injected gate is the spend AUTHORITY for this shell (replacement, like the wormSink seam); the
+  // invariant is that a CostGate that DENIES cannot grant the effect — it never relaxes a deny. Wrapped
+  // fail-closed so an EXTERNAL gate's thrown reserve/commit/release becomes a structured deny (the
+  // in-tree InMemoryCostGate never throws, so the ABSENT path stays byte-identical to today).
+  const cost: CostGate = failClosedCostGate(opts.costGate ?? new InMemoryCostGate(budget));
 
   // The structural event the pipeline hands the appender (pipeline.ts:79-84).
   interface StructuralEvent {
@@ -222,8 +247,17 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
       const decision = opts.toolRegistry
         ? authorizeToolInvoke(req, opts.toolRegistry, allow)
         : evaluatePolicy(req, allow);
-      const combined = combineDecisions(decision, []);
-      return { effect: combined.effect, reason: combined.reason };
+      // SLICE-IT1a: evaluate the INJECTED advisory secondaries fail-closed (a throwing adapter -> a
+      // synthetic deny), then fold them into the decision. ABSENT => `[]` adapters -> `[]` decisions,
+      // byte-identical to today's `combineDecisions(decision, [])`. combineDecisions is any-deny-wins /
+      // PDP-sovereign: a secondary can only deny more — it never grants/relaxes a PDP deny.
+      const secondaryDecisions = evaluateSecondaries(opts.secondaries ?? [], req);
+      const combined = combineDecisions(decision, secondaryDecisions);
+      // The combined reason folds UNTRUSTED secondary `reason` strings (an external/vendor seam); scrub
+      // them before the reason flows into the committed AuditEvent's policyDecision.reason (the appender
+      // writes `decisionReason` -> WORM). Mirrors the audit layer's redact-before-sink posture
+      // (canonical.ts). On the ABSENT path the reason has no adapter text, so redact is identity.
+      return { effect: combined.effect, reason: redactSecrets(combined.reason) };
     },
     cost,
     estimateTokens: () => estimate,

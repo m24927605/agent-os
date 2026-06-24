@@ -6,3 +6,4 @@
 export * from "./port.js";
 export * from "./null.js";
 export * from "./in-memory.js";
+export * from "./fail-closed.js";

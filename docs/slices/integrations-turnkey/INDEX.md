@@ -13,7 +13,7 @@ SpendGuard(`SpendGuardCostGate` + `createDecisionLedgerTransport`)與 AGT(`Secon
 ## 2. 切片
 | Slice | 範圍 | 狀態 |
 |---|---|---|
-| **IT1a**(注入面,純 in-repo,零姿態) | 三面加 **`costGate?`** + **`secondaries?: readonly SecondaryPolicyAdapter[]`** 注入(DVx 樣式):注入→用、缺→**byte-identical**(既有測不變);Enterprise 用 **per-tenant `costGateFor?(tenantId)`** 保隔離。**injected 只能更嚴**(cost 拒、secondaries advisory any-deny-wins);PDP sovereign。spec:`IT1-turnkey-injection-config.md` | DRAFT |
+| **IT1a**(注入面,純 in-repo,零姿態) | 三面加 **`costGate?`** + **`secondaries?: readonly SecondaryPolicyAdapter[]`** 注入(DVx 樣式):注入→用、缺→**byte-identical**(既有測不變);Enterprise 用 **per-tenant `costGateFor?(tenantId)`** 保隔離。**injected 只能更嚴**(cost 拒、secondaries advisory any-deny-wins);PDP sovereign。spec:`IT1-turnkey-injection-config.md` | ✅ **DONE**(三面注入 costGate?/secondaries?〔Enterprise per-tenant costGateFor?〕,缺省 byte-identical〔既有 e2e 未改+綠〕,injected 只能更嚴,per-tenant 隔離,無 vendor import;+ failClosedCostGate/write-side redactSecrets〔developer 證 load-bearing〕/NullCostGate fallback;verify 1101;獨立 Opus4.8 review PASS)|
 | **IT1b**(config 驅動 composition root = 真 user init) | env/config helper:`SPENDGUARD_UDS_PATH`(+ budget topology)→ 建 `SpendGuardCostGate(createDecisionLedgerTransport(...))`;secondaries config → 掛 advisory adapter(AGT-ready 注入點);**malformed config → fail-closed(deny/throw at startup,絕不靜默退成無治理)**;傳入三面。使用者設 env → 即開。spec:同檔 | DRAFT |
 
 ## 3. ⚠️ 誠實 scope
