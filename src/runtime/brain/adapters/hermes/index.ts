@@ -29,3 +29,10 @@ export {
   type ClosedLoopStop,
   runClosedLoop,
 } from "./closed-loop.js";
+export {
+  type BindingWrappedExecEffectOptions,
+  type ExecClosedLoopOptions,
+  type ExecToolBinding,
+  bindingWrappedExecEffect,
+  runExecClosedLoop,
+} from "./exec-closed-loop.js";

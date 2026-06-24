@@ -90,9 +90,9 @@ function serializeOutcome<R>(tool: string, outcome: GovernedOutcome<R>): string 
  * and the session is torn down in `finally` (deny-by-default). An aborted commit is a `denied` outcome
  * fed back as "DENIED: …" — never a fabricated success.
  */
-export async function runClosedLoop<R>(
+export async function runClosedLoop<TC extends GovernedCall, R>(
   transport: DuplexDesktopHermesTransport,
-  deps: GovernedToolCallDeps<GovernedCall, R>,
+  deps: GovernedToolCallDeps<TC, R>,
   context: unknown,
   intent: string,
   options: ClosedLoopOptions = {},
@@ -127,7 +127,10 @@ export async function runClosedLoop<R>(
       // Govern EACH proposal through the SAME pipeline (commit-before-effect unchanged).
       const lines: string[] = [];
       for (const p of proposals) {
-        const call: GovernedCall = { tool: p.tool, context };
+        // Forward the proposal's DECLARED args (e.g. an exec tool's params). `args` is OPTIONAL on the
+        // call type, so a scripted-frames caller that never sets it (DHB3a) is unaffected; the exec
+        // composer (EXEC3a) reads `args` in its effect wrapper. pipeline.ts still reads only .tool/.context.
+        const call = { tool: p.tool, context, args: p.args } as unknown as TC;
         const outcome = await runGovernedToolCall(deps, call);
         outcomes.push(outcome);
         lines.push(serializeOutcome(p.tool, outcome));

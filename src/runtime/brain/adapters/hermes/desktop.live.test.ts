@@ -446,7 +446,7 @@ d(
         // ── DRIVE THE LOOP. If the real return-edge dialect fails-closed (transport error / no continuation
         // / malformed feed-back), runClosedLoop REJECTS — caught below and re-thrown as a CLEAR diagnostic
         // (never a hang: every wait inside the transport is bounded; never a fallback to self-execution).
-        let result: Awaited<ReturnType<typeof runClosedLoop<{ id: number }>>>;
+        let result: Awaited<ReturnType<typeof runClosedLoop<GovernedToolCall, { id: number }>>>;
         try {
           result = await runClosedLoop(transport, deps, LOOP_CTX, LOOP_INTENT, {
             maxTurns: LOOP_MAX_TURNS,

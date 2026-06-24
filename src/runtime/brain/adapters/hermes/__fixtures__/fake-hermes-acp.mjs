@@ -32,6 +32,25 @@ import { writeFileSync } from "node:fs";
 const SCENARIO = process.env.FAKE_ACP_SCENARIO ?? "happy";
 const LOG_PATH = process.env.FAKE_ACP_LOG;
 
+/**
+ * SLICE-EXEC3a exec-loop proposals: a JSON array of `{tool, args}` the FAKE proposes, one per turn.
+ * For `exec_loop` the array is consumed turn-by-turn (and the loop ends with end_turn once exhausted);
+ * for `exec_loop_forever` the LAST entry is re-proposed on every turn (never end_turn — maxTurns test).
+ * This lets a test script EXACTLY what the brain proposes (a registered exec tool name + DECLARED
+ * args), with NO secret literals in this fixture (any canary is built by the test, not invented here).
+ */
+function parseExecProposals() {
+  const raw = process.env.FAKE_ACP_EXEC_PROPOSALS;
+  if (raw === undefined) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+const EXEC_PROPOSALS = parseExecProposals();
+
 /** Records of what the client did, flushed to the side-channel log on exit. */
 const record = {
   scenario: SCENARIO,
@@ -181,6 +200,49 @@ async function runLoopTurn(forever) {
   promptResolveWith({ stopReason: "tool_use" });
 }
 
+/**
+ * SLICE-EXEC3a `exec_loop` / `exec_loop_forever`: a CLOSED agentic loop whose tool_call frames carry a
+ * REGISTERED exec tool NAME (the frame's `title`) + DECLARED args (the frame's `rawInput`) drawn from
+ * FAKE_ACP_EXEC_PROPOSALS. The brain NEVER supplies argv — only the tool name + declared params; the
+ * composer's binding builds argv. Same propose-only + feed-back-and-loop mechanics as `runLoopTurn`.
+ */
+async function runExecLoopTurn(forever) {
+  loopTurn += 1;
+  const id = loopTurn;
+
+  // Pick this turn's proposal. exec_loop: walk the array, then end_turn once exhausted. exec_loop_forever:
+  // clamp to the last entry and NEVER end_turn (the maxTurns blast-radius cap test).
+  const idx = forever ? Math.min(id - 1, EXEC_PROPOSALS.length - 1) : id - 1;
+  const proposal = EXEC_PROPOSALS[idx];
+
+  if (!forever && proposal === undefined) {
+    // No more scripted proposals -> a terminal turn (no proposal, end_turn) so the loop ends cleanly.
+    sessionUpdate(SESSION_ID, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "exec loop done" },
+    });
+    flushLog();
+    promptResolve(); // stopReason: "end_turn"
+    return;
+  }
+
+  const tool = proposal?.tool ?? "exec.echo";
+  const args = proposal?.args ?? {};
+  sessionUpdate(SESSION_ID, {
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: `exec loop turn ${id}: I will run ${tool}` },
+  });
+  sessionUpdate(SESSION_ID, {
+    sessionUpdate: "tool_call",
+    toolCallId: `call-${id}`,
+    title: tool,
+    rawInput: args,
+  });
+  await askPermission(`call-${id}`, tool);
+  flushLog();
+  promptResolveWith({ stopReason: "tool_use" });
+}
+
 async function runPrompt(promptParams) {
   // The intent text the client forwarded (credential-blind: this is the only caller payload).
   // We do not need it beyond recording — it is captured in stdinLines already.
@@ -212,6 +274,11 @@ async function runPrompt(promptParams) {
 
   if (SCENARIO === "loop" || SCENARIO === "loop_forever") {
     await runLoopTurn(SCENARIO === "loop_forever");
+    return;
+  }
+
+  if (SCENARIO === "exec_loop" || SCENARIO === "exec_loop_forever") {
+    await runExecLoopTurn(SCENARIO === "exec_loop_forever");
     return;
   }
 
