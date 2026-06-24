@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # e2e:live-hermes-desktop (SLICE-HDI1) — RUN the GATED LIVE DESKTOP-PATH HARNESS: the LAST MILE for a real
 # Hermes DESKTOP user. It registers our governed exec MCP bin into Hermes's OWN `config.yaml` `mcp_servers`
-# map (via `hermes mcp add`, argv built by the pure `buildHermesMcpAddArgv`) UNDER AN ISOLATED, TEMP
-# HERMES_HOME (NEVER the user's real ~/.hermes), then drives a HEADLESS `hermes --oneshot` so a REAL Hermes
+# map by WRITING `$HERMES_HOME/config.yaml` DIRECTLY (body from the pure `renderHermesMcpServersConfigYaml`;
+# `hermes mcp add` is INTERACTIVE + cannot be driven headlessly — it CANCELS with no TTY) UNDER AN ISOLATED,
+# TEMP HERMES_HOME (NEVER the user's real ~/.hermes), then drives a HEADLESS `hermes --oneshot` so a REAL Hermes
 # Desktop AUTONOMOUSLY reads config.yaml, SPAWNS `node dist/.../exec-mcp-server-bin.js`, discovers + calls
 # our bounded exec.echo -> the bin's governed pipeline (runGovernedToolCall) -> REAL OpenShell exec -> the
 # result surfaces in the one-shot output. The bin's WORM ships every receipt to the SHARED kernel chain.
@@ -30,10 +31,11 @@
 # ⚠️ ISOLATION: the test sets HERMES_HOME to a FRESH temp dir for both the install + the drive; the user's
 # real ~/.hermes/config.yaml is NEVER touched (teardown removes the temp home, confirms no orphan).
 #
-# ⚠️ HONEST BOUNDARY: the in-repo proof (in `pnpm run verify`) is `buildHermesMcpAddArgv`'s argv correctness
-# (--args LAST / --env KEY=VALUE) + its credential-blindness (a secret-shaped value THROWS) + the install
-# script's no-hermes clean-block. A REAL Hermes Desktop DISCOVERING + CALLING our governed tools via
-# config.yaml is THIS live run, user-initiated. Redaction is best-effort — the REAL credential boundary is a
+# ⚠️ HONEST BOUNDARY: the in-repo proof (in `pnpm run verify`) is the pure renderers' correctness —
+# `renderHermesMcpServersConfigYaml` emits a valid config.yaml (top-level `mcp_servers:` map; env as a MAP;
+# args=[bin]) + `buildHermesMcpAddArgv`'s argv shape (--args LAST / --env KEY=VALUE) — plus their shared
+# credential-blindness (a secret-shaped value THROWS). A REAL Hermes Desktop AUTO-DISCOVERING + CALLING our
+# governed tools from the written config.yaml is THIS live run, user-initiated. Redaction is best-effort — the REAL credential boundary is a
 # sandbox provisioned with ZERO credentials + NO egress, not redaction. The nudge runs a benign echo only.
 # Credential-blind: it NEVER reads the user's real ~/.hermes and writes ONLY NON-secret endpoints.
 #
@@ -70,7 +72,7 @@ fi
 # The test is SELF-BOUNDING: the one-shot has a hard SIGKILL timeout + the per-test vitest timeout, so a
 # hung Hermes / a Hermes that never discovers our bin becomes a FAILURE (non-zero RC) with a clear
 # diagnostic, never a hang.
-echo "e2e:live-hermes-desktop: installing into an ISOLATED temp HERMES_HOME via 'hermes mcp add' then driving a REAL 'hermes --oneshot' that reads config.yaml + SPAWNS our governed exec MCP bin into REAL OpenShell (spends the user's Hermes credits + real sandbox side effects; the user's real ~/.hermes is NEVER touched)..."
+echo "e2e:live-hermes-desktop: installing into an ISOLATED temp HERMES_HOME by WRITING config.yaml directly (headless path; 'hermes mcp add' is interactive + cannot be driven headlessly) then driving a REAL 'hermes --oneshot' that reads config.yaml + SPAWNS our governed exec MCP bin into REAL OpenShell (spends the user's Hermes credits + real sandbox side effects; the user's real ~/.hermes is NEVER touched)..."
 VOUT="$(mktemp -t agentos-e2e-hermes-desktop.XXXXXX)"
 trap 'rm -f "$VOUT"' EXIT INT TERM
 

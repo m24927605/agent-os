@@ -49,6 +49,7 @@ export {
   type HermesMcpAddOptions,
   buildHermesMcpAddArgv,
   renderHermesConfigYamlSnippet,
+  renderHermesMcpServersConfigYaml,
 } from "./hermes-desktop-install.js";
 export {
   type ExecMcpServer,

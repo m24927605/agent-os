@@ -3,13 +3,30 @@
  *
  * This is the CONFIG.YAML analog of EXEC4c-b's ACP path. Instead of advertising our STDIO descriptor in
  * `session/new.mcpServers` (the ACP path), we register our governed exec MCP bin into Hermes's OWN
- * `~/.hermes/config.yaml` `mcp_servers` map — VIA Hermes's own `hermes mcp add` CLI (the argv built by
- * the pure, unit-tested `buildHermesMcpAddArgv`) — then drive a HEADLESS `hermes --oneshot` so a REAL
- * Hermes Desktop AUTONOMOUSLY reads config.yaml, SPAWNS `node dist/.../exec-mcp-server-bin.js`, discovers
- * (tools/list) + calls (tools/call) our bounded `exec.echo`, the bin's governed pipeline runs a REAL
- * OpenShell exec (exit=0), and the result surfaces in the one-shot output. The bin's WORM ships every
+ * `config.yaml` `mcp_servers` map by WRITING `$HERMES_HOME/config.yaml` DIRECTLY (the rendered body from
+ * the pure, unit-tested `renderHermesMcpServersConfigYaml`) — then drive a HEADLESS `hermes --oneshot` so
+ * a REAL Hermes Desktop AUTONOMOUSLY reads config.yaml, SPAWNS `node dist/.../exec-mcp-server-bin.js`,
+ * discovers (tools/list) + calls (tools/call) our bounded `exec.echo`, the bin's governed pipeline runs a
+ * REAL OpenShell exec (exit=0), and the result surfaces in the one-shot output. The bin's WORM ships every
  * receipt to the SHARED kernel chain (unified evidence — same as the ACP path). This proves a real
  * Hermes Desktop USER can actually use Agent OS through the config.yaml path they already have.
+ *
+ * ⚠️ WHY DIRECT-WRITE (not `hermes mcp add`): a live run pinned that `hermes mcp add` is DISCOVERY-FIRST +
+ * INTERACTIVE — it spawns the server, lists its tools, and asks "Enable all N tools?". There is NO
+ * `--yes`/`--no-confirm`/`--force` flag (confirmed via `hermes mcp add --help`). Under this headless
+ * `spawnSync` (no TTY) that prompt CANCELS and NOTHING is persisted, so `hermes mcp list` would then show
+ * "No MCP servers configured" and this test would fail at the install-verification step BEFORE any model
+ * call. The config.yaml direct-write IS the headless path AND the actual product claim: Hermes
+ * auto-discovers `mcp_servers` from config.yaml with NO enable-confirm (the EXEC4c-b ACP path already
+ * proved Hermes auto-discovers + calls our tool with no enable prompt).
+ *
+ * ⚠️ WHY APPEND (not overwrite): a fresh temp HERMES_HOME has NO provider config + NO credentials, so a
+ * live run pinned that `hermes --oneshot` there exits 2 with EMPTY output. The user AUTHORIZED cloning the
+ * MINIMAL provider+auth context (config.yaml, auth.json, auth.lock, .env) from the REAL ~/.hermes into the
+ * temp home so a real one-shot can authenticate. The cloned config.yaml carries the provider, so we ADD
+ * our `mcp_servers` block by APPENDING it (the user's real config has NO `mcp_servers:` key — verified via
+ * `hermes mcp list` = "No MCP servers configured" — so the append is valid and preserves the provider). A
+ * pre-existing top-level `mcp_servers:` key fails-closed with a diagnostic instead of an invalid config.
  *
  * WHO EXECUTES (the EXEC4 thesis, live, config.yaml path): the bin is Agent OS COMPILED code; even though
  * Hermes spawns it from config.yaml + controls its stdin/stdout/lifecycle, EVERY tools/call still routes
@@ -23,14 +40,16 @@
  *   the real kernel chain). Run via `pnpm run e2e:live-hermes-desktop` (preflight BLOCKS clean if the
  *   gates are unset).
  *
- * ⚠️ ISOLATION — NEVER the user's real ~/.hermes: this test sets HERMES_HOME to a FRESH temp dir for
- * BOTH the install (`hermes mcp add`) and the drive (`hermes --oneshot`). Hermes's _parser.py honours
- * HERMES_HOME as the config root, so config.yaml is written/read under the temp dir — the user's real
- * ~/.hermes/config.yaml is NEVER touched. Teardown removes the temp HERMES_HOME (+ any sandbox) and
- * confirms no orphan.
+ * ⚠️ ISOLATION — NEVER WRITES the user's real ~/.hermes: this test sets HERMES_HOME to a FRESH temp dir
+ * for BOTH the install and the drive (`hermes --oneshot`). Hermes's _parser.py honours HERMES_HOME as the
+ * config root, so config.yaml is written/read under the temp dir — the user's real ~/.hermes/config.yaml
+ * is NEVER modified. The temp home is SEEDED (read-only, fs byte-copy) with a COPY of the user's minimal
+ * provider+auth context (user-authorized) so the one-shot can authenticate; the originals are only ever
+ * READ by the fs copy, never written. Teardown removes the temp HERMES_HOME (now holding the cred copy)
+ * recursively and asserts no orphan.
  *
  * ASSERTIONS (the things ONLY the live config.yaml run can pin):
- *   1. >=1 AUTONOMOUS EXECUTED via the CONFIG.YAML path: the real Hermes Desktop read our installed
+ *   1. >=1 AUTONOMOUS EXECUTED via the CONFIG.YAML path: the real Hermes Desktop read our directly-written
  *      mcp_servers.agentos-exec, SPAWNED our bin, discovered + called exec.echo, the bin's governed
  *      pipeline ran a REAL OpenShell exec (exit=0 + hello). Observed from the one-shot output and —
  *      when the kernel gate is on — corroborated by the bin's receipt in the SHARED kernel chain.
@@ -46,20 +65,30 @@
  * TEARDOWN: the temp HERMES_HOME is removed in finally (asserted gone). The bin is Hermes-spawned, so
  * Hermes reaps it when the one-shot child exits; the one-shot process is bounded by a hard timeout.
  *
- * CREDENTIAL-BLIND: this file NEVER reads the user's real `~/.hermes`, NEVER puts an Agent OS secret into
- * config.yaml (the install argv is built by `buildHermesMcpAddArgv`, which THROWS on a secret-shaped
- * value), and advertises ONLY NON-secret endpoints (OpenShell + kernel ingest host:port + an mTLS DIR
- * path) in the bin's env. Redaction is best-effort — the REAL credential boundary is a sandbox
- * provisioned with ZERO credentials + NO egress, not redaction. The nudge runs a benign echo only.
+ * CREDENTIAL-BLIND: this file NEVER puts an Agent OS secret into config.yaml (OUR `mcp_servers` block is
+ * rendered by `renderHermesMcpServersConfigYaml`, which THROWS on a secret-shaped value), and advertises
+ * ONLY NON-secret endpoints (OpenShell + kernel ingest host:port + an mTLS DIR path) in the bin's env. The
+ * user's provider+auth context is moved by fs BYTE-COPY ONLY (copyFileSync) — its contents are NEVER read
+ * into JS, NEVER cat'd, NEVER logged (the [HDI1] logs print only the file NAMES copied, never any
+ * credential material). Redaction is best-effort — the REAL credential boundary is a sandbox provisioned
+ * with ZERO credentials + NO egress, not redaction. The nudge runs a benign echo only.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createSignedChainReader } from "../../../ingest/index.js";
-import { buildHermesMcpAddArgv } from "./index.js";
+import { renderHermesMcpServersConfigYaml } from "./index.js";
 
 // ── GATES ──────────────────────────────────────────────────────────────────────────────────────
 const LIVE_HERMES = process.env.AGENTOS_LIVE_DESKTOP_HERMES === "1";
@@ -122,8 +151,51 @@ function autonomousExecEvidence(blob: string): {
   return { sawExecTool, sawEchoedOutput };
 }
 
+/**
+ * USER-AUTHORIZED CREDENTIAL CLONE — the minimal provider+auth context Hermes needs to authenticate a
+ * `hermes --oneshot` turn under an ISOLATED temp HERMES_HOME.
+ *
+ * WHY: a live run pinned that `hermes --oneshot` under a FRESH temp HERMES_HOME exits 2 with EMPTY output
+ * because the temp home has NO provider config and NO credentials — the user's provider + auth live in the
+ * REAL ~/.hermes (which this test deliberately never modifies). The user has authorized cloning the
+ * minimal provider+auth context INTO the ephemeral temp home so a real one-shot can authenticate.
+ *
+ * THE MINIMAL SET (verified by inspecting ~/.hermes; NAMES only — contents NEVER read/printed):
+ *   - config.yaml — provides `model.provider: openai-codex` + `model.base_url` (the provider config); has
+ *     NO top-level `mcp_servers` key, so our block is APPENDED (see below).
+ *   - auth.json   — the openai-codex POOLED-credential store (active_provider / credential_pool /
+ *     providers) Hermes reads to authenticate the turn.
+ *   - auth.lock   — the auth lockfile that pairs with auth.json (tiny; copied for consistency).
+ *   - .env        — provider env (e.g. an OPENAI_* key) Hermes loads from HERMES_HOME.
+ *
+ * EXCLUDED on purpose: hermes-agent/ (the install dir — huge + unnecessary) and everything else
+ * (state.db*, caches, skills, logs, kanban …) — none are needed to authenticate a one-shot turn.
+ *
+ * ⚠️ CREDENTIAL SAFETY: every file is moved by fs BYTE-COPY (copyFileSync) ONLY — contents are NEVER
+ * read-then-printed, NEVER cat'd, NEVER logged. We log ONLY the file NAMES copied. The temp home (now
+ * holding a COPY of the user's creds) is removed recursively in teardown and asserted gone.
+ */
+const HERMES_CRED_CONTEXT_FILES = ["config.yaml", "auth.json", "auth.lock", ".env"] as const;
+
+/**
+ * Clone the user's minimal provider+auth context from the REAL ~/.hermes into the ISOLATED temp home via
+ * fs byte-copy ONLY. Best-effort: a missing source file is skipped. Returns the NAMES copied (for logging
+ * — never contents). NEVER copies hermes-agent/ (the install dir).
+ */
+function cloneHermesCredContext(realHermesHome: string, tempHermesHome: string): string[] {
+  const copied: string[] = [];
+  for (const name of HERMES_CRED_CONTEXT_FILES) {
+    const src = join(realHermesHome, name);
+    if (!existsSync(src)) continue; // best-effort: skip absent source
+    // fs BYTE-COPY ONLY — contents are never read into JS / never logged.
+    copyFileSync(src, join(tempHermesHome, name));
+    copied.push(name);
+  }
+  return copied;
+}
+
 dDesktop(
-  "HDI1 — a REAL Hermes Desktop reads config.yaml (installed via `hermes mcp add`), SPAWNS our governed exec MCP bin, autonomously discovers + calls it via `hermes --oneshot` -> REAL OpenShell exec -> shared-kernel WORM",
+  "HDI1 — a REAL Hermes Desktop reads config.yaml (mcp_servers written directly; `hermes mcp add` is interactive/no-headless-bypass), SPAWNS our governed exec MCP bin, autonomously discovers + calls it via `hermes --oneshot` -> REAL OpenShell exec -> shared-kernel WORM",
   () => {
     /** The ISOLATED Hermes config root — NEVER the user's real ~/.hermes. */
     let hermesHome: string;
@@ -144,10 +216,25 @@ dDesktop(
           "HDI1: refusing to run — HERMES_HOME resolved to the user's real ~/.hermes",
         );
       }
+
+      // ── USER-AUTHORIZED CREDENTIAL CLONE (see cloneHermesCredContext for the why/what/safety) ──────
+      // A fresh temp home has NO provider config + NO credentials, so `hermes --oneshot` exits 2 with
+      // EMPTY output. The user authorized cloning the MINIMAL provider+auth context (config.yaml,
+      // auth.json, auth.lock, .env) from the REAL ~/.hermes INTO this EPHEMERAL temp home via fs
+      // BYTE-COPY ONLY (contents never read/printed/logged) so a real one-shot can authenticate. We
+      // EXCLUDE hermes-agent/ (the install dir). The real ~/.hermes is NEVER written. The temp home (now
+      // holding a COPY of the user's creds) is removed recursively in afterAll and asserted gone.
+      const cloned = existsSync(realHermes) ? cloneHermesCredContext(realHermes, hermesHome) : [];
+      // Log ONLY the NAMES copied — never any credential CONTENTS.
+      console.info(
+        `[HDI1] cloned provider+auth context (fs byte-copy, NAMES only — no contents): [${cloned.join(", ")}] ` +
+          `from ${realHermes} into the ISOLATED temp home ${hermesHome} (hermes-agent/ EXCLUDED; real ~/.hermes UNTOUCHED)`,
+      );
     });
 
     afterAll(() => {
-      // TEARDOWN: remove the isolated temp HERMES_HOME; confirm no orphan.
+      // TEARDOWN: the temp HERMES_HOME now holds a COPY of the user's creds — it MUST be removed
+      // recursively so no temp dir leaks the user's key. Confirm no orphan.
       if (hermesHome !== undefined && existsSync(hermesHome)) {
         rmSync(hermesHome, { recursive: true, force: true });
       }
@@ -157,9 +244,20 @@ dDesktop(
     it(
       ">=1 autonomous EXECUTED via the config.yaml path (exit=0 + hello); deny-by-default for Hermes's own tools; bounded; shared-WORM if the kernel gate is on",
       () => {
-        // ── (1) INSTALL: build the `hermes mcp add` argv via the PURE helper (credential-blind THROWS on a
-        // secret-shaped value), then DELEGATE to Hermes's own CLI under the ISOLATED HERMES_HOME. The env
-        // carries ONLY NON-secret endpoints (OpenShell + kernel ingest host:port + the mTLS DIR) — no secret.
+        // ── (1) INSTALL: render the config.yaml body via the PURE helper (credential-blind THROWS on a
+        // secret-shaped value), then WRITE it DIRECTLY to $HERMES_HOME/config.yaml. The env carries ONLY
+        // NON-secret endpoints (OpenShell + kernel ingest host:port + the mTLS DIR) — no secret.
+        //
+        // ⚠️ WHY DIRECT-WRITE, NOT `hermes mcp add`: `hermes mcp add` is DISCOVERY-FIRST + INTERACTIVE — it
+        // spawns the server, lists its tools, and asks "Enable all N tools?". There is NO
+        // `--yes`/`--no-confirm`/`--force` flag (confirmed via `hermes mcp add --help`). Under this headless
+        // `spawnSync` (no TTY) that prompt CANCELS and NOTHING persists, so `hermes mcp list` would then show
+        // "No MCP servers configured" and this test would fail at the install-verification step BELOW (before
+        // any model call). The config.yaml write IS the headless path AND the actual product claim:
+        // Hermes auto-discovers `mcp_servers` from config.yaml with NO enable-confirm (the EXEC4c-b ACP path
+        // already proved Hermes auto-discovers + calls our tool with no enable prompt). The temp HERMES_HOME
+        // now holds a CLONED provider+auth context (user-authorized; fs byte-copy in beforeAll), so we
+        // APPEND our block to the cloned config.yaml rather than overwrite it (see the append logic below).
         const binEnv: Record<string, string> = {
           AGENTOS_OPENSHELL_ENDPOINT: OPENSHELL_ENDPOINT,
           AGENTOS_OPENSHELL_MTLS: MTLS,
@@ -168,26 +266,49 @@ dDesktop(
             ? { AGENTOS_KERNEL_INGEST_ENDPOINT: KERNEL_ENDPOINT }
             : {}),
         };
-        const addArgv = buildHermesMcpAddArgv({ name: MCP_NAME, binPath: BUILT_BIN, env: binEnv });
-        console.info(
-          `[HDI1] installing into ISOLATED HERMES_HOME=${hermesHome} via: hermes ${addArgv.join(" ")}`,
-        );
-
-        // Idempotent: tolerate a missing prior entry (fresh temp home has none).
-        spawnSync("hermes", ["mcp", "remove", MCP_NAME], {
-          env: { ...process.env, HERMES_HOME: hermesHome },
-          encoding: "utf8",
+        const configBody = renderHermesMcpServersConfigYaml({
+          name: MCP_NAME,
+          binPath: BUILT_BIN,
+          env: binEnv,
         });
-        const add = spawnSync("hermes", addArgv, {
-          env: { ...process.env, HERMES_HOME: hermesHome },
-          encoding: "utf8",
-        });
-        expect(
-          add.status,
-          `HDI1: 'hermes mcp add' must succeed under the isolated HERMES_HOME (stderr: ${add.stderr ?? ""}). If it failed, the CLI contract (mcp add <name> --command node --env K=V… --args <bin>) diverged.`,
-        ).toBe(0);
+        const configPath = join(hermesHome, "config.yaml");
+        // The temp home now holds a CLONED config.yaml carrying the user's provider config. We must ADD
+        // our `mcp_servers` block WITHOUT clobbering that provider config. `renderHermesMcpServersConfigYaml`
+        // returns a STANDALONE body whose top-level key is `mcp_servers:`, and the user's real config has NO
+        // `mcp_servers:` key (verified: `hermes mcp list` = "No MCP servers configured"), so APPENDING the
+        // block (newline + body) yields a valid config with both the provider AND our server.
+        //
+        // FAIL-CLOSED guard: if the cloned config ALREADY has a top-level `mcp_servers:` key, a blind append
+        // would produce a duplicate/invalid key — fail with a clear diagnostic instead of a broken config.
+        // (The verified/expected case is no pre-existing mcp_servers, so the append below is correct.)
+        if (existsSync(configPath)) {
+          const clonedConfig = readFileSync(configPath, "utf8");
+          if (/^mcp_servers:/m.test(clonedConfig)) {
+            throw new Error(
+              `HDI1: the cloned ~/.hermes config.yaml already has a top-level 'mcp_servers:' key — a blind ` +
+                "append would produce an invalid (duplicate-key) config. Refusing to proceed (fail-closed). " +
+                `Expected NO pre-existing mcp_servers (verified via 'hermes mcp list' = "No MCP servers ` +
+                `configured"); merge the entry under the existing key instead.`,
+            );
+          }
+          // APPEND our standalone `mcp_servers:` block (newline + body) to the cloned provider config.
+          console.info(
+            `[HDI1] appending our mcp_servers block to the CLONED config.yaml at ${configPath} ` +
+              `(HERMES_HOME=${hermesHome}) — provider config preserved:\n${configBody}`,
+          );
+          appendFileSync(configPath, `\n${configBody}`, "utf8");
+        } else {
+          // No cloned config (the user's real ~/.hermes/config.yaml was absent) — write our body directly
+          // as the whole config (the original fresh-home path).
+          console.info(
+            `[HDI1] writing ISOLATED config.yaml at ${configPath} (HERMES_HOME=${hermesHome}); ` +
+              `no cloned config present:\n${configBody}`,
+          );
+          writeFileSync(configPath, configBody, "utf8");
+        }
 
         // Confirm the entry landed in the ISOLATED config (observability + a sanity gate before the drive).
+        // `hermes mcp list` reads config.yaml from HERMES_HOME, so it now reflects our direct write.
         const list = spawnSync("hermes", ["mcp", "list"], {
           env: { ...process.env, HERMES_HOME: hermesHome },
           encoding: "utf8",
@@ -195,13 +316,17 @@ dDesktop(
         console.info(`[HDI1] hermes mcp list (isolated home):\n${list.stdout ?? ""}`);
         expect(
           (list.stdout ?? "").includes(MCP_NAME),
-          `HDI1: the installed '${MCP_NAME}' must appear in 'hermes mcp list' under the isolated home`,
+          `HDI1: the directly-written '${MCP_NAME}' must appear in 'hermes mcp list' under the isolated home (this is the headless install-verification gate that the interactive 'hermes mcp add' fails — it CANCELS with no TTY and persists nothing).`,
         ).toBe(true);
 
         // ── (2) DRIVE: headless one-shot. A REAL Hermes Desktop reads config.yaml mcp_servers, SPAWNS our
         // bin, autonomously discovers + calls exec.echo -> the bin's governed pipeline -> REAL OpenShell.
-        // `--oneshot` prints ONLY the final result; `--hooks-auto-accept` lets a tool call proceed headless.
-        const driveArgs = ["--oneshot", "-p", NUDGE_PROMPT, "--hooks-auto-accept"];
+        // `hermes --help` is authoritative: `-z PROMPT, --oneshot PROMPT` (the prompt is --oneshot's VALUE;
+        // there is NO top-level `-p`), and the headless hook-approve flag is `--accept-hooks` (NOT
+        // `--hooks-auto-accept`). A wrong flag makes argparse exit 2 with EMPTY output before any model turn
+        // (pinned by a live run). `--oneshot` prints ONLY the final result; `--accept-hooks` lets a tool call
+        // proceed without a TTY prompt.
+        const driveArgs = ["--oneshot", NUDGE_PROMPT, "--accept-hooks"];
         // Optional provider/model flags the env needs (e.g. AGENTOS_LIVE_HERMES_MODEL_ARGS="--provider x --model y").
         const extraArgs = (process.env.AGENTOS_LIVE_HERMES_MODEL_ARGS ?? "").trim();
         if (extraArgs.length > 0) driveArgs.push(...extraArgs.split(/\s+/));
