@@ -4,7 +4,7 @@
 - **Branches**: slice/hdi1-hermes-desktop-install（in-repo helper + 單元測）、live = 同檔 gated test
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: helper + 測 <= 1 day（TS only;新增依賴 0）;live-run = user-initiated
-- **狀態**: **DRAFT（待你核准開工）**
+- **狀態**: **in-repo DONE（merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(零 findings:install argv 正確〔--args 最後、--env KEY=VALUE,對真 `hermes mcp add --help` 校準〕/ credential-blind〔secret-shaped env→THROW、fail-closed-on-detector-throw〕/ script 非破壞 + no-hermes clean-block / live HERMES_HOME 隔離,mutation 證實;core byte-unchanged;**真實 ~/.hermes config review 前後皆乾淨**)。**desktop-path LIVE-RUN 待跑**。
 
 ## (0) 動機 + ⚠️ 為何不是 Web UI（grounded)
 北極星 HEADLINE = capability × experience,但**體驗就是 Hermes Desktop**（站在巨人肩膀）。我們**不造 UI**;我們讓 Hermes Desktop 使用者把 Agent OS 的 governed 工具接進他既有的 Hermes。機制**已 live 證**（EXEC4c-b:真 Hermes spawn `exec-mcp-server-bin` → tools/list+tools/call → 治理 → 真 OpenShell exec + 共享 WORM）。HDI1 補的是**「真 Desktop 使用者」與「已證機制」之間的最後一哩**:把 bin 註冊進 `~/.hermes/config.yaml` 的 `mcp_servers`(desktop/CLI 路徑,異於我們 live 走的 `hermes acp` session/new 路徑)+ 用真 Desktop 確認。
@@ -41,11 +41,11 @@ SLICE-HDI1 —(a)`agentos`-side install helper(純函式建 `hermes mcp add` arg
 - in-repo(verify 內):`buildHermesMcpAddArgv` RED→GREEN(正確 `mcp add` argv;endpoints 入 `--env`;**斷言輸出無金鑰/secret 形狀**,mutation:塞 secret → 測翻紅)。script 無-gate/無-hermes clean-BLOCK + 非空 guard。
 - desktop-path live(gated,user-initiated):隔離 config + `hermes --oneshot` 自主呼叫 → 真 exec;非空 guard(skip/no-pass→FAIL)。
 
-## (6) Definition of Done（待實測填）
-- [ ] in-repo:RED → `pnpm run verify` exit 0(helper 單元測綠;EXEC4a/4c/pipeline/核不變;depcruise/secret-scan clean;live skip-under-verify、不在 verify;無 orphan)。
-- [ ] `buildHermesMcpAddArgv` 正確建 `hermes mcp add` argv(bin 絕對路徑 + endpoints 為 `--env` 非-secret)+ **無金鑰/secret**(mutation 證非空);script 無-hermes clean-BLOCK + 非空 guard + idempotent(remove+add 容錯)。
-- [ ] 獨立 Opus 4.8 review = PASS。
-- [ ] **desktop-path LIVE(你親跑/授權代跑後填)**:隔離 config + `hermes --oneshot -p` 讀 config.yaml mcp_servers → 真 Hermes Desktop 自主發現+呼叫我們 governed exec.echo → 真 OpenShell exec(真 exit=0+hello)+(kernel gate)共享鏈 entries≥1 + deny-by-default + bounded;**證「Hermes Desktop 使用者經 config.yaml 路徑真的用得到 Agent OS」**;不污染使用者既有 config。
+## (6) Definition of Done（實測）
+- [x] in-repo:RED → `pnpm run verify` **exit 0**(1046 passed + 26 skipped;`hermes-desktop-install` 10 單元測綠;EXEC4a/4c/pipeline/核 byte-unchanged〔EXEC4c/4a 30 測綠〕;depcruise 152 modules clean〔reviewer deep-import 親證 bite〕;secret-scan clean〔canary runtime-built〕;live skip-under-verify load-bearing、不在 verify;無 orphan)。
+- [x] `buildHermesMcpAddArgv` 正確建 `["mcp","add","agentos-exec","--command","node","--env",…K=V,"--args",binPath]`(**`--args` 最後**〔REMAINDER〕、`--env` KEY=VALUE、對真 `hermes mcp add --help` 校準)+ **credential-blind**(secret-shaped env→THROW、detector throw→THROW fail-closed;`renderHermesConfigYamlSnippet` 同 guard);mutation 翻紅(--args-order / secret-guard-removal / fail-open)。script **非破壞**(委派 `hermes mcp add/remove`、只動 agentos-exec 鍵、不手改 config.yaml)+ 無-hermes clean-BLOCK + manual snippet + idempotent(remove+add 容錯)+ secret→abort 在碰 Hermes 前。
+- [x] **獨立 Opus 4.8 review = PASS**(零 BLOCKER/MAJOR/MINOR;8 攻擊面 HELD/N/A;**真實 ~/.hermes config review 前後皆 `hermes mcp list`=乾淨**)。註:writer dev 中誤跑 install script(`hermes` 在真實 PATH),但無-TTY 提示處取消未持久化;經我 + reviewer 兩次獨立 `hermes mcp list` 確認真實 config 乾淨、已遠程化。
+- [ ] **desktop-path LIVE-RUN(你親跑/授權代跑後填)**:`HERMES_HOME=<temp>` 隔離 + install + `hermes --oneshot -p` 讀 config.yaml mcp_servers → 真 Hermes Desktop 自主發現+呼叫我們 governed exec.echo → 真 OpenShell exec(真 exit=0+hello)+(kernel gate)共享鏈 entries≥1 + deny-by-default + bounded;**證「Hermes Desktop 使用者經 config.yaml 路徑真的用得到 Agent OS」**;不污染使用者既有 config。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(install helper + script + desktop-path 測)。bin/EXEC4a/4c/核不受影響。使用者端移除 = `hermes mcp remove agentos-exec`。

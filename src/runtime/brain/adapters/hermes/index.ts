@@ -46,6 +46,11 @@ export {
 } from "./exec-seed-tools.js";
 export { makeArgsCredentialScreen } from "./args-credential-screen.js";
 export {
+  type HermesMcpAddOptions,
+  buildHermesMcpAddArgv,
+  renderHermesConfigYamlSnippet,
+} from "./hermes-desktop-install.js";
+export {
   type ExecMcpServer,
   type ExecMcpServerDeps,
   type JsonRpcRequest,
