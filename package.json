@@ -42,6 +42,7 @@
     "e2e:live-kernel-verify": "bash scripts/e2e-live-kernel-verify.sh",
     "e2e:live-partition-verify": "bash scripts/e2e-live-partition-verify.sh",
     "e2e:live-substrate-exec": "bash scripts/e2e-live-substrate-exec.sh",
+    "e2e:live-capstone": "bash scripts/e2e-live-capstone.sh",
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run spendguard:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && pnpm run secret-scan"
   },
   "dependencies": {

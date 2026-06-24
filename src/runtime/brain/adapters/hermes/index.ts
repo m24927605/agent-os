@@ -36,3 +36,12 @@ export {
   bindingWrappedExecEffect,
   runExecClosedLoop,
 } from "./exec-closed-loop.js";
+export {
+  echoBinding,
+  echoManifest,
+  lsBinding,
+  lsManifest,
+  seedBindings,
+  seedRegistry,
+} from "./exec-seed-tools.js";
+export { makeArgsCredentialScreen } from "./args-credential-screen.js";
