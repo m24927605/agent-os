@@ -45,7 +45,7 @@ SLICE-EXEC2 —（a)`makeOpenShellExecCapable(adapter: OpenShellSandboxAdapter):
 - [x] OpenShell 既有 streaming exec / `ExecOutcome` / 39 exec 測 / nemoclaw / EXEC1 / pipeline **未動**(git-diff 空;只 6 EXEC2 檔)。
 - [x] gated live 骨架:`exec-buffered.live.test.ts` gate `AGENTOS_LIVE_OPENSHELL=1`(skip-under-verify load-bearing)+ `e2e-live-substrate-exec.sh` 缺 gate clean BLOCK exit 0 + 非空 guard;`afterAll` destroy sandbox(不洩)。
 - [x] **獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A;5 mutation 翻紅;1 MINOR〔depcruise not-to-internal 把 src/runtime/ 視為單一 module 的 pre-existing 廣度限制,非本刀引入、wrapper 正確走 barrel,無需處理〕)。
-- [ ] **live-run(待跑後填)**:`AGENTOS_LIVE_OPENSHELL=1 pnpm run e2e:live-substrate-exec` 對真 OpenShell:create→exec 真命令→真 {exitCode,stdout,stderr} 經 effect(redact+cap)→destroy;綠 / 或揭露差異(fail-closed)。
+- [x] **live-run ✅ 通過(2026-06-24)**:`AGENTOS_LIVE_OPENSHELL=1 pnpm run e2e:live-substrate-exec` 對真 OpenShell gateway(127.0.0.1:17670)**綠**(1 test,843ms):create 真 sandbox → `makeExecEffect`(over `makeOpenShellExecCapable`)exec `["sh","-c","echo hello; echo err 1>&2; exit 0"]` → 斷言 `EffectResult{ok:true, detail 含 "hello" + "exit=0"}`(真輸出 redact+cap 回來)→ afterAll destroy sandbox。非空 guard 過(passed、非 skipped);gate load-bearing(若 gateway 不通則 createSandbox FAIL、若命令沒真跑則斷言 FAIL)→ 真 pass。**substrate exec primitive live-verified:governed effect 在真 sandbox 跑真命令拿真輸出。** 小註:此測斷言(非 log)真輸出;可選後續加診斷 log 提升可觀測性。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(wrapper + 測 + live 骨架)。OpenShell 既有碼/EXEC1/pipeline 不受影響。
