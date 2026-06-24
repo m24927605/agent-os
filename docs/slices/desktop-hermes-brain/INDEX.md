@@ -27,7 +27,7 @@
 ## 2. 切片分解
 | Slice | 範圍 | 狀態 |
 |---|---|---|
-| **DHB1**(in-repo seam) | `DesktopHermesTransport` port(submit intent → stream **ACP `session/update` 幀**)+ `DesktopHermesTurnSource implements HermesTurnSource`(ACP update→`HermesTurn`,credential-blind:不讀/不轉 api_key、不送 Agent OS secret)+ **Fake transport**(腳本化 ACP 幀 + 對抗幀)證接縫 + contract test(turn→BrainEvent 經 `HermesBrainShim`;transport throw/ malformed → fail-closed;偷渡 secret → denied@screen)+ gated live e2e 骨架(`e2e:live-desktop-hermes`,缺 `hermes`/gate → clean BLOCK)| DRAFT(先建)|
+| **DHB1**(in-repo seam) | `DesktopHermesTransport` port(submit intent → stream **ACP `session/update` 幀**)+ `DesktopHermesTurnSource implements HermesTurnSource`(ACP update→`HermesTurn`,credential-blind:不讀/不轉 api_key、不送 Agent OS secret)+ **Fake transport**(腳本化 ACP 幀 + 對抗幀)證接縫 + contract test(turn→BrainEvent 經 `HermesBrainShim`;transport throw/ malformed → fail-closed;偷渡 secret → denied@screen)+ gated live e2e 骨架(`e2e:live-desktop-hermes`,缺 `hermes`/gate → clean BLOCK)| ✅ **DONE**(seam + credential-blind〔結構+內容〕+ fail-closed,mutation 證實;接縫三檔未動;獨立 Opus4.8 review PASS)|
 | **DHB2**(live,gated) | 綁真 `hermes acp` 子進程(JSON-RPC over stdio:initialize→session/new→session/prompt→session/update;以 `hermes acp --check` 對映 Hermes 的 ACP dialect;確認 propose-only/permission 模式由 client 主導)+ live 證明(intent → 桌面 Hermes ACP 提案 → 治理 → effect)。**需本機跑起來(已裝 ✓)** | OPEN(接面已查實=ACP;待 live 綁定)|
 
 ## 3. ✅ 整合接面已查實(ACP);DHB2 待 live 綁定
