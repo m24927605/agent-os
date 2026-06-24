@@ -129,3 +129,32 @@ export function renderHermesConfigYamlSnippet(opts: HermesMcpAddOptions): string
   }
   return `${lines.join("\n")}\n`;
 }
+
+/**
+ * SLICE-HDI1-FIX — render a COMPLETE, valid `config.yaml` body for the HEADLESS install path.
+ *
+ * WHY THIS EXISTS (a real Hermes behavior we pinned in a live run): `hermes mcp add` is
+ * DISCOVERY-FIRST + INTERACTIVE — it spawns the server, lists its tools, and asks "Enable all N tools?".
+ * There is NO `--yes`/`--no-confirm`/`--force` flag (confirmed via `hermes mcp add --help`). Under a
+ * headless `spawnSync` (no TTY) that prompt CANCELS and NOTHING is persisted, so `hermes mcp list` then
+ * shows "No MCP servers configured" and a headless/CI install (and the HDI1 desktop-path live test)
+ * fails at the install-verification step BEFORE any model call.
+ *
+ * THE HEADLESS PATH: write `$HERMES_HOME/config.yaml` DIRECTLY. Hermes Desktop/CLI reads and
+ * AUTO-DISCOVERS `mcp_servers` from config.yaml with NO enable-confirm — the EXEC4c-b ACP path already
+ * proved Hermes auto-discovers + calls our tool without an enable prompt. So this renders the SAME
+ * credential-blind `mcp_servers` shape as `renderHermesConfigYamlSnippet` but as a STANDALONE, complete
+ * file body (top-level `mcp_servers:` key) Hermes can parse as the whole config.yaml. The interactive
+ * `hermes mcp add` (still valid when a human answers the prompt) is UNCHANGED.
+ *
+ * The output IS the snippet (the snippet already begins with the top-level `mcp_servers:` key and is a
+ * valid standalone file body) — so the headless write and the manual no-hermes fallback share one source
+ * of truth + one credential-blind guard. A secret-shaped env value THROWS (no secret ever lands in
+ * config.yaml); a detector that throws also THROWS (fail-closed).
+ */
+export function renderHermesMcpServersConfigYaml(opts: HermesMcpAddOptions): string {
+  // Delegate to the single credential-blind renderer: it asserts no-secret-env FIRST and emits a complete,
+  // standalone config.yaml body whose top-level key is `mcp_servers:` — exactly what Hermes parses as the
+  // whole config root.
+  return renderHermesConfigYamlSnippet(opts);
+}
