@@ -4,7 +4,7 @@
 - **Branch**: slice/exec3b-live-capstone（harness in-repo,skip-under-verify)
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: harness <= 1 day（TS only）；live-run = user-initiated
-- **狀態**: **DRAFT**
+- **狀態**: **harness DONE（merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(真 screen 非 vacuous / exec-effect rename byte-identical / seed-tools drift-free / (A)(B) gating load-bearing + 誠實切分 / readinessGated wrapper sound;core 未動)。**(A)(B) live-run = 待跑**(A: `AGENTOS_LIVE_DESKTOP_HERMES=1 AGENTOS_LIVE_OPENSHELL=1`;B: `AGENTOS_LIVE_OPENSHELL=1`)。
 
 ## (0) 動機 + ⚠️ 必須誠實面對的設計實況（grounded)
 EXEC3a 已 in-repo 證 join(scripted Hermes 提案 `exec.echo` → 治理 → Fake exec → 回饋 → 續推)。EXEC3b = 用**真 OpenShell ephemeral sandbox + 真 desktop Hermes ACP** 跑整個 join,並補 finding②(真 inbound screen)。
@@ -39,11 +39,13 @@ SLICE-EXEC3b —（a)gated live harness 組合:`runExecClosedLoop(realTransport=
 - harness in-repo:RED-first 對 **Fake**(skip-under-verify 的 gated 測在 verify 下 skip;harness 邏輯 + 真 screen helper 可用 Fake 單元證:secret-arg→denied@screen;`makeArgsCredentialScreen` mutation 證非空)。
 - (A)(B) live:gated,user-initiated。
 
-## (6) Definition of Done（待實測填）
-- [ ] harness:`pnpm run verify` exit 0(真 screen helper Fake 單元測綠;live 測 skip-under-verify;depcruise/secret-scan clean;EXEC3a/核未動;e2e 不在 verify)。
-- [ ] `makeArgsCredentialScreen`:secret-shaped arg → `{ok:false}`;mutation(放行)→ 紅。
-- [ ] dual-gate + clean-BLOCK + 非空 guard + ephemeral sandbox finally-destroy。
-- [ ] 獨立 Opus 4.8 review = PASS。
+## (6) Definition of Done（實測）
+- [x] harness:`pnpm run verify` **exit 0**(1002 passed + 23 skipped;`args-credential-screen` 6 單元測綠;(A)(B) live skip-under-verify〔load-bearing〕;depcruise 144 modules clean〔reviewer deep-import 親證 bite〕;secret-scan clean;EXEC3a/EXEC1/EXEC2/DHB/pipeline/closed-loop 核**未動**;e2e:live-capstone 不在 verify;無 orphan)。
+- [x] **`makeArgsCredentialScreen`(finding② 修)**:secret-shaped arg → `{ok:false}`、wired 為 deps.screen 時 effect 永不達(denied@screen);throw → deny(fail-closed);default = 真 redactSecrets-changed detector;reviewer always-ok mutation → 4 測翻紅。
+- [x] **(A) SAFETY / (B) SUCCESS gating + 誠實切分**:(A) dual-gate(真 Hermes+真 OpenShell)斷言 deny-by-default `executed===0`/propose-only/credential-blind/ephemeral-sandbox/bounded + log 真 Hermes 提案(觀測);(B) gate OpenShell、受控 exec.echo 提案 over 真 OpenShell 斷言真 "hello"+"exit=0";**不假稱 autonomous 成功**(autonomous=EXEC4)。
+- [x] exec-effect.ts rename(`defaultDetectSecret`→exported `defaultExecSecretDetector`)byte-identical(EXEC1/2 24 測綠);exec-seed-tools 抽取 drift-free(EXEC3a 11 綠,bindings byte-identical)。
+- [x] dual-gate + clean-BLOCK exit 0(無 gate)+ 非空 guard(skip/no-passed→FAIL)+ ephemeral sandbox finally-destroy(loop 自有 finally,(B) 斷言 destroyed===created);readinessGated wrapper test-local、verbatim delegate、premise 證實(startSandbox 是 noop shim)。
+- [x] **獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A;零 BLOCKER/MAJOR/MINOR;1 observation〔depcruise runtime 深度-1 廣度,pre-existing,本刀走 barrel〕)。
 - [ ] **(A) SAFETY live(你親跑/授權代跑後填)**:真 Hermes + 真 OpenShell:它的提案被治理、deny-by-default/propose-only/credential-blind/bounded/ephemeral-sandbox 成立;log 真 Hermes 提了什麼。
 - [ ] **(B) SUCCESS live**:受控 exec.echo/exec.ls over 真 OpenShell → 真輸出回饋,綠;sandbox 零憑證+無 egress 確認/記錄。
 

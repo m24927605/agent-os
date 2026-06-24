@@ -39,7 +39,7 @@ import { redactSecrets } from "../../../../audit/index.js";
 import type { CommitAppender } from "../../../../commitgate/index.js";
 import { type CostGate, InMemoryCostGate } from "../../../../cost/index.js";
 import type { GovernedCall, GovernedToolCallDeps } from "../../../../orchestration/index.js";
-import { ToolRegistry, authorizeToolInvoke } from "../../../../tools/index.js";
+import { type ToolRegistry, authorizeToolInvoke } from "../../../../tools/index.js";
 import type { SecretDetector } from "../../../brain/index.js";
 import {
   type AdapterResult,
@@ -53,6 +53,10 @@ import {
   bindingWrappedExecEffect,
   runExecClosedLoop,
 } from "./exec-closed-loop.js";
+// SLICE-EXEC3b — the seed exec tools (manifests + bindings + registry) are now SHARED with the live
+// capstone via this module, so both the EXEC3a join and the EXEC3b live drive compose the EXACT same
+// bindings (no drift). The test reuses them unchanged.
+import { seedBindings, seedRegistry } from "./exec-seed-tools.js";
 import { AcpStdioTransport } from "./index.js";
 
 const FAKE = fileURLToPath(new URL("./__fixtures__/fake-hermes-acp.mjs", import.meta.url));
@@ -95,58 +99,8 @@ function secretCanary(): string {
   return `sk-${"a1B2c3D4".repeat(3)}`; // 24 alnum chars => matches /sk-[A-Za-z0-9]{16,}/
 }
 
-// --- the two seed exec tools + their composer-held bindings ---------------------------------------
-
-/** A valid `exec.echo` ToolManifest (read-only, no host damage). */
-const echoManifest = {
-  name: "exec.echo",
-  version: "1.0.0",
-  description: "echo a line of text",
-  action: "tool:invoke",
-  resourcePattern: "exec/echo",
-  sideEffect: "read" as const,
-  idempotent: true,
-  requiresApproval: false,
-  bundleRefOnly: false,
-};
-/** A valid `exec.ls` ToolManifest. */
-const lsManifest = {
-  name: "exec.ls",
-  version: "1.0.0",
-  description: "list a path",
-  action: "tool:invoke",
-  resourcePattern: "exec/ls",
-  sideEffect: "read" as const,
-  idempotent: true,
-  requiresApproval: false,
-  bundleRefOnly: false,
-};
-
-/** exec.echo binding: argvPrefix ["echo"], strict {text}, toArgv -> [text]. */
-const echoBinding: ExecToolBinding = {
-  argvPrefix: ["echo"],
-  argSchema: z.object({ text: z.string() }).strict(),
-  toArgv: (a) => [(a as { text: string }).text],
-};
-/** exec.ls binding: argvPrefix ["ls"], strict {path}, toArgv -> [path]. */
-const lsBinding: ExecToolBinding = {
-  argvPrefix: ["ls"],
-  argSchema: z.object({ path: z.string() }).strict(),
-  toArgv: (a) => [(a as { path: string }).path],
-};
-
-function seedRegistry(): ToolRegistry {
-  const r = new ToolRegistry();
-  r.register(echoManifest);
-  r.register(lsManifest);
-  return r;
-}
-function seedBindings(): ReadonlyMap<string, ExecToolBinding> {
-  return new Map<string, ExecToolBinding>([
-    ["exec.echo", echoBinding],
-    ["exec.ls", lsBinding],
-  ]);
-}
+// The two seed exec tools + their composer-held bindings now live in the SHARED `exec-seed-tools.ts`
+// (imported above as `seedRegistry`/`seedBindings`), reused by the EXEC3b live capstone unchanged.
 
 // --- base deps (everything EXCEPT effect — the composer injects the binding-wrapped effect) -------
 

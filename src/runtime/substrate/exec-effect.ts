@@ -35,8 +35,15 @@ import type { ExecCapableSandboxAdapter, ExecCommandSpec } from "./port.js";
  */
 export type ExecSecretDetector = (value: unknown) => boolean;
 
-/** Default detector: a value is secret-shaped iff `redactSecrets` changes it (same as every bootstrap). */
-const defaultDetectSecret: ExecSecretDetector = (v) =>
+/**
+ * Default detector: a value is secret-shaped iff `redactSecrets` changes it (same as every bootstrap).
+ *
+ * Exported (SLICE-EXEC3b) so a sibling composition's inbound `deps.screen` (the hermes
+ * `makeArgsCredentialScreen`) can default to the SAME production detector this effect's ENV guard uses —
+ * one credential-blind shape across both inbound directions (brain args + composer env), reached via the
+ * substrate public barrel, never re-implemented.
+ */
+export const defaultExecSecretDetector: ExecSecretDetector = (v) =>
   JSON.stringify(redactSecrets(v)) !== JSON.stringify(v);
 
 /** Default buffered-output cap applied to the redacted combined stdout/stderr summary (64 KiB). */
@@ -86,7 +93,7 @@ export function makeExecEffect(
   opts: MakeExecEffectOptions = {},
 ): (toolCall: ExecToolCall) => Promise<EffectResult> {
   const maxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
-  const detectSecret = opts.detectSecret ?? defaultDetectSecret;
+  const detectSecret = opts.detectSecret ?? defaultExecSecretDetector;
 
   return async (toolCall: ExecToolCall): Promise<EffectResult> => {
     try {
