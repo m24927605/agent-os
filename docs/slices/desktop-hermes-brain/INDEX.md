@@ -28,7 +28,8 @@
 | Slice | 範圍 | 狀態 |
 |---|---|---|
 | **DHB1**(in-repo seam) | `DesktopHermesTransport` port(submit intent → stream **ACP `session/update` 幀**)+ `DesktopHermesTurnSource implements HermesTurnSource`(ACP update→`HermesTurn`,credential-blind:不讀/不轉 api_key、不送 Agent OS secret)+ **Fake transport**(腳本化 ACP 幀 + 對抗幀)證接縫 + contract test(turn→BrainEvent 經 `HermesBrainShim`;transport throw/ malformed → fail-closed;偷渡 secret → denied@screen)+ gated live e2e 骨架(`e2e:live-desktop-hermes`,缺 `hermes`/gate → clean BLOCK)| ✅ **DONE**(seam + credential-blind〔結構+內容〕+ fail-closed,mutation 證實;接縫三檔未動;獨立 Opus4.8 review PASS)|
-| **DHB2**(live,gated) | 綁真 `hermes acp` 子進程(JSON-RPC over stdio:initialize→session/new→session/prompt→session/update;以 `hermes acp --check` 對映 Hermes 的 ACP dialect;確認 propose-only/permission 模式由 client 主導)+ live 證明(intent → 桌面 Hermes ACP 提案 → 治理 → effect)。**需本機跑起來(已裝 ✓)** | OPEN(接面已查實=ACP;待 live 綁定)|
+| **DHB2a**(in-repo) | `AcpStdioTransport implements DesktopHermesTransport`:spawn `hermes acp` + JSON-RPC over stdio(initialize→session/new→session/prompt→session/update)+ propose-only(`session/request_permission` 一律 deny、只擷取提案)+ fail-closed + credential-blind;**用 fake `hermes acp` 子進程單元測**(verify 內,不花 credits)。spec:`DHB2-real-acp-stdio-transport.md` | DRAFT(spec 好,待開工)|
+| **DHB2b**(live,gated,**user-initiated**) | 對**真 `hermes acp` + 你已認證的 Hermes** 跑 `e2e:live-desktop-hermes`:確認確切 ACP dialect(`--check`)+ propose-only + intent→提案→治理→effect 全鏈。**用你 Hermes 的 model credits/credentials → 由你親跑**(設 `AGENTOS_LIVE_DESKTOP_HERMES=1`) | OPEN(待 DHB2a + 你親跑)|
 
 ## 3. ✅ 整合接面已查實(ACP);DHB2 待 live 綁定
 接面不再是未知:`hermes acp`(JSON-RPC over stdio)。DHB1 的 transport port + parser + Fake 把 ACP 幀形狀抽象化、in-repo 證接縫(不啟動真 `hermes acp`);DHB2 才 launch 真子進程 + 以 `hermes acp --check`/實跑對映確切 ACP 訊息 dialect + 證 propose-only。本機 desktop Hermes 已安裝(v0.17.0)。
