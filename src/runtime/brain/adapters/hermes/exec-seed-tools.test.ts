@@ -185,6 +185,30 @@ describe("HDI2a-1 tools/list advertises the full read-only seed set, each schema
     }
   });
 
+  // INFO polish: each advertised description is SOURCED from the registered manifest (single source of
+  // truth), so EVERY seed tool (not just echo/ls) gets its real description — never the tool-name fallback.
+  // NON-VACUITY: before the fix, cat/head/pwd/wc/grep fell back to their NAME; now they are the manifests'.
+  it("sources each tool's description from its registered manifest (not the tool-name fallback)", async () => {
+    const { deps } = await makeServerKit();
+    const server = createExecMcpServer(deps);
+    const registry = seedRegistry();
+
+    const resp = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const tools = (resp.result as { tools: { name: string; description: string }[] }).tools;
+
+    for (const tool of tools) {
+      const manifestDesc = registry.lookup(tool.name)?.description;
+      expect(manifestDesc).toBeDefined();
+      // The advertised description equals the registered manifest description (no drift, no name fallback).
+      expect(tool.description).toBe(manifestDesc);
+      // And it is a real description, NOT the tool-name fallback.
+      expect(tool.description).not.toBe(tool.name);
+    }
+    // Spot-check a NEW tool that previously fell back to its name.
+    const wc = tools.find((t) => t.name === "exec.wc");
+    expect(wc?.description).toBe("count lines, words, and bytes of a file");
+  });
+
   // Each NEW tool's DERIVED schema carries the strict guarantees (string-only fields, additionalProperties:false).
   it("derives {path} for cat/head/wc, {pattern,path} for grep, and the EMPTY strict object for pwd", async () => {
     const { deps } = await makeServerKit();
