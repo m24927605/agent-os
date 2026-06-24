@@ -4,7 +4,7 @@
 - **Branches**: slice/exec4c-stdio-bin（in-repo)、slice/exec4c-live-autonomous（live)
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: EXEC4c-a <= 1–1.5 day（TS only)；EXEC4c-b = live(user-initiated)
-- **狀態**: **DRAFT**
+- **狀態**: **EXEC4c-a DONE（merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(per-line fail-closed / stdout protocol-only / single-execution-path over stdio / deny-by-default〔canary stdout+stderr 皆無〕,mutation 證實;core byte-unchanged;descriptor McpServerStdio 且未 wired;FAKE 不拉 vendor)。**EXEC4c-b OPEN**(live;真 Hermes spawn bin + 共享 kernel WORM)。
 
 ## (0) 動機 + ⚠️ 為何是 stdio bin（live 釘出)
 EXEC4b live 釘實:**Hermes `hermes acp` 只支援 STDIO mcpServers**(`acp_adapter/server.py:880-891` AgentCapabilities 無 mcp_capabilities → 預設 http=False/sse=False;server.py:900「ACP is stdio-only, local-trust」)。故 http loopback 不可用,autonomous 路徑 = **Hermes SPAWN 一個 Agent OS stdio MCP server bin**。
@@ -31,11 +31,11 @@ NEW(hermes vendor zone):
 ## (5) Test-first plan（RED 先行,EXEC4c-a)
 spawn bin 子進程 + Fake MCP client over stdio + Fake substrate:tools/list 只 2 工具;bound call governed(receipt-before-effect);unknown/poisoned/secret → isError:true substrate 0;malformed stdin line → JSON-RPC error(fail-closed);stdout 僅協定(spy:無非協定輸出);single-execution-path(mutation:bin 繞 handle 直執行 → deny 測紅);無 orphan(bin 子進程 teardown)。
 
-## (6) Definition of Done（待實測填)
-- [ ] EXEC4c-a:RED → `pnpm run verify` exit 0(bin 子進程 + Fake 測綠;EXEC4a/EXEC3a/EXEC1/2/DHB/pipeline 不變;depcruise/secret-scan clean;live 不在 verify;無 orphan)。
-- [ ] tools/list-only-bounded / governed tools/call / unknown+poisoned+secret→isError substrate 0 / stdio fail-closed / stdout-protocol-only / single-execution-path,各 mutation 證非空。
-- [ ] bin credential-blind(minimal env)+ WE-stay-executor(adversarial JSON-RPC 仍 governed)。
-- [ ] EXEC4c-a 獨立 Opus 4.8 review = PASS。
+## (6) Definition of Done（實測）
+- [x] EXEC4c-a:RED → `pnpm run verify` **exit 0**(1032 passed + 24 skipped;stdio core 6 + subprocess〔spawn 真 dist bin,FAKE 模式〕3 測綠;EXEC4a〔11〕/EXEC4b〔6〕/EXEC3a〔11〕/acp-stdio〔11/4〕/EXEC1/2/DHB/pipeline 不變;depcruise 150 modules clean〔reviewer deep-import 親證 bite〕;secret-scan clean;live 不在 verify;**無 orphan**)。
+- [x] tools/list-only-bounded(exec.echo/ls,schema 衍生)/ governed tools/call(commit-before-effect receipt-before-effect)/ unknown+poisoned+secret→isError:true **substrate 0**(legit 僅 1)/ **stdio per-line fail-closed**(malformed→-32700、loop 存活)/ **stdout protocol-only**(診斷走 stderr)/ **single-execution-path**(只經 `createExecMcpServer.handle`→`runGovernedToolCall`),各 mutation 翻紅證實(malformed-fabricate / stdout-banner / bypass-handle / deny-vectors)。canary stdout+stderr **皆無**。
+- [x] bin credential-blind(minimal env、不讀 ~/.hermes)+ WE-stay-executor(bin 編譯碼;adversarial JSON-RPC 仍 governed;FAKE 不拉 vendor〔lazy openshell import〕);ephemeral sandbox create-on-startup/destroy-on-exit/SIGTERM/SIGINT;descriptor McpServerStdio 且**未** wired 進 acp-stdio 預設(仍 [])。
+- [x] **EXEC4c-a 獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A;4 mutation 翻紅;2 INFO〔REAL-mode WORM 暫 in-memory stub→EXEC4c-b 接共享 kernel;redaction best-effort,真邊界=零憑證 no-egress sandbox〕皆誠實標記、不弱化已測不變量)。
 - [ ] **EXEC4c-b(你親跑/授權代跑後填)**:stdio descriptor → 真 Hermes spawn bin → 自主 tools/list+tools/call → 真 OpenShell exec(>=1 真 exit=0)+ deny-by-default for 其他;WORM 寫共享 kernel(統一 evidence)確認;若仍分歧 → fail-closed 診斷。
 
 ## (7) Rollback
