@@ -45,8 +45,26 @@ export interface GovernedToolCallDeps<TC extends GovernedCall, R> {
 
 export type GovernedStage = "screen" | "policy" | "cost" | "commit";
 
+/**
+ * The outcome of settling the REAL cost AFTER the effect ran (`cost.commit`). Surfaced on every
+ * executed outcome so a post-effect deny or a recorded budget overrun is NEVER silently swallowed.
+ * The effect is irreversible (commit-before-effect -> effect -> settle), so settlement does NOT change
+ * the executed status; it is an auditable, alertable signal for the caller / composition root. A
+ * recorded `overrun` exhausts the budget so every SUBSEQUENT reserve is denied (the hard-cap is
+ * proactive on reserve; an in-flight overshoot is recorded, not erased — cf. the cost-port invariant).
+ */
+export type CostSettlement =
+  | { status: "committed"; overrun: boolean }
+  | { status: "denied"; reason: string };
+
 export type GovernedOutcome<R> =
-  | { status: "executed"; reservationId: string; receipt: R; detail?: string }
+  | {
+      status: "executed";
+      reservationId: string;
+      receipt: R;
+      detail?: string;
+      settlement: CostSettlement;
+    }
   | { status: "denied"; stage: GovernedStage; reason: string };
 
 /** Run one brain-proposed tool call through the governed pipeline. Fail-closed at every gate. */
@@ -94,14 +112,31 @@ export async function runGovernedToolCall<TC extends GovernedCall, R>(
     return { status: "denied", stage: "commit", reason: committed.reason };
   }
 
-  // 5) effect ran -> settle the real cost.
-  await deps.cost.commit(toolCall.context, reservation.reservationId, {
-    actualTokens: committed.result.tokensUsed ?? deps.estimateTokens(toolCall),
-  });
+  // 5) effect ran -> settle the real cost. The effect is IRREVERSIBLE, so the status STAYS "executed"
+  // regardless of how settlement lands; but the settlement result is SURFACED (never swallowed) so a
+  // post-effect deny or a recorded budget overrun can be audited/alerted on. A commit that THROWS is
+  // mapped to a static `denied` reason (no error-message/secret leak) — it must NOT propagate (that
+  // would lose the receipt of an effect that already ran) and must NOT be silently dropped.
+  let settlement: CostSettlement;
+  try {
+    const settled = await deps.cost.commit(toolCall.context, reservation.reservationId, {
+      actualTokens: committed.result.tokensUsed ?? deps.estimateTokens(toolCall),
+    });
+    settlement =
+      settled.status === "committed"
+        ? { status: "committed", overrun: settled.overrun }
+        : { status: "denied", reason: settled.reason };
+  } catch {
+    settlement = {
+      status: "denied",
+      reason: "cost settlement failed (post-effect; effect already ran)",
+    };
+  }
   return {
     status: "executed",
     reservationId: reservation.reservationId,
     receipt: committed.receipt,
     detail: committed.result.detail,
+    settlement,
   };
 }

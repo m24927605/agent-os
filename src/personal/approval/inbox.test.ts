@@ -29,9 +29,15 @@ function previewOf(title: string): PlanPreview {
   };
 }
 
-// An executed outcome a stub runner returns (P2-I GovernedOutcome shape).
+// An executed outcome a stub runner returns (P2-I GovernedOutcome shape). Carries the now-required
+// `settlement` (the surfaced cost.commit result); the inbox passes the runner's outcome through opaquely.
 function executed(): GovernedOutcome<string> {
-  return { status: "executed", reservationId: "res-1", receipt: "receipt-1" };
+  return {
+    status: "executed",
+    reservationId: "res-1",
+    receipt: "receipt-1",
+    settlement: { status: "committed", overrun: false },
+  };
 }
 
 describe("ApprovalInbox — explicit-approve is the ONLY effect entry (deny-by-default)", () => {
