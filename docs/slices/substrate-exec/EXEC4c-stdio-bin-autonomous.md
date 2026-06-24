@@ -1,0 +1,47 @@
+# SLICE-EXEC4c: stdio MCP bin — 真 Hermes 自主 spawn + 呼叫我們的 governed 工具（autonomous capstone）
+
+- **Phase**: autonomous capstone（Hermes-spawned governed MCP server over stdio)
+- **Branches**: slice/exec4c-stdio-bin（in-repo)、slice/exec4c-live-autonomous（live)
+- **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
+- **Size budget**: EXEC4c-a <= 1–1.5 day（TS only)；EXEC4c-b = live(user-initiated)
+- **狀態**: **DRAFT**
+
+## (0) 動機 + ⚠️ 為何是 stdio bin（live 釘出)
+EXEC4b live 釘實:**Hermes `hermes acp` 只支援 STDIO mcpServers**(`acp_adapter/server.py:880-891` AgentCapabilities 無 mcp_capabilities → 預設 http=False/sse=False;server.py:900「ACP is stdio-only, local-trust」)。故 http loopback 不可用,autonomous 路徑 = **Hermes SPAWN 一個 Agent OS stdio MCP server bin**。
+- **設計**:`exec-mcp-server-bin`(Agent OS 碼,經 **newline-delimited JSON-RPC over stdin/stdout** 講 MCP——同 fake-hermes-acp.mjs 的 framing)dispatch 進 **既有 `createExecMcpServer(deps).handle`**(transport-agnostic,單一 governed edge,EXEC4a 已證)。bin 自建 deps:真 OpenShell substrate(`makeOpenShellExecCapable` + ephemeral sandbox)+ seed bindings + screen/authorize/cost + **WORM appender**。descriptor = `{name:"agentos-exec", command:"node", args:[bin], env:<minimal>}`(stdio)。
+- **WE-stay-executor(仍成立)**:bin 是 Agent OS **編譯碼**;即使 Hermes spawn 它、控其 stdin/stdout/生命週期,**所有 tools/call 仍只經 `runGovernedToolCall`**(brain 無法竄改其治理邏輯;adversarial JSON-RPC → 仍 governed;kill bin → 只是停、fail-closed)。
+- **⚠️ WORM topology(誠實 + 緩解)**:bin 在 Hermes 行程樹內、是獨立行程。**緩解**:bin 的 WORM appender = **`createIngestAppender` 寫同一個真 WORM kernel**(via ingest gRPC)→ **evidence 統一成一條鏈、可獨立驗證**,非分裂的 in-memory log。(open decision:統一 kernel〔建議〕vs in-memory split。)
+
+## (1) Recommended design
+stdio bin 包 `createExecMcpServer.handle`;deps 含真 OpenShell + 寫共享 WORM kernel;descriptor 為 stdio。
+
+## (2) Seam change（最小,最大重用)
+NEW(hermes vendor zone):
+1. `src/runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin.ts`(+ 編譯/執行入口):stdin newline-delimited JSON-RPC reader → `createExecMcpServer(deps).handle(req)` → stdout newline-delimited response。**stdout 僅協定**(無污染,同 ACP stdio 紀律);malformed line → JSON-RPC error(fail-closed,非假 ok)。bin 啟動建 deps + ephemeral sandbox(init create / exit destroy);**minimal env**(無 Agent OS secret);自建 OpenShell mTLS(讀 OpenShell client materials,非我經手的 secret);exec env placeholder-only。
+2. 一個 helper 把 stdio descriptor 餵給 acp-stdio 的 `mcpServers`(EXEC4b 已加可注入 `mcpServers?`,EXEC4c 用 stdio 形狀的 descriptor)。
+**REUSE 不動**:`createExecMcpServer`(EXEC4a 的 governed handle + single-execution-path)、`seedRegistry`/`seedBindings`、`bindingWrappedExecEffect`、`makeArgsCredentialScreen`、`makeOpenShellExecCapable`、`createIngestAppender`、`runGovernedToolCall`。
+
+## (3) EXEC4c-a（in-repo)/ EXEC4c-b（live)
+- **EXEC4c-a(verify-green,無 Hermes/credits)**:把 bin 當**子進程** spawn(`node <bin>`),Fake MCP client 經其 stdio 送 `initialize`/`tools/list`/`tools/call`,deps = Fake substrate + Fake/in-memory appender。斷言:tools/list 只 exec.echo/ls;bound tools/call 經全治理(receipt before effect);unknown/secret/poisoned → isError:true、substrate 0;**stdio framing fail-closed**(malformed line → error、stdout 僅協定);**single-execution-path**(重用 EXEC4a handle)。RED-first;non-vacuity。
+- **EXEC4c-b(live,user-initiated,dual-gate)**:advertise **stdio descriptor** → 真 Hermes **spawn 我們的 bin** → `tools/list` 自主發現 → `tools/call` 呼叫 → bin 的 governed pipeline → **真 OpenShell exec** → 結果回 → Hermes 續推。WORM 寫**共享真 kernel**(統一 evidence)。斷言 >=1 autonomous EXECUTED(真 exit=0)+ deny-by-default for Hermes 其他工具。**這是 (A)+(B)+(EXEC4b http)都無法展示的「真 Hermes 自主呼叫我們的工具」**。
+
+## (4) 不變量（重用 EXEC4a 7 + NEW)
+重用(bin 包同一 handle):deny-by-default(只暴露 bounded)/ single-execution-path / schema-no-drift / commit-before-effect / credential-blind / fail-closed / composer-fixed argv。NEW:**stdio framing fail-closed**(malformed JSON line → JSON-RPC error,stdout 僅協定、無污染)/ **bin deps credential-blind**(minimal env、無 Agent OS secret、exec env placeholder-only)/ **WORM 統一**(寫共享 kernel,可獨立驗證)/ **WE-stay-executor under Hermes-spawn**(bin 編譯碼,adversarial JSON-RPC 仍 governed)。
+
+## (5) Test-first plan（RED 先行,EXEC4c-a)
+spawn bin 子進程 + Fake MCP client over stdio + Fake substrate:tools/list 只 2 工具;bound call governed(receipt-before-effect);unknown/poisoned/secret → isError:true substrate 0;malformed stdin line → JSON-RPC error(fail-closed);stdout 僅協定(spy:無非協定輸出);single-execution-path(mutation:bin 繞 handle 直執行 → deny 測紅);無 orphan(bin 子進程 teardown)。
+
+## (6) Definition of Done（待實測填)
+- [ ] EXEC4c-a:RED → `pnpm run verify` exit 0(bin 子進程 + Fake 測綠;EXEC4a/EXEC3a/EXEC1/2/DHB/pipeline 不變;depcruise/secret-scan clean;live 不在 verify;無 orphan)。
+- [ ] tools/list-only-bounded / governed tools/call / unknown+poisoned+secret→isError substrate 0 / stdio fail-closed / stdout-protocol-only / single-execution-path,各 mutation 證非空。
+- [ ] bin credential-blind(minimal env)+ WE-stay-executor(adversarial JSON-RPC 仍 governed)。
+- [ ] EXEC4c-a 獨立 Opus 4.8 review = PASS。
+- [ ] **EXEC4c-b(你親跑/授權代跑後填)**:stdio descriptor → 真 Hermes spawn bin → 自主 tools/list+tools/call → 真 OpenShell exec(>=1 真 exit=0)+ deny-by-default for 其他;WORM 寫共享 kernel(統一 evidence)確認;若仍分歧 → fail-closed 診斷。
+
+## (7) Rollback
+- `git revert <merge-sha>`(新 bin + descriptor helper + 測)。EXEC4a/EXEC4b/核不受影響;mcpServers 復原 [] 即回非廣告。
+
+## (8) Depends-on / blocks + ⚠️ 待你決定
+- Depends-on:EXEC4a(`createExecMcpServer` governed handle)、EXEC4b(acp-stdio 可注入 mcpServers)、EXEC3a(bindings)、EXEC2(`makeOpenShellExecCapable`)、`createIngestAppender`(共享 WORM)、DHB(真 Hermes ACP)。Blocks:無(autonomous capstone 終態)。DAG 無 cycle ☑。
+- **待你決定**:① **WORM topology**:bin 寫**共享真 kernel**(統一 evidence,建議)vs in-memory split。② bin 的 sandbox 生命週期:init-create/exit-destroy(建議)vs per-call。③ bin 自建 OpenShell mTLS 連線(讀 OpenShell client materials)是否接受(這非我經手的 secret;是 OpenShell 既有信任根)。④ 是否接受「Hermes-spawned governance 行程」這個 topology(WE-stay-executor 仍成立,但 bin 在 Hermes 行程樹內)。
+- **誠實前提**:EXEC4c-a 證 stdio bin 的 governed 邊界 + framing fail-closed(Fake);真 Hermes 自主 spawn+discover+call + 真 OpenShell exec + 共享 WORM = EXEC4c-b/live;redaction best-effort,真 credential 邊界 = zero-credential no-egress sandbox。
