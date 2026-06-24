@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SLICE-EXEC4c-a — the Hermes-SPAWNABLE governed exec MCP server BIN (stdio transport).
+ * SLICE-EXEC4c-a/b — the Hermes-SPAWNABLE governed exec MCP server BIN (stdio transport).
  *
  * A real Hermes spawns this compiled Agent OS `.js` (`node dist/.../exec-mcp-server-bin.js`) and speaks
  * MCP to it over the child's stdin/stdout (newline-delimited JSON-RPC). The bin builds the EXEC4a
@@ -12,27 +12,43 @@
  *
  * TWO DEPS MODES:
  *   • REAL (default): a real OpenShell exec-capable substrate (`makeOpenShellExecCapable`) + an ephemeral
- *     OpenShell sandbox + seedRegistry/seedBindings + makeArgsCredentialScreen + an in-process WORM
- *     appender + an in-memory cost hard-cap. The shared-kernel WORM topology + the real OpenShell exec are
- *     validated LIVE in EXEC4c-b (this REAL wiring is best-effort here — diagnostics route to stderr).
+ *     OpenShell sandbox + seedRegistry/seedBindings + makeArgsCredentialScreen + the SHARED-KERNEL WORM
+ *     appender + an in-memory cost hard-cap. The WORM appender is `createPartitionedIngestSink(<the
+ *     grpc-js AppendTransport>, <the bin's tenant binding>)` — the SAME shared-kernel composition the
+ *     Enterprise composition root wires — so EVERY tools/call receipt is shipped over the ingest wire to
+ *     the kernel's PARTITIONED AppendService and lands in the SAME independently-verifiable WORM chain as
+ *     the rest of the system (UNIFIED EVIDENCE), not a split in-memory log. The kernel ingest endpoint +
+ *     the OpenShell endpoint arrive via the descriptor's MINIMAL env (NON-secret routing, NEVER a
+ *     credential). The real OpenShell exec + the receipts landing in the real shared kernel chain are
+ *     validated LIVE in EXEC4c-b (this REAL wiring's diagnostics route to stderr).
  *   • FAKE (gated by AGENTOS_EXEC_MCP_FAKE=1 — for the in-repo subprocess test ONLY): a FakeSandboxAdapter
- *     + an in-memory appender + a created fake sandbox. This is what EXEC4c-a's subprocess test exercises.
+ *     + an IN-MEMORY monotonic-receipt appender + a created fake sandbox. FAKE NEVER reaches the kernel.
+ *     This is what EXEC4c-a's subprocess test exercises.
+ *
+ * COMMIT-BEFORE-EFFECT holds over the shared-kernel appender: `runGovernedToolCall` -> `commitBeforeEffect`
+ * appends the AuditEvent, AWAITS the kernel receipt, and ONLY THEN runs the effect. A kernel reject/timeout
+ * (the grpc-js adapter fails closed) aborts the commit so the effect never runs (no receipt => no effect).
  *
  * STDOUT PROTOCOL-ONLY: NOTHING but JSON-RPC protocol envelopes go to stdout (the loop core enforces it).
  * ALL diagnostics (mode, sandbox lifecycle, errors) route to stderr — a real Hermes parses stdout as the
  * MCP wire, so a single banner byte on stdout would corrupt the protocol.
  *
  * CREDENTIAL-BLIND / MINIMAL ENV: the bin NEVER reads `~/.hermes`; it puts NO Agent OS secret on stdout;
- * it reads only the env it needs. The REAL credential boundary is a zero-credential, no-egress sandbox —
- * redaction is best-effort, defense-in-depth.
+ * it reads only the env it needs (NON-secret endpoints + the OpenShell client materials' dir). The REAL
+ * credential boundary is a zero-credential, no-egress sandbox — redaction is best-effort, defense-in-depth.
  *
  * Cohesion/coupling: lives in the hermes vendor-adapter zone (`adapters/hermes/mcp/`). Imports ONLY Node
- * built-ins + sibling hermes modules + the neutral public barrels (cost/tools) + the OpenShell adapter
- * barrel (REAL mode). No deep cross-module import.
+ * built-ins + sibling hermes modules + the neutral public barrels (audit/cost/tools/ingest/tenant) + the
+ * OpenShell adapter barrel (REAL mode, lazy). No deep cross-module import. The ingest barrel is vendor-
+ * neutral (no vendor token), and this zone is under an adapter sub-tree, so dependency-cruiser holds.
  */
+import { pathToFileURL } from "node:url";
+import type { AppendTransport } from "../../../../../audit/index.js";
 import type { CommitAppender } from "../../../../../commitgate/index.js";
 import { type CostGate, InMemoryCostGate } from "../../../../../cost/index.js";
+import type { TenantBinding } from "../../../../../tenant/index.js";
 import { authorizeToolInvoke } from "../../../../../tools/index.js";
+import { createPartitionedIngestSink, createRpcAppendTransport } from "../../../../ingest/index.js";
 import type { ExecCapableSandboxAdapter } from "../../../../substrate/index.js";
 import { FakeSandboxAdapter } from "../../../../substrate/index.js";
 import { makeArgsCredentialScreen } from "../args-credential-screen.js";
@@ -54,6 +70,18 @@ const BIN_CONTEXT = {
   requestId: "req-bin",
 } as const;
 
+/**
+ * The bin's tenant binding for the SHARED-KERNEL WORM. partitionId routes every append to THIS tenant's
+ * INDEPENDENT kernel partition chain (its own head + signing key); storeRef is the (non-secret) store ref.
+ * Closure-bound to one binding inside `createPartitionedIngestSink`, so the bin can only ever write its
+ * own partition — cross-tenant write is structurally impossible. All NON-secret routing metadata.
+ */
+const BIN_TENANT_BINDING: TenantBinding = {
+  tenantId: BIN_CONTEXT.tenantId,
+  partitionId: BIN_CONTEXT.tenantId,
+  storeRef: `worm:${BIN_CONTEXT.tenantId}`,
+};
+
 /** A sandbox spec for the ephemeral sandbox the bin provisions on startup. */
 interface BinSandboxSpec {
   readonly image: string;
@@ -65,20 +93,42 @@ interface SubstrateKit {
   readonly sandboxSpec: BinSandboxSpec;
 }
 
+/** Injectable seams so the in-repo test builds the bin's REAL deps with NO real kernel + NO real OpenShell. */
+export interface BuildBinOpts {
+  /**
+   * Inject an `AppendTransport` for the REAL-mode WORM (the in-repo test injects a FAKE; the live bin omits
+   * it and a grpc-js `createRpcAppendTransport(fromEnv)` is built). Ignored in FAKE mode (in-memory stub).
+   */
+  readonly ingestTransport?: AppendTransport;
+  /**
+   * Inject the exec-capable substrate (the in-repo test injects a Fake so it stays in-repo; the live bin
+   * omits it and builds the real OpenShell adapter). When injected, the bin does NOT build OpenShell.
+   */
+  readonly substrate?: ExecCapableSandboxAdapter;
+  /** Test hook invoked the moment the REAL effect starts (proves commit-before-effect order). */
+  readonly onEffect?: () => void;
+}
+
 /**
  * Build the exec-capable substrate for the active mode. FAKE (AGENTOS_EXEC_MCP_FAKE=1): an in-memory
  * FakeSandboxAdapter (echoes argv) — the in-repo subprocess test path. REAL: a real OpenShell adapter
- * (best-effort here; the live exec is EXEC4c-b). REAL construction is lazy so the bin's FAKE path never
- * pulls the OpenShell RPC vendor at module load.
+ * (the live exec is EXEC4c-b). REAL construction is lazy so the bin's FAKE path never pulls the OpenShell
+ * RPC vendor at module load. An injected substrate short-circuits both (the in-repo REAL-WORM test path).
  */
-async function buildSubstrate(fake: boolean): Promise<SubstrateKit> {
+async function buildSubstrate(
+  fake: boolean,
+  injected: ExecCapableSandboxAdapter | undefined,
+): Promise<SubstrateKit> {
+  if (injected !== undefined) {
+    return { substrate: injected, sandboxSpec: { image: "injected" } };
+  }
   if (fake) {
     diag("mode=FAKE (in-memory FakeSandboxAdapter)");
     return { substrate: new FakeSandboxAdapter(), sandboxSpec: { image: "fake" } };
   }
   diag("mode=REAL (OpenShell exec-capable substrate)");
   // Lazy import so FAKE mode never loads the OpenShell RPC vendor. REAL-mode wiring is best-effort
-  // here — the live OpenShell exec + the shared-kernel WORM are validated by EXEC4c-b.
+  // here — the live OpenShell exec is validated by EXEC4c-b.
   const { OpenShellSandboxAdapter, createOpenShellGrpcTransport, makeOpenShellExecCapable } =
     await import("../../../../openshell/index.js");
   const endpoint = process.env.AGENTOS_OPENSHELL_ENDPOINT ?? "127.0.0.1:17670";
@@ -98,17 +148,49 @@ async function buildSubstrate(fake: boolean): Promise<SubstrateKit> {
 }
 
 /**
- * Build an in-process WORM appender. FAKE mode: a pure in-memory monotonic-receipt appender. REAL mode:
- * best-effort the SAME in-memory appender (the shared-kernel `createIngestAppender` topology needs the
- * live ingest transport + materials — wired + validated in EXEC4c-b, not in this in-repo slice).
+ * Build the WORM appender for the active mode.
+ *
+ * FAKE mode: a pure IN-MEMORY monotonic-receipt appender (the EXEC4c-a subprocess test's invariant — FAKE
+ * NEVER reaches the kernel, even if a transport is available).
+ *
+ * REAL mode: the SHARED-KERNEL appender `createPartitionedIngestSink(<AppendTransport>, BIN_TENANT_BINDING)`
+ * — the SAME shared-kernel composition the Enterprise composition root wires. EVERY tools/call receipt is
+ * canonicalized + redacted (inside `createIngestAppender`, reused by the partitioned sink) and shipped over
+ * the wire to the kernel's PARTITIONED AppendService bound to the bin's tenant — so the bin's receipts land
+ * in the SAME independently-verifiable chain (UNIFIED EVIDENCE). The transport is injectable: the in-repo
+ * test supplies a Fake (no real kernel); the live bin omits it and a grpc-js `createRpcAppendTransport` is
+ * built from the NON-secret `AGENTOS_KERNEL_INGEST_ENDPOINT` env. Fail-closed: the transport (and the S1
+ * parser) REJECT on any non-receipt, which aborts the commit so the effect never runs.
  */
-function buildAppender(): CommitAppender<unknown, { id: number }> {
-  let receiptId = 0;
-  return { append: () => Promise.resolve({ id: ++receiptId }) };
+export function buildBinAppender(
+  fake: boolean,
+  opts: BuildBinOpts = {},
+): CommitAppender<unknown, unknown> {
+  if (fake) {
+    // FAKE = in-memory monotonic receipt. NEVER the kernel transport (subprocess test stays green).
+    let receiptId = 0;
+    return { append: () => Promise.resolve({ id: ++receiptId }) };
+  }
+  // REAL = the shared-kernel partitioned sink over the (injected | grpc-js-from-env) AppendTransport.
+  const transport: AppendTransport =
+    opts.ingestTransport ??
+    createRpcAppendTransport({
+      // NON-secret routing endpoint (host:port) — NEVER a credential. Defaults to the conventional local.
+      endpoint: process.env.AGENTOS_KERNEL_INGEST_ENDPOINT ?? "127.0.0.1:50051",
+    });
+  const sink = createPartitionedIngestSink(transport, BIN_TENANT_BINDING);
+  // The sink is `(event) => Promise<AppendReceipt>`; the commitgate's CommitAppender is the same single-arg
+  // `append(event)` shape, so this slots in with ZERO behavioural change (commit-before-effect preserved).
+  return { append: (event) => sink(event as never) };
 }
 
-/** Assemble the full EXEC4a governed deps over a (pre-provisioned) ephemeral sandbox. */
-function buildDeps(substrate: ExecCapableSandboxAdapter, sandboxId: string): ExecMcpServerDeps {
+/** Assemble the full EXEC4a governed deps over a (pre-provisioned) ephemeral sandbox + a WORM appender. */
+function buildDeps(
+  substrate: ExecCapableSandboxAdapter,
+  sandboxId: string,
+  appender: CommitAppender<unknown, unknown>,
+  onEffect: (() => void) | undefined,
+): ExecMcpServerDeps {
   const registry = seedRegistry();
   const allowRules = [
     {
@@ -144,32 +226,58 @@ function buildDeps(substrate: ExecCapableSandboxAdapter, sandboxId: string): Exe
     },
     cost,
     estimateTokens: () => 10,
-    appender: buildAppender(),
+    appender,
     context: BIN_CONTEXT,
+    ...(onEffect !== undefined ? { onEffect } : {}),
   };
+}
+
+/**
+ * Build the bin's full governed deps for the active mode + provision the ephemeral sandbox. Exported so the
+ * in-repo test can construct the bin's REAL deps (REAL shared-kernel appender via an injected Fake
+ * transport + an injected Fake substrate) and drive a governed tools/call through `runExecMcpStdio` to
+ * prove commit-before-effect over the shared-kernel appender. Returns the deps + the substrate (for
+ * teardown / observation). The bin's `main` calls this with no injections (REAL OpenShell + REAL kernel).
+ */
+export async function buildBinDeps(
+  fake: boolean,
+  opts: BuildBinOpts = {},
+): Promise<{ deps: ExecMcpServerDeps; substrate: ExecCapableSandboxAdapter; sandboxId: string }> {
+  const { substrate, sandboxSpec } = await buildSubstrate(fake, opts.substrate);
+  const created = await substrate.createSandbox(BIN_CONTEXT, sandboxSpec);
+  if (created.status !== "ok") {
+    throw new Error(`buildBinDeps: sandbox create denied — ${created.reason}`);
+  }
+  const sandboxId = created.sandboxId;
+  const started = await substrate.startSandbox(BIN_CONTEXT, sandboxId);
+  if (started.status !== "ok") {
+    await safeDestroy(substrate, sandboxId);
+    throw new Error(`buildBinDeps: sandbox start denied — ${started.reason}`);
+  }
+  const appender = buildBinAppender(fake, opts);
+  const deps = buildDeps(substrate, sandboxId, appender, opts.onEffect);
+  return { deps, substrate, sandboxId };
 }
 
 /** The bin's entry point: provision an ephemeral sandbox, run the stdio loop, destroy on exit. */
 async function main(): Promise<void> {
   const fake = process.env.AGENTOS_EXEC_MCP_FAKE === "1";
-  const { substrate, sandboxSpec } = await buildSubstrate(fake);
 
-  // ── Provision the EPHEMERAL sandbox on startup (the surface every tools/call exec targets). ──
-  const created = await substrate.createSandbox(BIN_CONTEXT, sandboxSpec);
-  if (created.status !== "ok") {
-    diag(`fatal: sandbox create denied — ${created.reason}`);
+  // ── Provision the EPHEMERAL sandbox + assemble deps (REAL: OpenShell substrate + shared-kernel WORM). ──
+  let assembled: {
+    deps: ExecMcpServerDeps;
+    substrate: ExecCapableSandboxAdapter;
+    sandboxId: string;
+  };
+  try {
+    assembled = await buildBinDeps(fake);
+  } catch (e) {
+    diag(`fatal: ${e instanceof Error ? e.message : String(e)}`);
     process.exitCode = 1;
     return;
   }
-  const sandboxId = created.sandboxId;
+  const { deps, substrate, sandboxId } = assembled;
   diag(`ephemeral sandbox created: ${sandboxId}`);
-  const started = await substrate.startSandbox(BIN_CONTEXT, sandboxId);
-  if (started.status !== "ok") {
-    diag(`fatal: sandbox start denied — ${started.reason}`);
-    await safeDestroy(substrate, sandboxId);
-    process.exitCode = 1;
-    return;
-  }
 
   // ── Destroy the ephemeral sandbox on ANY exit path (clean EOF, SIGTERM, SIGINT). ──
   let destroyed = false;
@@ -187,7 +295,6 @@ async function main(): Promise<void> {
   process.once("SIGINT", onSignal);
 
   // ── Run the stdio loop CORE over process.stdin/stdout (protocol-only stdout). Resolves on EOF. ──
-  const deps = buildDeps(substrate, sandboxId);
   diag("ready: serving newline-delimited JSON-RPC over stdin/stdout");
   try {
     await runExecMcpStdio(deps, { input: process.stdin, output: process.stdout });
@@ -205,8 +312,14 @@ async function safeDestroy(substrate: ExecCapableSandboxAdapter, sandboxId: stri
   }
 }
 
-main().catch((e) => {
-  // Fail-closed: any unexpected error is a stderr diagnostic + a non-zero exit — NEVER a stdout banner.
-  diag(`fatal: ${e instanceof Error ? e.message : String(e)}`);
-  process.exitCode = 1;
-});
+// Run `main` ONLY when this module is the process entry point (a real Hermes spawns `node <bin>`). When
+// IMPORTED (the in-repo test importing the exported builders), `main` does NOT run — no sandbox, no loop,
+// no side effect. This keeps the testable factory functions importable without the bin's startup effect.
+const entryUrl = process.argv[1] !== undefined ? pathToFileURL(process.argv[1]).href : undefined;
+if (entryUrl !== undefined && import.meta.url === entryUrl) {
+  main().catch((e) => {
+    // Fail-closed: any unexpected error is a stderr diagnostic + a non-zero exit — NEVER a stdout banner.
+    diag(`fatal: ${e instanceof Error ? e.message : String(e)}`);
+    process.exitCode = 1;
+  });
+}
