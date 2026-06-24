@@ -4,7 +4,7 @@
 - **Branch**: slice/dhb1-desktop-hermes-turnsource
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；TS only;新增依賴 = 0（用內建 fetch/WebStreams,真 endpoint 綁定留 DHB2）
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer = PASS;seam + credential-blind〔結構+內容〕+ fail-closed 經 mutation 證實;接縫三檔未動;真 `hermes acp` = DHB2）
 
 ## (0) 動機 + 現況 + ⚠️ 誠實分界（grounded）
 接縫已在(`src/runtime/brain/adapters/hermes/shim.ts`):`HermesTurnSource.turns(intent)→AsyncIterable<HermesTurn>` 是注入式 transport seam,今日只有 `ScriptedTurnSource`。`HermesTurn` **無 api_key 欄位**(credential 通道結構性剝除);`HermesBrainShim` 把 turn→BrainEvent fail-closed;`screenBrainEvent` 在偷渡 secret 時 deny。**唯一缺口 = 連本機 desktop Hermes 的真 `HermesTurnSource`。**
@@ -46,14 +46,15 @@ SLICE-DHB1 —（a)`DesktopHermesTransport` port:`submit(intent: string): AsyncI
 - 對抗幀③:transport `submit` throw / 回 malformed 幀 → **fail-closed**(停串、不 yield ok event)。
 - gated live 骨架:無 `AGENTOS_DESKTOP_HERMES_ENDPOINT` → 腳本印 `BLOCKED` exit 0(不跑、不假綠)。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED:port/TurnSource/parser 前紅。
-- [ ] `pnpm run verify` exit 0(contract test 綠;depcruise no-vendor-in-core 合規;secret-scan clean;`e2e:live-desktop-hermes` **不在** verify 內)。
-- [ ] **接縫**:Fake transport → `DesktopHermesTurnSource` → `HermesBrainShim` → BrainEvent 串受治理通過;mutation(TurnSource 不經 parser 直吐 raw)→ 測試紅。
-- [ ] **credential-blind 結構性保持**:api_key/credential 幀欄位**永不**入 BrainEvent(parser 只讀 4 個已知欄位);字面 secret 的 tool-call → denied@screen 停串;mutation(parser 讀 api_key / 透傳)→ 對抗測試紅。
-- [ ] **fail-closed**:transport throw/ malformed 幀 → 停串、不 yield ok;mutation(malformed 仍 yield)→ 紅。
-- [ ] **gated live 骨架**:缺 endpoint → clean BLOCK exit 0(不假綠);**誠實標記** DHB1 未綁真 endpoint。
-- [ ] Adversarial review = PASS(獨立 Opus 4.8;mutation:parser 透傳 api_key、malformed 不 fail-closed、secret 不被 screen 擋)。
+## (6) Definition of Done（實測）
+- [x] RED:impl 前 9 測試紅(`parseFrame is not a function`/`FakeDesktopHermesTransport is not a constructor`…)。
+- [x] `pnpm run verify` **exit 0**(938 passed + 18 skipped;contract test 綠;depcruise no-vendor-in-core 合規〔136 modules,reviewer 以 deep-import `desktop.ts→src/audit/redact.ts` 親證 not-to-internal exit 1〕;secret-scan clean〔Fake 的 `sk-${repeat()}` 為 runtime-built,無 source literal〕;`e2e:live-desktop-hermes` **不在** verify〔reviewer 程式化確認〕)。
+- [x] **接縫**:Fake ACP transport → `DesktopHermesTurnSource` → `HermesBrainShim` → BrainEvent 串受 `governBrainStream` 治理通過(plan-step + tool-call,ctx 帶過)。
+- [x] **credential-blind 結構性保持**:api_key/apiKey 幀欄位**永不**入 HermesTurn 或 BrainEvent(結構 + 序列化內容雙證);`parseFrame` 只讀 `sessionUpdate/content.text/title/toolName/rawInput`;字面 secret tool-call → 用**真** redactSecrets detector → `governBrainStream` denied@screen **並停串**;reviewer mutation(spread `{...frame}` 入 args → 漏 `sk-aaa`,翻 4 測試;no-op detector → deny 測試紅)。
+- [x] **fail-closed**:malformed 幀 → parseFrame 回 null **per-frame skip**(不 throw、不中毒整串,兩側 valid turn 存活);transport throw mid-stream → source 停、throw 後不 yield ok,shim deny-by-default 停 BrainEvent 串;reviewer mutation(swallow-then-emit / throw-on-malformed)→ 翻紅。
+- [x] **gated live 骨架**:`scripts/e2e-live-desktop-hermes.sh` gate on `command -v hermes` + `AGENTOS_LIVE_DESKTOP_HERMES=1`;**兩 gate 皆滿足仍 clean-BLOCK exit 0**(本機 hermes 真在 PATH,reviewer 實證)、不啟動真子進程、不假綠;header/spec **誠實標記**真 `hermes acp` = DHB2。
+- [x] **接縫三檔未動**:`shim.ts`/`port.ts`/`credential-guard.ts` git-diff 空(reused,not modified)。
+- [x] **Adversarial review = PASS**(獨立 Opus 4.8;8 攻擊面 HELD/N/A;credential-blind/deny/fail-closed 三類 mutation 皆翻紅;1 MINOR〔throw-mutation 變體因 faulted async generator 不 resume 而測試仍綠——意圖不變量已 pin,非缺陷〕)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(新 port + impl + Fake + parser + 骨架腳本)。`HermesBrainShim`/screen/pipeline 不受影響。

@@ -12,3 +12,10 @@ export {
   type HermesTurnSource,
   HermesBrainShim,
 } from "./shim.js";
+export {
+  type AcpUpdateFrame,
+  type DesktopHermesTransport,
+  DesktopHermesTurnSource,
+  FakeDesktopHermesTransport,
+  parseFrame,
+} from "./desktop.js";
