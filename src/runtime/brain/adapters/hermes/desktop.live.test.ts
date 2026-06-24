@@ -1,5 +1,14 @@
 /**
- * SLICE-DHB2b GATED LIVE harness — drive the REAL local desktop `hermes acp` as the Agent OS brain.
+ * SLICE-DHB2b + DHB3b GATED LIVE harness — drive the REAL local desktop `hermes acp` as the Agent OS brain.
+ *
+ * This file holds BOTH gated live tests, same gate, same throwaway-cwd / bounded-timeout / child-cleanup
+ * idiom (the live harness the `e2e:live-desktop-hermes` script runs):
+ *   • DHB2b (first describe) — the ONE-SHOT live chain: intent -> real `hermes acp` -> a governed PROPOSAL,
+ *     propose-only, credential-blind, with the M3/M4 wire-dialect diagnostics.
+ *   • DHB3b (second describe, at the bottom) — the CLOSED-LOOP live drive: `runClosedLoop` (DHB3a's DRIVER)
+ *     over the real held duplex ACP session with a deterministic Fake `GovernedToolCallDeps`, proving the
+ *     loop terminates / >=1 governed turn / propose-only / credential-blind, and LOGGING the real
+ *     RETURN-EDGE dialect (does the real `hermes acp` continue after a same-session result feed-back?).
  *
  * This is the live half of SLICE-DHB2 (DHB2a proved the `AcpStdioTransport` protocol/parse/propose-only/
  * fail-closed/credential-blind against an in-tree FAKE `hermes acp` subprocess, inside `pnpm run verify`,
@@ -50,8 +59,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redactSecrets } from "../../../../audit/redact.js";
+import type { CommitAppender } from "../../../../commitgate/index.js";
+import { type CostGate, InMemoryCostGate } from "../../../../cost/index.js";
+import type {
+  GovernedCall as GovernedToolCall,
+  GovernedToolCallDeps,
+} from "../../../../orchestration/index.js";
 import { type BrainEvent, governBrainStream } from "../../index.js";
-import { AcpStdioTransport, DesktopHermesTurnSource, HermesBrainShim } from "./index.js";
+import {
+  AcpStdioTransport,
+  DesktopHermesTurnSource,
+  HermesBrainShim,
+  runClosedLoop,
+} from "./index.js";
 
 // GATE: the USER's opt-in flag. Unset -> describe.skip -> a NO-OP under `pnpm run verify`.
 const LIVE = process.env.AGENTOS_LIVE_DESKTOP_HERMES === "1";
@@ -291,3 +311,234 @@ d("DHB2b — Agent OS drives the REAL desktop `hermes acp` over ACP (live, propo
     DRIVE_TIMEOUT_MS + PROBE_TIMEOUT_MS + 30_000,
   );
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// SLICE-DHB3b — GATED LIVE CLOSED LOOP: drive the REAL `hermes acp` through the DHB3a multi-turn loop.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// DHB2b (above) proved the ONE-SHOT live chain: intent -> real `hermes acp` -> a governed PROPOSAL,
+// propose-only, credential-blind. DHB3a (in `closed-loop.ts`, merged + reviewed) proved the WHOLE
+// multi-turn loop — propose -> govern via `runGovernedToolCall` -> redacted result fed back over a HELD
+// duplex ACP session as the NEXT `session/prompt` -> continue, to a terminal stopReason / `maxTurns` —
+// against a FAKE `hermes acp` + a deterministic Fake `GovernedToolCallDeps`. DHB3b is the LIVE half: it
+// binds that same `runClosedLoop` DRIVER + the same Fake deps to the user's REAL, authenticated desktop
+// Hermes over ACP and surfaces the ONE thing the Fake can NOT prove — the real RETURN-EDGE dialect:
+//
+//   Does the real `hermes acp` CONTINUE after we feed a tool-result via a same-`sessionId` follow-up
+//   `session/prompt` (Design B's core assumption), or does it stop after turn 1?
+//
+// We drive an intent designed to elicit MULTIPLE tool proposals across turns (two files, "use a tool for
+// each"), so the EXPECTED Design-B trace is: Hermes proposes write#1 -> the DRIVER governs it + feeds the
+// canned redacted result back on the same session -> Hermes proposes write#2 -> ... -> done. The
+// console.info diagnostics below LOG whether that return edge actually fired (a 2nd governed turn / more)
+// or whether the loop terminated after a single turn (=> Design B's same-session re-prompt assumption may
+// be WRONG and the main loop must adapt the DRIVER/transport mapping — logged with a clear ⚠).
+//
+// INVARIANTS asserted (lenient on the nondeterministic model, STRICT on the security invariants):
+//   • LOOP TERMINATES        — `runClosedLoop` returns with a terminal `stoppedBy` (terminal / session-end
+//                              / no-proposal / maxTurns); it NEVER hangs (every wait is bounded). If the
+//                              real return-edge dialect makes the transport fail-closed (transport error /
+//                              no continuation), the loop REJECTS and the test FAILS with a clear
+//                              diagnostic — never a hang, never a fallback to letting Hermes self-execute.
+//   • >=1 GOVERNED TURN      — at least one tool-call proposal was driven through `runGovernedToolCall`
+//                              (`result.outcomes.length >= 1`). (Lenient: the model is nondeterministic, so
+//                              we require >=1, not an exact count.)
+//   • PROPOSE-ONLY           — nothing executed on the HOST: the throwaway cwd has NO a.txt / b.txt. We
+//                              advertise no fs/terminal capability and the held session DENIES every
+//                              `session/request_permission` on EVERY turn, so Hermes never self-executes.
+//                              (The Fake effect's canned result is Agent OS's OWN governed substrate stub
+//                              — it never touches the host fs; see the HONEST BOUNDARY below.)
+//   • CREDENTIAL-BLIND       — no spurious denial from a leaked secret: every governed outcome is
+//                              `executed` (the Fake authorize allows + the Fake effect succeeds), so a
+//                              `denied` here would mean a real literal secret rode in a payload.
+//
+// HONEST BOUNDARY (restated): the substrate has NO exec primitive yet, so the governed effect is a
+// DETERMINISTIC Fake returning a short canned result — real command output fed back is a later slice. This
+// live PASS proves the real RETURN-EDGE dialect + the loop closing over the real wire; it does NOT prove a
+// real tool ran on the host (by design — propose-only). The PASS is the USER's own gated run; this writer
+// NEVER runs the live drive and NEVER reads `~/.hermes`.
+
+/** The live AgentContext for the closed-loop drive (plain non-empty strings; validates in the pipeline). */
+const LOOP_CTX = {
+  actorId: "agent:dhb3b-live-closed-loop",
+  tenantId: "tenant-live",
+  projectId: "proj-live",
+  taskId: "task-live-loop",
+  requestId: "req-live-dhb3b-1",
+};
+
+/**
+ * A MULTI-PROPOSAL intent: it asks for two distinct tool actions in sequence, so a Design-B return edge
+ * (feed result#1 back -> Hermes proposes #2) produces >1 governed turn. Benign + propose-only: nothing can
+ * execute on the host (no capability advertised + every permission denied), so the cwd stays empty.
+ */
+const LOOP_INTENT =
+  'Create two files: first a.txt containing "one", then b.txt containing "two". ' +
+  "Use a tool for each file, one at a time. Do not do anything else.";
+
+/** The basenames the intent references — PROPOSE-ONLY asserts NEITHER ever lands in the throwaway cwd. */
+const LOOP_FILES = ["a.txt", "b.txt"] as const;
+
+/** Hard turn cap for the live loop — keeps a chatty/looping model bounded (and the credit spend small). */
+const LOOP_MAX_TURNS = 4;
+
+/**
+ * A DETERMINISTIC Fake `GovernedToolCallDeps` — the SAME shape DHB3a's closed-loop.test.ts wires (allow
+ * authorize, an InMemoryCostGate, an in-memory seam appender, a counting Fake effect that returns a short
+ * canned result). The substrate has NO exec primitive yet, so the effect is a stub: it NEVER touches the
+ * host fs — Agent OS's OWN governed result, not Hermes self-executing. Returns the deps + a live counter so
+ * the test can assert >=1 governed effect actually ran.
+ */
+function makeLoopFakeDeps(): {
+  deps: GovernedToolCallDeps<GovernedToolCall, { id: number }>;
+  effectCalls: GovernedToolCall[];
+} {
+  const effectCalls: GovernedToolCall[] = [];
+  let receiptId = 0;
+  const cost: CostGate = new InMemoryCostGate(1_000_000);
+  const appender: CommitAppender<unknown, { id: number }> = {
+    append: () => Promise.resolve({ id: ++receiptId }),
+  };
+  const deps: GovernedToolCallDeps<GovernedToolCall, { id: number }> = {
+    screen: () => ({ ok: true }),
+    authorize: () => ({ effect: "allow", reason: "dhb3b live fake allow" }),
+    cost,
+    estimateTokens: () => 10,
+    appender,
+    effect: (tc) => {
+      effectCalls.push(tc);
+      // A short CANNED result — the honest stand-in until a substrate exec primitive lands. NEVER touches
+      // the host fs; it is fed back (redacted) as the next prompt so we can observe the real return edge.
+      return Promise.resolve({ ok: true, detail: `ok: ${tc.tool} done`, tokensUsed: 5 });
+    },
+  };
+  return { deps, effectCalls };
+}
+
+d(
+  "DHB3b — Agent OS drives the REAL desktop `hermes acp` through the CLOSED LOOP (live, multi-turn)",
+  () => {
+    let cwd: string;
+
+    beforeAll(() => {
+      // A throwaway temp cwd given to the child as its working dir AND the PROPOSE-ONLY witness: if anything
+      // actually executed a write on the host, a.txt / b.txt would land HERE. It must stay empty.
+      cwd = mkdtempSync(join(tmpdir(), "dhb3b-live-closed-loop-"));
+    });
+
+    afterAll(() => {
+      if (cwd !== undefined) rmSync(cwd, { recursive: true, force: true });
+    });
+
+    it(
+      "multi-proposal intent -> runClosedLoop over real hermes acp; loop terminates, >=1 governed turn, propose-only, credential-blind",
+      async () => {
+        // The REAL held duplex transport, exactly as the composition root would wire it for the closed loop.
+        const transport = new AcpStdioTransport({
+          command: ["hermes", "acp"],
+          cwd,
+          // Real-LLM latency, multi-turn: let each model turn complete before the idle guard fires. Bounded.
+          idleTimeoutMs: DRIVE_TIMEOUT_MS,
+          startupTimeoutMs: PROBE_TIMEOUT_MS,
+        });
+        const { deps, effectCalls } = makeLoopFakeDeps();
+
+        // ── DRIVE THE LOOP. If the real return-edge dialect fails-closed (transport error / no continuation
+        // / malformed feed-back), runClosedLoop REJECTS — caught below and re-thrown as a CLEAR diagnostic
+        // (never a hang: every wait inside the transport is bounded; never a fallback to self-execution).
+        let result: Awaited<ReturnType<typeof runClosedLoop<{ id: number }>>>;
+        try {
+          result = await runClosedLoop(transport, deps, LOOP_CTX, LOOP_INTENT, {
+            maxTurns: LOOP_MAX_TURNS,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.info(
+            "[DHB3b] ⚠ RETURN-EDGE DIALECT FAIL-CLOSED: runClosedLoop REJECTED before terminating —",
+            message,
+          );
+          console.info(
+            "[DHB3b] ⚠ This means the real `hermes acp` return edge diverges from Design B's assumption " +
+              "(same-`sessionId` follow-up `session/prompt` did NOT continue, or the feed-back malformed the " +
+              "wire). The main loop must adapt the DRIVER/transport mapping (e.g. request_permission response " +
+              "or an MCP-server posture). Agent OS FAILED CLOSED — it never let Hermes self-execute.",
+          );
+          // Re-throw so the test FAILS with the diagnostic (deny-by-default), never a silent/vacuous green.
+          throw new Error(`DHB3b closed loop failed closed on the real return edge: ${message}`);
+        }
+
+        // ── RETURN-EDGE DIALECT DIAGNOSTICS (the DHB3b point — the thing the Fake can NOT prove). ─────────
+        console.info(
+          `[DHB3b] closed loop terminated: stoppedBy=${result.stoppedBy}, turns=${result.turns}, ` +
+            `governedTurns(outcomes)=${result.outcomes.length}, effectRuns=${effectCalls.length}`,
+        );
+        console.info(
+          "[DHB3b] per-outcome status:",
+          JSON.stringify(result.outcomes.map((o) => o.status)),
+        );
+        if (result.turns >= 2) {
+          console.info(
+            `[DHB3b] ✓ RETURN EDGE CONTINUED: the real \`hermes acp\` produced a 2nd turn AFTER we fed a tool-result over the SAME sessionId — Design B's same-session re-prompt assumption HOLDS on the real dialect (drove ${result.turns} turns, ${result.outcomes.length} governed proposals).`,
+          );
+        } else {
+          console.info(
+            `[DHB3b] ⚠ RETURN EDGE STOPPED AFTER TURN 1: the real \`hermes acp\` did NOT continue after the fed-back tool-result (turns=${result.turns}, stoppedBy=${result.stoppedBy}). Design B's same-session re-prompt assumption may be WRONG on the real dialect — the model treated the result as a conversation end rather than a continuation cue. The main loop should consider adapting the DRIVER mapping (request_permission grant-with-result, or the Agent-OS-as-MCP-server posture) so the return edge reliably continues. (Still SAFE: propose-only held, nothing self-executed; this is a dialect signal, not a failure.)`,
+          );
+        }
+        console.info(
+          `[DHB3b] termination kind: ${
+            result.stoppedBy === "maxTurns"
+              ? "hit the hard maxTurns cap (the loop was still proposing — a chatty/looping model)"
+              : `the model ended the conversation (stopReason path: ${result.stoppedBy})`
+          }`,
+        );
+
+        // ── INVARIANT: LOOP TERMINATES. runClosedLoop RETURNED (did not hang / reject) with a terminal
+        // reason. (A hang would have tripped the per-test vitest timeout below; a reject was handled above.)
+        expect(
+          ["terminal", "session-end", "no-proposal", "maxTurns"],
+          "the closed loop must terminate with a known terminal reason — never hang",
+        ).toContain(result.stoppedBy);
+
+        // ── INVARIANT: >=1 GOVERNED TURN. At least one tool-call proposal was driven through the SAME
+        // `runGovernedToolCall` pipeline. (Lenient on count: the model is nondeterministic.) A zero here is
+        // the loud failure mode of an unconfirmed return-edge dialect — the diagnostics above tell the user.
+        expect(
+          result.outcomes.length,
+          "the real `hermes acp` produced NO governed tool-call proposal across the loop — the multi-proposal " +
+            "intent did not elicit a tool_call, or the return edge stopped before any proposal was governed. " +
+            "See the [DHB3b] return-edge diagnostics above.",
+        ).toBeGreaterThanOrEqual(1);
+        // The governed effect (Agent OS's own stub) actually ran for the allowed proposals — not vacuous.
+        expect(
+          effectCalls.length,
+          "a governed proposal was recorded but the Fake effect never ran (governance did not reach the effect)",
+        ).toBeGreaterThanOrEqual(1);
+
+        // ── INVARIANT: CREDENTIAL-BLIND. No spurious denial from a leaked secret. The Fake authorize ALLOWS
+        // and the Fake effect SUCCEEDS, so EVERY governed outcome must be "executed". A `denied` would mean a
+        // real literal secret rode in a payload (a real finding) or governance unexpectedly blocked.
+        const denied = result.outcomes.filter((o) => o.status === "denied");
+        expect(
+          denied,
+          `no governed outcome should be denied (credential-blind held; a deny would mean a literal secret rode in a payload or governance unexpectedly blocked): ${JSON.stringify(denied)}`,
+        ).toEqual([]);
+
+        // ── INVARIANT: PROPOSE-ONLY. Nothing executed on the HOST. The throwaway cwd must contain NEITHER
+        // file the intent asked Hermes to write. We advertise no fs/terminal capability and the held session
+        // DENIES every `session/request_permission` on every turn, so Hermes can never have self-executed.
+        const entries = readdirSync(cwd);
+        console.info("[DHB3b] throwaway cwd contents after the loop:", JSON.stringify(entries));
+        for (const file of LOOP_FILES) {
+          expect(
+            entries.includes(file),
+            `PROPOSE-ONLY VIOLATION: "${file}" was actually written to the host cwd — Hermes self-executed a tool across the loop. The held session must DENY every permission request on every turn.`,
+          ).toBe(false);
+        }
+      },
+      // Generous timeout: real LLM latency across up to maxTurns multi-turn prompts, with margin so a slow
+      // turn does not flake. Bounded — a stuck child/stream becomes a FAILURE (timeout), never an infinite hang.
+      DRIVE_TIMEOUT_MS * 2 + 60_000,
+    );
+  },
+);

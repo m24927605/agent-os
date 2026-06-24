@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# e2e:live-desktop-hermes (SLICE-DHB2b) — RUN the GATED live proof that Agent OS drives a LOCALLY-RUN
-# desktop Hermes as its brain over ACP (Agent Client Protocol: JSON-RPC over stdio, the surface
-# `hermes acp` exposes). It spawns the REAL `hermes acp` subprocess via DHB2a's `AcpStdioTransport`
-# (initialize -> session/new -> session/prompt -> session/update), wraps it in DHB1's
-# `DesktopHermesTurnSource` + `HermesBrainShim`, drives one safe intent, and runs the brain events
-# through `governBrainStream`. It proves the live invariants: >=1 real frame, a captured governed
-# PROPOSAL, propose-only (nothing executed on the host), credential-blind — and logs the M3/M4 dialect
-# diagnostics so this run CONFIRMS or REVEALS divergence from DHB2a's wire assumptions.
+# e2e:live-desktop-hermes (SLICE-DHB2b + DHB3b) — RUN the GATED live proofs that Agent OS drives a
+# LOCALLY-RUN desktop Hermes as its brain over ACP (Agent Client Protocol: JSON-RPC over stdio, the
+# surface `hermes acp` exposes). It spawns the REAL `hermes acp` subprocess via DHB2a's `AcpStdioTransport`
+# and runs the TWO gated live tests in `desktop.live.test.ts`:
+#   • DHB2b — the ONE-SHOT chain (initialize -> session/new -> session/prompt -> session/update) wrapped in
+#     DHB1's `DesktopHermesTurnSource` + `HermesBrainShim` + `governBrainStream`: >=1 real frame, a captured
+#     governed PROPOSAL, propose-only (nothing executed on the host), credential-blind, with the M3/M4
+#     wire-dialect diagnostics so this run CONFIRMS or REVEALS divergence from DHB2a's wire assumptions.
+#   • DHB3b — the CLOSED-LOOP drive: DHB3a's `runClosedLoop` DRIVER over the real HELD duplex ACP session
+#     with a deterministic Fake `GovernedToolCallDeps`, driving a multi-proposal intent: it proves the loop
+#     terminates / >=1 governed turn / propose-only / credential-blind, and LOGS the real RETURN-EDGE
+#     dialect — whether the real `hermes acp` CONTINUES after a same-`sessionId` result feed-back (Design B)
+#     or stops after turn 1 (=> the main loop must adapt the DRIVER mapping). A return-edge fail-close FAILS
+#     with a clear diagnostic, never a hang, never a fallback to letting Hermes self-execute.
 #
 # ⚠️ HONEST BOUNDARY: this drive uses the REAL `hermes acp` + the user's AUTHENTICATED Hermes, so it
 # SPENDS the user's Hermes MODEL CREDITS and touches their account. That is why it is GATED + USER-
@@ -35,10 +41,11 @@ if [ "${AGENTOS_LIVE_DESKTOP_HERMES:-}" != "1" ]; then
 fi
 
 # --- Both gates satisfied: RUN the gated vitest that drives the REAL `hermes acp` subprocess. ---------
-# This spends the user's Hermes model credits (the gate above is exactly why it is user-initiated). The
-# test is SELF-BOUNDING: the AcpStdioTransport's startup/idle guards + the per-test vitest timeout mean
-# a hung child / stuck stream becomes a FAILURE (non-zero RC), never a silent block or an infinite hang.
-echo "e2e:live-desktop-hermes: driving the REAL 'hermes acp' (spends the user's Hermes model credits)..."
+# This runs BOTH gated live tests (DHB2b one-shot + DHB3b closed-loop) in desktop.live.test.ts and spends
+# the user's Hermes model credits (the gate above is exactly why it is user-initiated). The tests are
+# SELF-BOUNDING: the AcpStdioTransport's startup/idle guards + the per-test vitest timeouts mean a hung
+# child / stuck stream becomes a FAILURE (non-zero RC), never a silent block or an infinite hang.
+echo "e2e:live-desktop-hermes: driving the REAL 'hermes acp' — DHB2b one-shot + DHB3b closed loop (spends the user's Hermes model credits)..."
 VOUT="$(mktemp -t agentos-e2e-desktop-hermes.XXXXXX)"
 trap 'rm -f "$VOUT"' EXIT INT TERM
 
@@ -57,8 +64,8 @@ if [ "$RC" = 0 ]; then
 fi
 
 if [ "$RC" = 0 ]; then
-  echo "e2e:live-desktop-hermes: ok — real 'hermes acp' drive verified: >=1 frame, governed proposal, propose-only (nothing executed), credential-blind"
+  echo "e2e:live-desktop-hermes: ok — real 'hermes acp' drive verified: DHB2b (>=1 frame, governed proposal, propose-only, credential-blind) + DHB3b closed loop (loop terminated, >=1 governed turn, propose-only, credential-blind; see the [DHB3b] return-edge dialect log above for whether the real dialect CONTINUED after a same-session result feed-back)"
 else
-  echo "e2e:live-desktop-hermes: FAIL — live drive exit $RC (see the [DHB2b/M3] + [DHB2b/M4] dialect diagnostics above; the real ACP dialect may diverge from DHB2a's mapping)" >&2
+  echo "e2e:live-desktop-hermes: FAIL — live drive exit $RC (see the [DHB2b/M3]+[DHB2b/M4] and [DHB3b] return-edge dialect diagnostics above; the real ACP dialect may diverge from the DHB2a/DHB3a mapping)" >&2
 fi
 exit "$RC"
