@@ -43,11 +43,62 @@ export type AdapterResult =
   | { status: "ok"; sandboxId: SandboxIdType; event: SandboxLifecycleEvent }
   | { status: "denied"; reason: string; event: SandboxLifecycleEvent };
 
+/**
+ * A BUFFERED command to run inside an already-created sandbox. Crosses the port boundary, so it is
+ * zod-validated (`ExecCommandSpecSchema`) by every adapter before use — a malformed spec is fail-closed
+ * (denied), never executed.
+ *
+ * `env` values are PLACEHOLDER / bundleRef strings ONLY. A raw secret in `env` is a credential-blind
+ * violation and is rejected UPSTREAM by `makeExecEffect` (the substrate/process never sees it); the port
+ * type documents that contract — it does not itself scan, because the port holds no audit dependency
+ * (cohesion chokepoint: port/null/fake import only zod + identity primitives).
+ */
+export interface ExecCommandSpec {
+  readonly argv: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
+}
+
+/** Boundary validator for `ExecCommandSpec`. argv must be non-empty (a command with no program is denied). */
+export const ExecCommandSpecSchema = z.object({
+  argv: z.array(z.string()).nonempty(),
+  env: z.record(z.string(), z.string()).optional(),
+  timeoutMs: z.number().int().nonnegative().optional(),
+});
+
+/**
+ * BUFFERED exec result — a fail-closed discriminated union. `ok:true` carries the captured exit code +
+ * stdout/stderr (+ a `truncated` flag if the substrate itself capped its capture). `ok:false` carries a
+ * reason and NOTHING else: a failed/garbled/no-terminal-exit exec is NEVER reported as a (possibly
+ * fabricated) successful exit 0 — mirrors the OpenShell transport's fail-closed contract (client.ts:213-214).
+ */
+export type ExecResult =
+  | { ok: true; exitCode: number; stdout: string; stderr: string; truncated: boolean }
+  | { ok: false; reason: string };
+
 export interface SandboxAdapter {
   createSandbox(ctx: unknown, spec: SandboxSpec): Promise<AdapterResult>;
   startSandbox(ctx: unknown, sandboxId: string): Promise<AdapterResult>;
   stopSandbox(ctx: unknown, sandboxId: string): Promise<AdapterResult>;
   destroySandbox(ctx: unknown, sandboxId: string): Promise<AdapterResult>;
+}
+
+/**
+ * The exec primitive — the substrate's BUFFERED run-a-command capability, added as an EXTENSION of the
+ * four frozen lifecycle methods rather than a mutation of `SandboxAdapter`.
+ *
+ * Why an extension (the honest EXEC1 boundary): the four lifecycle methods are frozen (P2-A), and the
+ * real OpenShell adapter already carries its OWN richer, STREAMING exec (`ExecOutcome`, a different
+ * shape) consumed by the nemoclaw `/bin/sh -c` seam — wiring OpenShell onto THIS buffered shape is
+ * EXEC2, explicitly out of scope here. So EXEC1 adds the buffered primitive to the port as a separate
+ * contract that the in-tree defaults (Fake, Null) implement and `makeExecEffect` consumes; OpenShell
+ * reconciling to it is EXEC2. No existing lifecycle adapter is touched.
+ *
+ * Fail-closed: invalid context / unknown sandbox / malformed spec / a failed run all resolve to
+ * `{ok:false, reason}` — never a thrown error across the port boundary and never a fabricated exit code.
+ */
+export interface ExecCapableSandboxAdapter extends SandboxAdapter {
+  execSandbox(ctx: unknown, sandboxId: string, spec: ExecCommandSpec): Promise<ExecResult>;
 }
 
 /**

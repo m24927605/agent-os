@@ -4,7 +4,7 @@
 - **Branch**: slice/exec1-substrate-exec-port
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1–1.5 day；TS only;新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS;credential-blind 進/出 + fail-closed〔無假 exit 0〕+ output cap〔redact 後截斷〕+ commit-before-effect 經 mutation 證實;pipeline/guard/OpenShell empty-diff;12 tests）
 
 ## (0) 動機 + 現況 + ⚠️ 誠實分界（grounded)
 `SandboxAdapter`(src/runtime/substrate/port.ts:46-50)只有 lifecycle(create/start/stop/destroy)+ `AdapterResult`,**無 exec**——所以 governed effect 只能回 canned stub(DHB3 閉環因此回饋假結果)。但 **exec 能力已在 OpenShell transport 層**(client.ts:221+:`ExecSandboxRequest/Stdout/Stderr/Exit{exitCode}/Event`,streaming,fail-closed)。EXEC1 = **把 exec 經 port 暴露 + Fake 證 + 接 governed effect + credential-blind**;真 OpenShell 接線 = EXEC2;接 DHB3 閉環 = EXEC3。
@@ -46,10 +46,16 @@ SLICE-EXEC1 —（a)port 加 `execSandbox(ctx: unknown, sandboxId: string, spec:
 - RED5 output cap:Fake 巨量 stdout → 截斷 + `truncated:true`、長度 <= cap;mutation(不截)→ 紅。
 - RED6 commit-before-effect:exec 只經 effect(commit 之後)跑;rejecting appender → execSandbox 從未被呼叫。
 
-## (6) Definition of Done（待實測填）
-- [ ] RED → `pnpm run verify` exit 0(Fake exec 單元測綠;depcruise/secret-scan clean;pipeline/guard 未改;live/EXEC2/EXEC3 不在 verify)。
-- [ ] credential-blind 進(raw-env 拒)/出(redact)各 mutation 證非空;output cap mutation 證;fail-closed(無假 exit 0)mutation 證;commit-before-effect(exec 只在 effect)。
-- [ ] 獨立 Opus 4.8 review = PASS(mutation:raw env 放行、skip redact、無-exit 仍 ok、不截斷、commit 前 exec)。
+## (6) Definition of Done（實測）
+- [x] RED → `pnpm run verify` **exit 0**(973 passed + 20 skipped;exec-effect 12/12;depcruise 140 modules clean〔reviewer deep-import 親證 not-to-internal bite,substrate→audit 僅經 barrel〕;secret-scan clean〔canary runtime-built〕;pipeline/guard/OpenShell empty-diff;live/EXEC2/EXEC3 不在 verify)。
+- [x] **credential-blind 進**:env 值經 detector(預設 redactSecrets-changed;**throw=secret** fail-closed)篩,raw secret → DENY 且 `execSandbox` **0 calls**;reviewer mutation(drop check / always-false detector / catch 視為非-secret)→ 翻紅;**預設 detector 拒 canary 放 bundleRef(非 vacuous)**。
+- [x] **credential-blind 出**:stdout **與** stderr 皆經 `redactSecrets` 才入 detail;skip-redact mutation → canary 漏 → 紅。
+- [x] **fail-closed**:無 terminal exit / Null / 啟動失敗 → `EffectResult{ok:false}`,**ExecResult failure arm 結構上無 exitCode**(map-fail-to-ok mutation → 紅;`{ok:false,exitCode}` → TS2353)。
+- [x] **output cap**:redact **之後**截斷至 64KB + `[truncated]`(跨截斷邊界 secret 不存活);remove-cap mutation → 紅。
+- [x] **commit-before-effect**:rejecting appender → `execSandbox` 0 calls;pipeline/guard EMPTY-diff,effect 在其上注入。
+- [x] **獨立 Opus 4.8 review = PASS**(5 安全性質非 vacuous;deviation 證實 sound;2 MINOR——①預設/throwing detector 覆蓋〔已採納補 3 cases〕②EXEC2 reconcile〔下〕)。
+> **deviation(reviewer 判定 sound)**:未直接加 `execSandbox` 到 `SandboxAdapter`,改用 `ExecCapableSandboxAdapter extends SandboxAdapter`——因 OpenShell adapter 早有自己的 **streaming** `execSandbox(…cmd, opts)→ExecOutcome`(~40+ 測 + nemoclaw 用),直接 widen 會 TS2416/2322 撞 OpenShell + 逼改 out-of-scope。extension 介面把 buffered exec 加進 port、4 個 lifecycle 凍結、OpenShell 不動。
+> **→ EXEC2 tracking item**:buffered `ExecResult`(EXEC1)↔ OpenShell streaming `ExecOutcome` 同名 `execSandbox` 簽章不相容,**EXEC2 須 reconcile**(buffered 包裝 / 收斂 seam)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(port method + 2 adapter impl + effect helper + 測)。lifecycle/既有 adapter 用法不變、向後相容。
