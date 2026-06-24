@@ -179,9 +179,56 @@ export const grepBinding: ExecToolBinding = {
   },
 };
 
+// ------------------------------------------------------------------------------------------------
+// SLICE-HDI2b — the ONE bounded GENERAL exec tool: the "maximum utility" capability (user-approved
+// posture). Unlike the HDI2a whitelist (a fixed program per tool), `exec.run` lets the brain supply a
+// FULL argv VECTOR and runs it DIRECTLY (argvPrefix [] + toArgv = the raw vector = execve argv[0] with
+// args). It is NOT bounded by a program whitelist; it is bounded by the SEALED ephemeral
+// zero-credential no-egress sandbox + the governance pipeline.
+//
+// WHY KEEPING THIS SAFE (and `requiresApproval:false`): the brain proposes a TOOL NAME + the DECLARED
+// `argv` field — NEVER a shell string. argv is built in ONE place (binding.argvPrefix [] + toArgv) and
+// passed VERBATIM as the process argv — there is NO shell, NEVER `sh -c` / `bash -c`. A "; rm -rf /"
+// can only appear as an EXPLICIT literal token the brain typed into the vector (e.g. argv ["rm","-rf",
+// "/"]); with no shell, it is just an argument — and even then it is bounded by the EPHEMERAL
+// ZERO-CREDENTIAL NO-EGRESS sandbox (nothing to steal, no outbound network, destroyed after the loop).
+// `requiresApproval` stays FALSE on purpose: the boundary is the governance pipeline + the SEALED
+// sandbox, NOT an interactive gate — so the AUTONOMOUS loop can actually use this capability. The
+// sandbox seal (zero credentials + no egress + ephemeral) is the deployment fact that makes it safe.
+// `sideEffect:"write"` (it can mutate the ephemeral sandbox fs), `idempotent:false` (running a command
+// is not idempotent in general).
+// ------------------------------------------------------------------------------------------------
+
+/** A valid `exec.run` ToolManifest — the bounded GENERAL exec tool (write to the ephemeral sandbox fs). */
+export const runManifest = {
+  name: "exec.run",
+  version: "1.0.0",
+  description: "run a command (an explicit argv vector — never a shell string) in the sandbox",
+  action: "tool:invoke",
+  resourcePattern: "exec/run",
+  sideEffect: "write" as const,
+  idempotent: false,
+  requiresApproval: false,
+  bundleRefOnly: false,
+};
+
 /**
- * A fresh ToolRegistry holding the read-only seed exec tools (so authorize can admit only these names).
- * SLICE-HDI2a grows this from the two EXEC3a tools to the full read-only-safe set.
+ * exec.run binding: argvPrefix [] (NO fixed program), strict {argv: string[] (min 1)}, toArgv -> [...argv].
+ * So the brain supplies the FULL argv vector and the effect runs `[...argvPrefix, ...toArgv] = [...argv]`
+ * DIRECTLY — execve argv[0] with args, NEVER a shell string, NEVER `sh -c` / `bash -c`. The `.min(1)`
+ * enforces a non-empty vector (an empty argv has no program to run). The `.strict()` rejects any smuggled
+ * extra key (e.g. a `cmd` shell string) — the brain cannot smuggle a second argv channel.
+ */
+export const runBinding: ExecToolBinding = {
+  argvPrefix: [],
+  argSchema: z.object({ argv: z.array(z.string()).min(1) }).strict(),
+  toArgv: (a) => [...(a as { argv: string[] }).argv],
+};
+
+/**
+ * A fresh ToolRegistry holding the seed exec tools (so authorize can admit only these names).
+ * SLICE-HDI2a grew this from the two EXEC3a tools to the read-only-safe set; SLICE-HDI2b adds the ONE
+ * bounded general exec tool `exec.run`.
  */
 export function seedRegistry(): ToolRegistry {
   const r = new ToolRegistry();
@@ -192,10 +239,11 @@ export function seedRegistry(): ToolRegistry {
   r.register(pwdManifest);
   r.register(wcManifest);
   r.register(grepManifest);
+  r.register(runManifest);
   return r;
 }
 
-/** The composer-held bindings map for the read-only seed exec tools (parallel to the registry). */
+/** The composer-held bindings map for the seed exec tools (parallel to the registry). */
 export function seedBindings(): ReadonlyMap<string, ExecToolBinding> {
   return new Map<string, ExecToolBinding>([
     ["exec.echo", echoBinding],
@@ -205,5 +253,6 @@ export function seedBindings(): ReadonlyMap<string, ExecToolBinding> {
     ["exec.pwd", pwdBinding],
     ["exec.wc", wcBinding],
     ["exec.grep", grepBinding],
+    ["exec.run", runBinding],
   ]);
 }

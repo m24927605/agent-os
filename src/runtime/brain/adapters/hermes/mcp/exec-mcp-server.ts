@@ -71,10 +71,19 @@ const METHOD_NOT_FOUND = -32601;
 // MCP tool descriptor + result shapes.
 // ------------------------------------------------------------------------------------------------
 
+/**
+ * A JSON-Schema property the converter can emit. Either a scalar `{ type: "string" }` (HDI2a) or a
+ * string ARRAY `{ type: "array", items: { type: "string" } }` (HDI2b's `exec.run {argv: string[]}`).
+ * No other shape is emitted — the converter throws (fail-closed) for anything it cannot derive.
+ */
+export type JsonSchemaProperty =
+  | { readonly type: "string" }
+  | { readonly type: "array"; readonly items: { readonly type: "string" } };
+
 /** A JSON-Schema object derived from a binding's strict zod argSchema (the only shape we emit/accept). */
 export interface JsonSchemaObject {
   readonly type: "object";
-  readonly properties: Readonly<Record<string, { readonly type: string }>>;
+  readonly properties: Readonly<Record<string, JsonSchemaProperty>>;
   readonly required: readonly string[];
   readonly additionalProperties: false;
 }
@@ -100,13 +109,21 @@ export interface McpToolResult {
  * Derive a JSON-Schema object from a binding's STRICT zod object schema — the SINGLE SOURCE OF TRUTH for
  * the advertised `inputSchema`. We DELIBERATELY do NOT hand-write a constant that could drift from the
  * schema enforcement actually applies at `tools/call` time. A tiny in-house converter (NOT
- * zod-to-json-schema) for the two simple `z.object({ k: z.string() }).strict()` shapes:
+ * zod-to-json-schema) for the bounded set of field shapes our bindings actually use:
  *
  *   - REQUIRES a `ZodObject` with `unknownKeys === "strict"` -> emits `additionalProperties: false`
- *     (so a smuggled `argv` key is advertised as DISALLOWED, matching what the strict argSchema rejects).
- *   - each field is a `ZodString` (optionally wrapped in `ZodOptional`) -> `{ type: "string" }`;
- *     a NON-optional field is added to `required`.
- *   - any OTHER shape -> throws (fail-closed: we never advertise a schema we cannot faithfully derive).
+ *     (so a smuggled key is advertised as DISALLOWED, matching what the strict argSchema rejects).
+ *   - a `ZodString` field (optionally wrapped in `ZodOptional`) -> `{ type: "string" }`.
+ *   - a `ZodArray` field whose ELEMENT is a `ZodString` (HDI2b's `exec.run {argv: string[]}`),
+ *     optionally wrapped in `ZodOptional` -> `{ type: "array", items: { type: "string" } }`. Note:
+ *     a `.min(1)` non-empty constraint is an ENFORCEMENT detail of the strict argSchema (the binding
+ *     rejects an empty argv) — it is NOT carried into the advertised JSON-Schema; the advertised array
+ *     schema (array-of-strings, on a strict object) faithfully matches the SHAPE enforcement accepts.
+ *   - a NON-string array element (e.g. `z.array(z.number())`), or ANY other shape -> throws
+ *     (fail-closed: we never advertise a schema we cannot faithfully + enforceably derive).
+ *
+ * The string-array support is the ONLY change vs HDI2a; every other shape stays fail-closed (a number,
+ * a number array, an array-of-arrays, an object field, etc. all still THROW).
  */
 export function argSchemaToJsonSchema(argSchema: z.ZodType<unknown>): JsonSchemaObject {
   // Narrow via the zod internal def (zod 3.x). We read only the public-ish `_def` fields we need; an
@@ -128,23 +145,41 @@ export function argSchemaToJsonSchema(argSchema: z.ZodType<unknown>): JsonSchema
     throw new Error("argSchemaToJsonSchema: ZodObject has no shape");
   }
 
-  const properties: Record<string, { type: string }> = {};
+  const properties: Record<string, JsonSchemaProperty> = {};
   const required: string[] = [];
   for (const [key, field] of Object.entries(shape)) {
+    // Unwrap a single ZodOptional layer (an optional field is derived but NOT required).
     const fieldDef = (field as { _def?: unknown })._def as
-      | { typeName?: string; innerType?: { _def?: { typeName?: string } } }
+      | {
+          typeName?: string;
+          innerType?: { _def?: { typeName?: string; type?: { _def?: { typeName?: string } } } };
+          type?: { _def?: { typeName?: string } };
+        }
       | undefined;
     let typeName = fieldDef?.typeName;
     let optional = false;
+    // The (possibly unwrapped) def carrying the array element type — set when we descend into Optional.
+    let resolvedDef = fieldDef;
     if (typeName === "ZodOptional") {
       optional = true;
-      typeName = fieldDef?.innerType?._def?.typeName;
+      resolvedDef = fieldDef?.innerType?._def;
+      typeName = resolvedDef?.typeName;
     }
-    if (typeName !== "ZodString") {
-      // We only derive the simple {string} cases. Anything else -> fail-closed (never guess a type).
+
+    if (typeName === "ZodString") {
+      properties[key] = { type: "string" };
+    } else if (typeName === "ZodArray") {
+      // A ZodArray whose ELEMENT is a ZodString -> array/items:string. Any other element -> fail-closed.
+      const elementTypeName = resolvedDef?.type?._def?.typeName;
+      if (elementTypeName !== "ZodString") {
+        // A non-string array element would be an UNENFORCEABLE advertised schema -> never advertise it.
+        throw new Error(`argSchemaToJsonSchema: unsupported array element type for '${key}'`);
+      }
+      properties[key] = { type: "array", items: { type: "string" } };
+    } else {
+      // We only derive {string} and {string[]} cases. Anything else -> fail-closed (never guess a type).
       throw new Error(`argSchemaToJsonSchema: unsupported field type for '${key}'`);
     }
-    properties[key] = { type: "string" };
     if (!optional) required.push(key);
   }
 

@@ -172,7 +172,8 @@ describe("EXEC4b (in-repo) — RED-L1 loopback tools/list advertises exactly the
       });
       expect(status).toBe(200);
       const tools = (json as { result: { tools: { name: string }[] } }).result.tools;
-      // EXACTLY the registered bounded seed tools (HDI2a grew this to 7), nothing unexpected.
+      // EXACTLY the registered bounded seed tools (HDI2a grew this to 7; HDI2b adds exec.run -> 8),
+      // nothing unexpected.
       expect(tools.map((t) => t.name).sort()).toEqual([
         "exec.cat",
         "exec.echo",
@@ -180,6 +181,7 @@ describe("EXEC4b (in-repo) — RED-L1 loopback tools/list advertises exactly the
         "exec.head",
         "exec.ls",
         "exec.pwd",
+        "exec.run",
         "exec.wc",
       ]);
     } finally {
