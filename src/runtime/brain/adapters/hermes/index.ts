@@ -45,3 +45,18 @@ export {
   seedRegistry,
 } from "./exec-seed-tools.js";
 export { makeArgsCredentialScreen } from "./args-credential-screen.js";
+export {
+  type ExecMcpServer,
+  type ExecMcpServerDeps,
+  type JsonRpcRequest,
+  type JsonRpcResponse,
+  type McpToolDescriptor,
+  argSchemaToJsonSchema,
+  createExecMcpServer,
+} from "./mcp/exec-mcp-server.js";
+export {
+  type ExecMcpLoopbackOptions,
+  type ExecMcpLoopbackServer,
+  type ExecMcpServerDescriptor,
+  startExecMcpLoopbackServer,
+} from "./mcp/exec-mcp-loopback.js";
