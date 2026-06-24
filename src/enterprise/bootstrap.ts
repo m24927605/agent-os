@@ -41,7 +41,12 @@ import {
   redactSecrets,
 } from "../audit/index.js";
 import { type CommitAppender, commitBeforeEffect } from "../commitgate/index.js";
-import { type CostGate, InMemoryCostGate } from "../cost/index.js";
+import {
+  type CostGate,
+  InMemoryCostGate,
+  NullCostGate,
+  failClosedCostGate,
+} from "../cost/index.js";
 import type { AgentContext } from "../iam/ids.js";
 import {
   type GovernedCall,
@@ -56,8 +61,10 @@ import {
 import {
   type AllowRule,
   type PolicyRequest,
+  type SecondaryPolicyAdapter,
   combineDecisions,
   evaluatePolicy,
+  evaluateSecondaries,
 } from "../policy/index.js";
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { FakeSandboxAdapter } from "../runtime/substrate/index.js";
@@ -124,6 +131,28 @@ export interface EnterpriseFleetOpts {
    * operator e2e stay green unchanged.
    */
   readonly toolRegistry?: ToolRegistry;
+  /**
+   * SLICE-IT1a — an INJECTABLE, vendor-neutral PER-TENANT CostGate FACTORY (the spend slot). Called
+   * ONCE per tenant at provisioning with that tenant's id; it returns the gate THAT tenant's pipeline
+   * reserves against. ABSENT (the default) => each tenant gets its OWN `new InMemoryCostGate(budget)`
+   * (byte-identical to ES1). PER-TENANT ISOLATION is LOAD-BEARING: the factory builds an INDEPENDENT
+   * gate per tenant (e.g. a SpendGuardCostGate scoped to tenant-A's budget claim is NEVER tenant-B's),
+   * so A exhausting/denying never affects B. The injection can ONLY NARROW: a CostGate's `reserve` can
+   * DENY (deny@cost), it never grants more budget. Depends ONLY on the vendor-neutral `CostGate` PORT
+   * type — never a vendor adapter (SpendGuard/AGT).
+   */
+  readonly costGateFor?: (tenantId: string) => CostGate;
+  /**
+   * SLICE-IT1a — INJECTABLE, vendor-neutral ADVISORY secondary policy adapters (e.g. AGT), SHARED
+   * across every tenant's per-tenant authorize (the approved default: fleet-wide advisory). ABSENT (the
+   * default) => `[]` (byte-identical to ES1: `combineDecisions(decision, [])`). When provided, every
+   * tenant's per-tenant authorize folds them via `combineDecisions(decision, opts.secondaries)`: each
+   * tenant's PDP is the SOLE deny authority and the merge is any-deny-wins / fail-closed, so a secondary
+   * can ONLY NARROW — it never grants/relaxes a per-tenant deny, and (being a deny-only advisory) it
+   * does NOT change routing or cross-tenant isolation. Depends ONLY on the vendor-neutral
+   * `SecondaryPolicyAdapter` PORT type — never a vendor adapter.
+   */
+  readonly secondaries?: readonly SecondaryPolicyAdapter[];
 }
 
 /** A console resolved for a routed tenant, or a deny when the ctx does not route (fail-closed). */
@@ -436,8 +465,16 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         const decision = opts.toolRegistry
           ? authorizeToolInvoke(req, opts.toolRegistry, allow)
           : evaluatePolicy(req, allow);
-        const combined = combineDecisions(decision, []);
-        return { effect: combined.effect, reason: combined.reason };
+        // SLICE-IT1a: evaluate the INJECTED shared advisory secondaries fail-closed (a throwing adapter
+        // -> a synthetic deny), then fold them into THIS tenant's decision. ABSENT => `[]` adapters ->
+        // `[]` decisions, byte-identical to ES1's `combineDecisions(decision, [])`. combineDecisions is
+        // any-deny-wins / per-tenant-PDP-sovereign: a secondary can only deny more — it never grants,
+        // and (deny-only advisory) it does not affect this tenant's routing/isolation.
+        const secondaryDecisions = evaluateSecondaries(opts.secondaries ?? [], req);
+        const combined = combineDecisions(decision, secondaryDecisions);
+        // Scrub UNTRUSTED secondary `reason` text before it flows into THIS tenant's committed
+        // AuditEvent (the appender writes `decisionReason` -> the per-tenant WORM). ABSENT => identity.
+        return { effect: combined.effect, reason: redactSecrets(combined.reason) };
       },
       cost,
       estimateTokens: () => estimate,
@@ -485,7 +522,24 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
       binding.tenantId,
       injected ?? ((auditEvent: AuditEvent) => Promise.resolve(log.append(auditEvent))),
     );
-    costByTenant.set(binding.tenantId, new InMemoryCostGate(budget));
+    // SLICE-IT1a: build THIS tenant's INDEPENDENT gate from the INJECTED per-tenant factory, or —
+    // ABSENT — the ES1-identical `new InMemoryCostGate(budget)`. PER-TENANT ISOLATION: the factory is
+    // called with THIS tenant's id and returns a gate scoped to THIS tenant (A's always-deny/SpendGuard
+    // gate is NEVER B's). FAIL-CLOSED PROVISIONING: if the factory THROWS for THIS tenant, install a
+    // deny-all `NullCostGate` for it (its calls deny@cost) instead of aborting the whole fleet — so one
+    // tenant's gate-construction fault NEVER prevents the other tenants from being provisioned (A's
+    // fault denies A only, never B). The chosen gate is wrapped fail-closed so an EXTERNAL gate's thrown
+    // reserve/commit/release becomes a structured deny; the in-tree gate never throws, so the ABSENT
+    // path is byte-identical. The injected gate is THIS tenant's spend authority; the invariant is that
+    // a gate that DENIES cannot grant the effect.
+    let tenantGate: CostGate;
+    try {
+      tenantGate = opts.costGateFor?.(binding.tenantId) ?? new InMemoryCostGate(budget);
+    } catch {
+      // Factory fault => deny-all for THIS tenant (deny-by-default), fleet construction continues.
+      tenantGate = new NullCostGate();
+    }
+    costByTenant.set(binding.tenantId, failClosedCostGate(tenantGate));
     inboxByTenant.set(
       binding.tenantId,
       new ApprovalInbox<GovernedCall, AppendReceipt>((tc) =>

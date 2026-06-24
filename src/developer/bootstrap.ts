@@ -51,7 +51,7 @@ import {
   redactSecrets,
 } from "../audit/index.js";
 import type { CommitAppender } from "../commitgate/index.js";
-import { type CostGate, InMemoryCostGate } from "../cost/index.js";
+import { type CostGate, InMemoryCostGate, failClosedCostGate } from "../cost/index.js";
 import type { AgentContext } from "../iam/ids.js";
 import {
   type GovernedCall,
@@ -61,7 +61,13 @@ import {
   replayTimeline,
   runGovernedToolCall,
 } from "../orchestration/index.js";
-import { type AllowRule, type PolicyRequest, combineDecisions } from "../policy/index.js";
+import {
+  type AllowRule,
+  type PolicyRequest,
+  type SecondaryPolicyAdapter,
+  combineDecisions,
+  evaluateSecondaries,
+} from "../policy/index.js";
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { FakeSandboxAdapter } from "../runtime/substrate/index.js";
 import {
@@ -130,6 +136,24 @@ export interface DeveloperKitOpts {
    * authorize; this opt only makes the registry an INJECTABLE (shareable) seam.
    */
   readonly toolRegistry?: ToolRegistry;
+  /**
+   * SLICE-IT1a — an INJECTABLE, vendor-neutral CostGate (the spend slot). ABSENT (the default) => the
+   * DV1-identical `new InMemoryCostGate(budget)` (byte-identical to today). When provided (e.g. a
+   * config-driven SpendGuardCostGate wired by IT1b), the governed pipeline reserves against THIS gate
+   * instead — and the injection can ONLY NARROW: a CostGate's `reserve` can DENY (deny@cost), it never
+   * grants more budget than the gate allows. The kit depends ONLY on the vendor-neutral `CostGate`
+   * PORT type here — never a vendor adapter (SpendGuard/AGT).
+   */
+  readonly costGate?: CostGate;
+  /**
+   * SLICE-IT1a — INJECTABLE, vendor-neutral ADVISORY secondary policy adapters (e.g. AGT). ABSENT (the
+   * default) => `[]` (byte-identical to today: `combineDecisions(decision, [])`). When provided, every
+   * adapter is folded via `combineDecisions(decision, opts.secondaries)`: the registry-backed PDP is
+   * the SOLE deny authority and the merge is any-deny-wins / fail-closed, so a secondary can ONLY
+   * NARROW — it can NEVER grant/relax what the registry/PDP denied. The kit depends ONLY on the
+   * vendor-neutral `SecondaryPolicyAdapter` PORT type — never a vendor adapter.
+   */
+  readonly secondaries?: readonly SecondaryPolicyAdapter[];
 }
 
 /** The composed Developer-surface facade a developer (or a test) drives end-to-end. */
@@ -202,7 +226,12 @@ export function createDeveloperKit(opts: DeveloperKitOpts = {}): DeveloperKit {
   // kit shares the SAME catalog as the other surfaces (SLICE-DVx three-surface unified admission).
   const registry = opts.toolRegistry ?? new ToolRegistry();
   const fake = new FakeSandboxAdapter();
-  const cost: CostGate = new InMemoryCostGate(budget);
+  // SLICE-IT1a: the INJECTED CostGate or — ABSENT — the DV1-identical `new InMemoryCostGate(budget)`.
+  // The injected gate is the spend AUTHORITY for this kit (replacement); the invariant is that a
+  // CostGate that DENIES cannot grant the effect. Wrapped fail-closed so an EXTERNAL gate's thrown
+  // reserve/commit/release becomes a structured deny (the in-tree gate never throws, so the ABSENT path
+  // stays byte-identical to today).
+  const cost: CostGate = failClosedCostGate(opts.costGate ?? new InMemoryCostGate(budget));
 
   /**
    * The seam appender (mirrors Personal): synthesize a REAL AuditEvent from the structural event and
@@ -244,8 +273,15 @@ export function createDeveloperKit(opts: DeveloperKitOpts = {}): DeveloperKit {
       // authorizeToolInvoke is the deny-only registry pre-screen IN FRONT of the PDP: an UNREGISTERED
       // tool is denied deny-by-default; a REGISTERED tool is delegated to evaluatePolicy(req, rules).
       const decision = authorizeToolInvoke(req, registry, rules);
-      const combined = combineDecisions(decision, []);
-      return { effect: combined.effect, reason: combined.reason };
+      // SLICE-IT1a: evaluate the INJECTED advisory secondaries fail-closed (a throwing adapter -> a
+      // synthetic deny), then fold them into the decision. ABSENT => `[]` adapters -> `[]` decisions,
+      // byte-identical to today's `combineDecisions(decision, [])`. combineDecisions is any-deny-wins /
+      // PDP-sovereign: a secondary can only deny more — it never grants/relaxes a registry/PDP deny.
+      const secondaryDecisions = evaluateSecondaries(opts.secondaries ?? [], req);
+      const combined = combineDecisions(decision, secondaryDecisions);
+      // Scrub UNTRUSTED secondary `reason` text before it flows into the committed AuditEvent (replayFold
+      // folds the RAW WORM, so write-side redaction is the defense). ABSENT path => identity redact.
+      return { effect: combined.effect, reason: redactSecrets(combined.reason) };
     },
     cost,
     estimateTokens: () => estimate,
