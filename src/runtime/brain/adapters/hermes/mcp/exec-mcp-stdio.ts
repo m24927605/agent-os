@@ -157,8 +157,13 @@ export interface ExecMcpStdioDescriptor {
   readonly command: string;
   /** The args — the absolute path to the built bin. */
   readonly args: readonly string[];
-  /** The MINIMAL env the spawned bin runs under (no Agent OS secret; placeholder-only). */
-  readonly env: Readonly<Record<string, string>>;
+  /**
+   * The MINIMAL env the spawned bin runs under (no Agent OS secret; placeholder-only). Matches the ACP
+   * `McpServerStdio.env` schema (acp/schema.py: `List[EnvVariable]`) — a LIST of `{name, value}` objects,
+   * NOT a dict (a dict-shaped env makes `session/new` fail with JSON-RPC -32602; pinned by the EXEC4c-b
+   * live run).
+   */
+  readonly env: readonly { readonly name: string; readonly value: string }[];
 }
 
 const DEFAULT_NAME = "agentos-exec";
@@ -179,6 +184,7 @@ export function execMcpStdioDescriptor(
     name: DEFAULT_NAME,
     command: "node",
     args: [binPath],
-    env: { ...env },
+    // ACP McpServerStdio.env is List[EnvVariable] ({name, value}) — serialize the ergonomic Record to it.
+    env: Object.entries(env).map(([name, value]) => ({ name, value })),
   };
 }

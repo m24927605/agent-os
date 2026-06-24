@@ -242,8 +242,15 @@ describe("EXEC4c-b — DESCRIPTOR-ADVERTISE the stdio descriptor is threaded int
     expect(params?.mcpServers).toEqual([descriptor]);
     expect(descriptor.command).toBe("node");
     expect(descriptor.args).toEqual(["/abs/path/to/exec-mcp-server-bin.js"]);
+    // env is the ACP McpServerStdio List[EnvVariable] shape ({name, value}), NOT a dict.
+    expect(descriptor.env).toContainEqual({
+      name: "AGENTOS_OPENSHELL_ENDPOINT",
+      value: "127.0.0.1:17670",
+    });
     // The kernel ingest endpoint rides as NON-secret env (never a credential).
-    expect(descriptor.env.AGENTOS_KERNEL_INGEST_ENDPOINT).toBe("127.0.0.1:50051");
+    expect(descriptor.env.find((e) => e.name === "AGENTOS_KERNEL_INGEST_ENDPOINT")?.value).toBe(
+      "127.0.0.1:50051",
+    );
   });
 
   it("with NO mcpServers option the default stays [] (acp-stdio byte-unchanged — the descriptor is opt-in)", async () => {
