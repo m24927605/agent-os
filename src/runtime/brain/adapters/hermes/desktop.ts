@@ -68,6 +68,46 @@ export interface DesktopHermesTransport {
   submit(intent: string): AsyncIterable<AcpUpdateFrame>;
 }
 
+/**
+ * One turn of a held duplex ACP session (SLICE-DHB3a). A turn = the `session/update` frames Hermes
+ * streamed for ONE `session/prompt`, terminated by the prompt's `stopReason`. The DRIVER governs these
+ * frames, then feeds the (redacted, serialized) outcome back as the NEXT prompt.
+ */
+export interface HermesLoopTurn {
+  /** The proposal frames (e.g. a tool_call) streamed before this prompt resolved. */
+  readonly frames: readonly AcpUpdateFrame[];
+  /** The terminal stopReason Hermes returned for this prompt (e.g. "end_turn"). */
+  readonly stopReason: string;
+}
+
+/**
+ * A held duplex ACP session: multiple prompt turns on the SAME `sessionId` before teardown.
+ *
+ * Usage: `nextTurn()` drives one `session/prompt` and resolves with its proposals + stopReason (or
+ * `null` once the session is finished/closed); the DRIVER governs them and calls `feed(resultText)` to
+ * send the NEXT prompt as `[{type:"text", text}]` (same content shape as the one-shot submit); repeat.
+ * `close()` tears the child down (SIGKILL in finally). Fail-closed is unchanged: spawn / nonzero /
+ * malformed / EOF / JSON-RPC-error reject out of `nextTurn`/`feed` (deny-by-default).
+ */
+export interface HermesLoopSession {
+  /** Drive the next prompt turn; resolves with its proposals, or `null` if the session is finished. */
+  nextTurn(): Promise<HermesLoopTurn | null>;
+  /** Send the (already-redacted) governed result text as the next `session/prompt` on the same session. */
+  feed(text: string): Promise<void>;
+  /** Tear the held child + session down (idempotent). */
+  close(): Promise<void>;
+}
+
+/**
+ * A duplex-capable transport: the one-shot `submit` (DHB1/DHB2a, UNCHANGED) PLUS a held multi-turn
+ * session entry (DHB3a). Backward-compatible: every `DuplexDesktopHermesTransport` is still a
+ * `DesktopHermesTransport`, so existing one-shot callers keep working.
+ */
+export interface DuplexDesktopHermesTransport extends DesktopHermesTransport {
+  /** Open a held duplex ACP session; the FIRST `nextTurn()` drives the prompt for `intent`. */
+  openSession(intent: string): Promise<HermesLoopSession>;
+}
+
 /** True iff `v` is a non-empty string. */
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
