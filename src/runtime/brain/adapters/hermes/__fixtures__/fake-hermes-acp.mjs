@@ -48,6 +48,10 @@ const record = {
   fsReadResponse: /** @type {unknown} */ (undefined),
   terminalCreateResponse: /** @type {unknown} */ (undefined),
   hostAccessGranted: false,
+  // (e) DHB3a closed loop: the text of each FOLLOW-UP session/prompt the client fed back (the governed
+  // result), and the permission response observed on EACH turn (propose-only must hold every turn).
+  promptTexts: /** @type {string[]} */ ([]),
+  permissionResponsesPerTurn: /** @type {unknown[]} */ ([]),
 };
 
 function flushLog() {
@@ -93,6 +97,90 @@ function serverRequest(method, params) {
 
 const SESSION_ID = "sess-fake-1";
 
+/** Decide whether a permission response APPROVED execution (allow/approve) vs denied (cancelled/reject). */
+function isApproval(response) {
+  const outcome =
+    response && typeof response === "object" && "outcome" in response
+      ? response.outcome
+      : undefined;
+  const outcomeKind =
+    outcome && typeof outcome === "object" && "outcome" in outcome ? outcome.outcome : undefined;
+  const selectedOption =
+    outcome && typeof outcome === "object" && "optionId" in outcome ? outcome.optionId : undefined;
+  return outcomeKind === "selected" && (selectedOption === "allow" || selectedOption === "approve");
+}
+
+/**
+ * Ask the client to permit executing a tool (propose-only test). Records the per-turn response so the
+ * test can assert EVERY turn was answered with a cancellation. A correct client DENIES; if it ever
+ * approves, the fake self-executes (which the test catches as a propose-only violation).
+ */
+async function askPermission(toolCallId, title) {
+  const response = await serverRequest("session/request_permission", {
+    sessionId: SESSION_ID,
+    toolCall: { toolCallId, title },
+    options: [
+      { optionId: "allow", name: "Allow", kind: "allow_once" },
+      { optionId: "reject", name: "Reject", kind: "reject_once" },
+    ],
+  });
+  record.permissionResponsesPerTurn.push(response);
+  if (isApproval(response)) {
+    record.permissionApproved = true;
+    record.toolExecuted = true;
+    sessionUpdate(SESSION_ID, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: `EXECUTED ${title} (client approved!)` },
+    });
+  }
+}
+
+/** Per-prompt turn index for the loop scenarios (each session/prompt = one turn). */
+let loopTurn = 0;
+
+/**
+ * DHB3a `loop`: a CLOSED agentic loop over a held session. Turn 1 proposes a tool_call + asks
+ * permission (denied) and does NOT resolve end_turn — it WAITS for the client's second session/prompt
+ * (the governed result). On the SECOND prompt it proposes a SECOND tool_call (continue). On the THIRD
+ * prompt it resolves stopReason:"end_turn" (done). `loop_forever` proposes a tool_call on EVERY prompt
+ * and NEVER resolves end_turn (for the maxTurns cap test).
+ */
+async function runLoopTurn(forever) {
+  loopTurn += 1;
+  const id = loopTurn;
+
+  // A terminal turn (only for `loop` on turn 3): no proposal, resolve end_turn -> loop ends.
+  if (!forever && id >= 3) {
+    sessionUpdate(SESSION_ID, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "all done" },
+    });
+    flushLog();
+    promptResolve(); // stopReason: "end_turn"
+    return;
+  }
+
+  // Otherwise propose a tool_call + ask permission (denied every turn). Do NOT resolve end_turn:
+  // the prompt resolves with a stopReason ONLY so the client can read this turn's proposals, then the
+  // client feeds back the governed result as the next prompt. We resolve "tool_use" (a non-terminal
+  // stopReason) so the DRIVER keeps looping while there is a proposal.
+  sessionUpdate(SESSION_ID, {
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: `loop turn ${id}: I will run a tool` },
+  });
+  sessionUpdate(SESSION_ID, {
+    sessionUpdate: "tool_call",
+    toolCallId: `call-${id}`,
+    title: `loop_tool_${id}`,
+    rawInput: { step: id },
+  });
+  await askPermission(`call-${id}`, `loop_tool_${id}`);
+  flushLog();
+  // Resolve THIS prompt with a non-terminal stopReason so the client governs the proposal and feeds
+  // the result back as the next prompt (the loop closes).
+  promptResolveWith({ stopReason: "tool_use" });
+}
+
 async function runPrompt(promptParams) {
   // The intent text the client forwarded (credential-blind: this is the only caller payload).
   // We do not need it beyond recording — it is captured in stdinLines already.
@@ -119,6 +207,11 @@ async function runPrompt(promptParams) {
     // Exit non-zero BEFORE resolving the prompt -> fail-closed.
     flushLog();
     process.exit(3);
+    return;
+  }
+
+  if (SCENARIO === "loop" || SCENARIO === "loop_forever") {
+    await runLoopTurn(SCENARIO === "loop_forever");
     return;
   }
 
@@ -207,6 +300,22 @@ async function runPrompt(promptParams) {
 }
 
 let promptResolve = () => {};
+/** Resolve the in-flight prompt with a CUSTOM result (e.g. a non-terminal stopReason for loop turns). */
+let promptResolveWith = (_result) => {};
+
+/** Extract the plain text the client sent in a session/prompt's content (the governed result, etc.). */
+function promptText(params) {
+  const prompt = params && typeof params === "object" ? params.prompt : undefined;
+  if (!Array.isArray(prompt)) return "";
+  return prompt
+    .map((block) =>
+      block && typeof block === "object" && typeof block.text === "string" ? block.text : "",
+    )
+    .join("");
+}
+
+/** How many session/prompt messages the client has sent so far (turn 1 = the intent). */
+let promptCount = 0;
 
 /** Handle one fully-parsed JSON-RPC message arriving from the client (on our stdin). */
 function onClientMessage(msg) {
@@ -224,8 +333,14 @@ function onClientMessage(msg) {
         respond(msg.id, { sessionId: SESSION_ID });
         return;
       case "session/prompt": {
-        // Resolve the prompt only after the scenario's streaming completes.
+        promptCount += 1;
+        // The FIRST prompt carries the intent; every SUBSEQUENT prompt carries the governed result the
+        // client fed back. Record the follow-up texts so the loop test can assert what egressed.
+        if (promptCount > 1) record.promptTexts.push(promptText(msg.params));
+        // Resolve the prompt only after the scenario's streaming completes. Two resolvers bound to
+        // THIS prompt's id: the default end_turn, and a custom-result one for loop turns.
         promptResolve = () => respond(msg.id, { stopReason: "end_turn" });
+        promptResolveWith = (result) => respond(msg.id, result);
         void runPrompt(msg.params);
         return;
       }

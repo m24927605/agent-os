@@ -4,7 +4,7 @@
 - **Branches**: slice/dhb3a-closed-loop（in-repo)、slice/dhb3b-live-closed-loop（live）
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: DHB3a <= 1–1.5 day（TS only）；DHB3b = live 驗證(user-initiated)
-- **狀態**: **DRAFT**
+- **狀態**: **DHB3a DONE**（merged;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS;6 不變量 + duplex fail-closed 經 mutation 證實;pipeline/guard EMPTY-diff;真 Hermes 回饋-邊 dialect=DHB3b/live）。**DHB3b OPEN**(live,user-initiated)。
 
 ## (0) 動機 + 現況 + ⚠️ 誠實分界（grounded,設計探索 task wdv6ncux1)
 DHB1/2 已 live 證:desktop Hermes 經 ACP 驅動 Agent OS,但**單向、propose-only 一次性**——`AcpStdioTransport.submit(intent)` 做一次 `initialize→session/new→session/prompt`,prompt 一 resolve(stopReason)就 `channel.end()` + `finally` SIGKILL child(acp-stdio.ts:309-353);`HermesTurnSource.turns(intent)` intent 進、turn 出(shim.ts:63-65、desktop.ts:120-129)。Agent OS **擷取+治理**提案,但**不執行、不把結果回饋**。DHB3 = **閉環**:propose → 治理 → **執行 governed effect(Agent OS 自己的 substrate)** → 結果經 ACP 回 Hermes → 續推,到任務終止。
@@ -42,9 +42,12 @@ SLICE-DHB3 = **對話式結果回饋,雙工 ACP session**(留 result-serializati
 - **RED6 commit-before-effect + abort 不回假結果**:appender reject → effect 從未跑 **且** 不送後續結果 prompt(commit 失敗 = deny,非假結果)。
 - **RED7 既有 fail-closed 不回歸**:對「多輪化後的 submit」重跑既有 acp-stdio.test.ts 的 fail-closed/credential-blind/host-access/propose-only suites,全綠。
 
-## (6) Definition of Done（待實測填）
-- [ ] DHB3a:RED → `pnpm run verify` exit 0(Fake 多輪閉環測綠;6 不變量 RED7 各 mutation 證非空;pipeline.ts/guard.ts 未改;depcruise/secret-scan clean;live 不在 verify)。
-- [ ] DHB3a:獨立 Opus 4.8 review = PASS。
+## (6) Definition of Done（實測）
+- [x] DHB3a:RED → `pnpm run verify` **exit 0**(961 passed + 19 skipped;Fake 多輪閉環測 + duplex fail-closed 綠;6 不變量各 mutation 證非空〔propose-only-turn>1 / skip-redact / fabricate-denied-success×2 / Infinity-cap-hang〕;depcruise 139 modules clean〔reviewer deep-import 親證 bite〕;secret-scan clean;live/DHB3b 不在 verify)。
+- [x] **pipeline.ts / guard.ts EMPTY-diff**(reviewer git-diff 證);DRIVER `runClosedLoop` 在管線之上、重用 `runGovernedToolCall`、絕不自跑 effect;DHB1/DHB2a seam(shim/credential-guard/parseFrame/one-shot submit)未動、向後相容。
+- [x] **6 不變量 HELD**:propose-only **每輪**(duplex `session/request_permission`→cancelled 逐字同 one-shot,reviewer 證第 2 輪仍 deny)/ deny-不執行且回報 "DENIED" / **credential-blind 回饋(redactSecrets 才出,無 raw-args echo)** / brain-untrusted / commit-before-effect 不改(abort→deny 非假結果)/ fail-closed + **maxTurns=12 cap(Infinity→hang 證 load-bearing)**。
+- [x] **duplex fail-closed committed tests(採納 reviewer MINOR)**:malformed/nonzero/EOF→`nextTurn` reject、spawn-fail→`openSession` reject、early-stop teardown 無 hang/orphan + feed-after-close reject(各帶 non-vacuity mutation);+ 硬化:child exit 在 handshake pending 時即 reject(test d 10s→77ms)。無 orphan(ps 全表精確證)。
+- [x] DHB3a:**獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A;每不變量 mutation 翻紅;1 MINOR〔duplex fail-closed 無 committed test〕已採納補)。
 - [ ] DHB3b(你親跑後填):`AGENTOS_LIVE_DESKTOP_HERMES=1 pnpm run e2e:live-desktop-hermes` 多輪 live 綠 / 或揭露 dialect 分歧(fail-closed 診斷)→ 必要時修 DRIVER/transport mapping 回 verify 重證。
 
 ## (7) Rollback

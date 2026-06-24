@@ -16,7 +16,16 @@ export {
   type AcpUpdateFrame,
   type DesktopHermesTransport,
   DesktopHermesTurnSource,
+  type DuplexDesktopHermesTransport,
   FakeDesktopHermesTransport,
+  type HermesLoopSession,
+  type HermesLoopTurn,
   parseFrame,
 } from "./desktop.js";
 export { AcpStdioTransport, type AcpStdioTransportOptions } from "./acp-stdio.js";
+export {
+  type ClosedLoopOptions,
+  type ClosedLoopResult,
+  type ClosedLoopStop,
+  runClosedLoop,
+} from "./closed-loop.js";
