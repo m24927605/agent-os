@@ -153,7 +153,8 @@ pnpm run verifier:release           # builds the standalone + WASM verifier, wit
   so everything runs without external services; the live adapters are injected when you point at real infra.
 - **North star vs today.** "Say anything, the whole computer does it" is the vision. What ships is the
   governed spine + the three surfaces + verifiable evidence. Honest gaps are tracked in `docs/slices/`
-  (e.g. real STT vendor; the in-process NemoClaw-hosted Hermes model SDK; **operator-unforgeable trust-root** — the kernel
+  (e.g. real STT vendor; the **closed Hermes agentic loop** — the live ACP drive is governed *propose-only* today, so
+  feeding a governed effect's result back to the desktop Hermes for a multi-turn task is not yet wired; **operator-unforgeable trust-root** — the kernel
   process no longer holds the signing key, but a hardware/KMS root that even the operator can't forge is a
   deployment step, not yet wired).
 
