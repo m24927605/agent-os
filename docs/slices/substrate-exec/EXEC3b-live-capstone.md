@@ -4,7 +4,7 @@
 - **Branch**: slice/exec3b-live-capstone（harness in-repo,skip-under-verify)
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: harness <= 1 day（TS only）；live-run = user-initiated
-- **狀態**: **harness DONE（merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(真 screen 非 vacuous / exec-effect rename byte-identical / seed-tools drift-free / (A)(B) gating load-bearing + 誠實切分 / readinessGated wrapper sound;core 未動)。**(A)(B) live-run = 待跑**(A: `AGENTOS_LIVE_DESKTOP_HERMES=1 AGENTOS_LIVE_OPENSHELL=1`;B: `AGENTOS_LIVE_OPENSHELL=1`)。
+- **狀態**: **harness DONE（merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(真 screen 非 vacuous / exec-effect rename byte-identical / seed-tools drift-free / (A)(B) gating load-bearing + 誠實切分 / readinessGated wrapper sound;core 未動)。**(B) SUCCESS live ✅ 通過(2026-06-24)**:`AGENTOS_LIVE_OPENSHELL=1 vitest exec-capstone.live.test.ts` 綠——`[EXEC3b/B] stoppedBy=terminal, turns=3, governedProposals=2, realExecs=2`,受控 exec.echo `{text:'hello'}` → 治理 → **真 OpenShell sandbox 真命令(2 真 exec)** → `EffectResult{ok:true}` 含真 'hello'+'exit=0';propose-only + credential-blind + ephemeral sandbox create+destroy 守住。**完整治理閉環 live 端到端成立。** **(A) SAFETY live = 待你明確 OK**(`AGENTOS_LIVE_DESKTOP_HERMES=1 AGENTOS_LIVE_OPENSHELL=1`,真 Hermes、花 LLM credits)。
 
 ## (0) 動機 + ⚠️ 必須誠實面對的設計實況（grounded)
 EXEC3a 已 in-repo 證 join(scripted Hermes 提案 `exec.echo` → 治理 → Fake exec → 回饋 → 續推)。EXEC3b = 用**真 OpenShell ephemeral sandbox + 真 desktop Hermes ACP** 跑整個 join,並補 finding②(真 inbound screen)。
