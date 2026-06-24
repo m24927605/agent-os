@@ -17,19 +17,21 @@
 
 → **唯一缺口**:一個連「本機 desktop Hermes local gateway」的**真 `HermesTurnSource`**(把 Hermes 的 turn 串轉成 `HermesTurn`),其餘治理鏈現成。
 
-## 1. ⚠️ 誠實未知（決定 in-repo vs live）
-- **desktop Hermes 的 local API(endpoint/protocol/auth/request-response 形狀)未知**——marketing 頁未列;需從桌面版**官方 docs 或實跑的 app** 確認。故 DHB1 把 adapter 設計在 **`DesktopHermesTransport` port + parser** 後面(API-shape-agnostic),用 **Fake transport** 在 in-repo 證接縫;真 endpoint 綁定 = DHB2/live。
-- **brain 必須是「propose-only」**:Agent OS 模型裡 brain 只**提案**,effect 走 Agent OS 的治理管線 + substrate(OpenShell/Fake)。需確認 desktop Hermes 能以「只回提案 turn、不自行執行」模式運作(或我們只取其提案、忽略其自帶執行)。= DHB2 確認項。
-- **credential-blind 邊界**:adapter **絕不**把 Agent OS 的 secret 送進 Hermes,**絕不**把 Hermes 的 api_key 讀進 BrainEvent(`HermesTurn` 無此欄位)。Agent OS 的 secret 留 Agent OS 側;Hermes 的 model key 留 Hermes 側。
+## 1. ✅ 整合接面 = ACP（已在本機查實,2026-06-24）
+本機已裝 desktop Hermes v0.17.0(`~/.local/bin/hermes`,project `~/.hermes/hermes-agent`)。查 CLI 接面後,**程式化接面確定 = `hermes acp`(Agent Client Protocol)**:
+- `hermes acp` = "Start Hermes Agent in **ACP mode for editor integration (VS Code, Zed, JetBrains)**" —— **JSON-RPC over stdio**:client(= Agent OS)launch 子進程 → `initialize` → `session/new` → `session/prompt(intent)` → 串回 `session/update`(agent message chunk + **tool_call** update)。這正是「client 驅動 agent、串流 tool-call」的標準接面,直接對映 `HermesTurn`(planText/toolCalls/…)。`hermes acp --check` 可驗依賴/adapter。
+- 其他接面**較不適合**:`hermes -z PROMPT`(一次性、文字輸出,無結構化 tool-call 串);`hermes proxy start`(本機 OpenAI-compatible HTTP,只有 chat-completions,無 agent tool-call 串);messaging gateway(走 unix socket,接 Telegram/Discord/…,非程式化 brain 接面)。
+- **propose-only**:ACP 把控制權交給 client——Agent OS 收到 `tool_call` update 後,由**自己的治理管線**(screen→authorize→cost→commit→effect + 自己的 substrate)決定是否執行,而非讓 Hermes 自跑。需在 DHB2 確認 Hermes ACP 的 permission/tool 模式可由 client 主導。
+- **credential-blind 邊界**:adapter **只送 intent prompt**,**絕不**把 Agent OS 的 secret 送進 Hermes;Hermes 的 model key 留在 `~/.hermes`(`.env`/`auth.json`,**我們從不讀**);ACP 的 tool_call → `HermesTurn.toolCalls`(`HermesTurn` 無 api_key 欄位 → 結構性剝除),字面 secret 仍由 `screenBrainEvent` 擋。
 
 ## 2. 切片分解
 | Slice | 範圍 | 狀態 |
 |---|---|---|
-| **DHB1**(in-repo seam) | `DesktopHermesTransport` port(submit intent → stream raw turn frames)+ `DesktopHermesTurnSource implements HermesTurnSource`(raw→`HermesTurn`,credential-blind:不讀/不轉 api_key、不送 Agent OS secret)+ **Fake transport** 證接縫 + contract test(turn→BrainEvent 經 `HermesBrainShim`;transport throw/ malformed → fail-closed;偷渡 secret → denied@screen)+ gated live e2e 骨架(`e2e:live-desktop-hermes`,缺 app/endpoint → clean BLOCK)| DRAFT(先建)|
-| **DHB2**(live,gated) | 綁真 desktop Hermes local gateway(確認 endpoint/protocol/propose-only 模式)+ live 證明(intent → 桌面 Hermes 提案 → 治理 → effect)。**需你本機跑 desktop Hermes + 確認其 local API** | OPEN(待 API 確認 + 環境)|
+| **DHB1**(in-repo seam) | `DesktopHermesTransport` port(submit intent → stream **ACP `session/update` 幀**)+ `DesktopHermesTurnSource implements HermesTurnSource`(ACP update→`HermesTurn`,credential-blind:不讀/不轉 api_key、不送 Agent OS secret)+ **Fake transport**(腳本化 ACP 幀 + 對抗幀)證接縫 + contract test(turn→BrainEvent 經 `HermesBrainShim`;transport throw/ malformed → fail-closed;偷渡 secret → denied@screen)+ gated live e2e 骨架(`e2e:live-desktop-hermes`,缺 `hermes`/gate → clean BLOCK)| DRAFT(先建)|
+| **DHB2**(live,gated) | 綁真 `hermes acp` 子進程(JSON-RPC over stdio:initialize→session/new→session/prompt→session/update;以 `hermes acp --check` 對映 Hermes 的 ACP dialect;確認 propose-only/permission 模式由 client 主導)+ live 證明(intent → 桌面 Hermes ACP 提案 → 治理 → effect)。**需本機跑起來(已裝 ✓)** | OPEN(接面已查實=ACP;待 live 綁定)|
 
-## 3. 待你提供（影響 DHB2,不影響 DHB1)
-desktop Hermes 的 **local gateway endpoint + protocol**(HTTP/WS?路徑?如何提交 intent、如何串回 turn、是否有 propose-only 模式)。DHB1 的 transport port + parser + Fake **不需**此資訊即可建並 in-repo 證;DHB2 綁真 endpoint 才需。
+## 3. ✅ 整合接面已查實(ACP);DHB2 待 live 綁定
+接面不再是未知:`hermes acp`(JSON-RPC over stdio)。DHB1 的 transport port + parser + Fake 把 ACP 幀形狀抽象化、in-repo 證接縫(不啟動真 `hermes acp`);DHB2 才 launch 真子進程 + 以 `hermes acp --check`/實跑對映確切 ACP 訊息 dialect + 證 propose-only。本機 desktop Hermes 已安裝(v0.17.0)。
 
 ## 4. 交付順序
-DHB1(in-repo:transport port + 真 TurnSource + Fake + contract test + gated live 骨架)→(待你確認 desktop Hermes local API + 本機跑起來)DHB2(live 綁定)。每刀 doc-first + RED + `pnpm run verify` 綠 + 獨立 Opus 4.8 review + merge。
+DHB1(in-repo:ACP transport port + 真 TurnSource + Fake + contract test + gated live 骨架)→ DHB2(live:綁真 `hermes acp` 子進程)。每刀 doc-first + RED + `pnpm run verify` 綠 + 獨立 Opus 4.8 review + merge。
