@@ -9,8 +9,9 @@
  * Hermes + the descriptor shape + autonomous discovery = EXEC4b (a posture decision).
  *
  * INVARIANTS (each with a NON-VACUITY mutation noted in-line):
- *   1. deny-by-default / only-bounded-tools-exposed — tools/list = EXACTLY [exec.echo, exec.ls];
- *      an unregistered/unbound tools/call is denied at policy and never reaches the substrate.
+ *   1. deny-by-default / only-bounded-tools-exposed — tools/list = EXACTLY the registered bounded seed
+ *      tools (HDI2a: the 7 read-only-safe tools), nothing unexpected; an unregistered/unbound tools/call
+ *      is denied at policy and never reaches the substrate.
  *   2. composer-fixed argv — the brain's `arguments` are DECLARED params, never argv; a smuggled `argv`
  *      key is rejected by the strict argSchema, substrate 0 calls.
  *   3. commit-before-effect — the AuditEvent receipt is appended BEFORE the effect runs.
@@ -147,11 +148,12 @@ async function makeServerKit(opts: { substrate?: SpyFakeSandboxAdapter } = {}): 
 }
 
 // ==================================================================================================
-// RED1 — tools/list advertises EXACTLY [exec.echo, exec.ls], each inputSchema DERIVED from the strict
-//        argSchema (required + additionalProperties:false). NOTHING else (no fs/terminal/argv/shell).
+// RED1 — tools/list advertises EXACTLY the registered bounded seed tools (HDI2a: the 7 read-only-safe
+//        tools), each inputSchema DERIVED from the strict argSchema (required + additionalProperties:
+//        false). NOTHING unexpected (no fs/terminal/argv/shell/exec.run).
 // ==================================================================================================
-describe("EXEC4a — RED1 tools/list advertises exactly the two seed tools, schema-derived", () => {
-  it("returns exactly exec.echo + exec.ls with descriptions + DERIVED inputSchemas, nothing else", async () => {
+describe("EXEC4a — RED1 tools/list advertises exactly the bounded seed tools, schema-derived", () => {
+  it("returns exactly the bounded seed tools with descriptions + DERIVED inputSchemas, nothing else", async () => {
     const { deps } = await makeServerKit();
     const server = createExecMcpServer(deps);
 
@@ -161,10 +163,29 @@ describe("EXEC4a — RED1 tools/list advertises exactly the two seed tools, sche
       resp.result as { tools: { name: string; description: string; inputSchema: unknown }[] }
     ).tools;
 
-    // EXACTLY the two seed tools — nothing else (no fs/terminal/raw-argv/shell/command tool).
-    expect(tools.map((t) => t.name).sort()).toEqual(["exec.echo", "exec.ls"]);
+    // EXACTLY the registered bounded seed tools, nothing else (no fs/terminal/raw-argv/shell/command
+    // tool). SLICE-HDI2a grew the read-only-safe set from 2 to 7; the invariant is unchanged — ONLY the
+    // bounded seed tools are advertised, nothing unexpected.
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "exec.cat",
+      "exec.echo",
+      "exec.grep",
+      "exec.head",
+      "exec.ls",
+      "exec.pwd",
+      "exec.wc",
+    ]);
     const names = tools.map((t) => t.name);
-    for (const forbidden of ["fs", "fs/read", "terminal", "shell", "command", "argv", "exec.rm"]) {
+    for (const forbidden of [
+      "fs",
+      "fs/read",
+      "terminal",
+      "shell",
+      "command",
+      "argv",
+      "exec.rm",
+      "exec.run",
+    ]) {
       expect(names).not.toContain(forbidden);
     }
 
