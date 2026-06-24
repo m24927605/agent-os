@@ -18,7 +18,7 @@
 ## 2. 切片分解
 | Slice | 範圍 | 狀態 |
 |---|---|---|
-| **EXEC1**(in-repo,Fake-proven) | `SandboxAdapter` 加 `execSandbox(ctx, sandboxId, spec)→ExecResult{exitCode,stdout,stderr}`(placeholder-only env)+ `FakeSandboxAdapter` impl(deterministic)+ `NullSandboxAdapter` fail-closed + 一個 **exec-backed governed effect**(跑命令→redact 輸出→EffectResult)+ credential-blind(placeholder 進/redact 出)+ fail-closed。Fake 證,verify 內。spec:`EXEC1-substrate-exec-port.md` | DRAFT(先建)|
+| **EXEC1**(in-repo,Fake-proven) | `SandboxAdapter` 加 `execSandbox(ctx, sandboxId, spec)→ExecResult{exitCode,stdout,stderr}`(placeholder-only env)+ `FakeSandboxAdapter` impl(deterministic)+ `NullSandboxAdapter` fail-closed + 一個 **exec-backed governed effect**(跑命令→redact 輸出→EffectResult)+ credential-blind(placeholder 進/redact 出)+ fail-closed。Fake 證,verify 內。spec:`EXEC1-substrate-exec-port.md` | ✅ **DONE**(`ExecCapableSandboxAdapter` port + Fake/Null + `makeExecEffect`;credential-blind 進/出 + fail-closed〔無假 exit 0〕+ 64KB cap〔redact 後〕+ commit-before-effect,mutation 證實;pipeline/guard/OpenShell 未動;12 tests;獨立 Opus4.8 review PASS)|
 | **EXEC2**(live,gated) | OpenShell adapter 的 `execSandbox` 接真 `ExecSandbox` RPC(client.ts 已有 client-level)+ live 證(對你的真 OpenShell gateway,`e2e:live-*` gated;**這是 sandbox 命令、非 LLM credits**,但在你 sandbox 內有真副作用)| OPEN(待 EXEC1 + 你 OpenShell 環境)|
 | **EXEC3**(整合,後續) | 把 exec-backed effect 接進 **DHB3 閉環**:desktop Hermes 提案 → 治理 → **真命令執行** → **真輸出(redacted)回饋** → Hermes 續推。把 DHB3 的「canned stub」升級成真任務 | OPEN(待 EXEC1/EXEC2)|
 
