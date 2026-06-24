@@ -164,4 +164,4 @@ operating contract) and [`docs/`](./docs/).
 
 ## License
 
-Not yet licensed — all rights reserved (a `LICENSE` will be added). Open an issue before relying on it.
+[MIT](./LICENSE) © 2026 m24927605.
