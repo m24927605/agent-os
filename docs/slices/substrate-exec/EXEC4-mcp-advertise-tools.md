@@ -4,7 +4,7 @@
 - **Branches**: slice/exec4a-mcp-governed-server（in-repo)、slice/exec4b-live-autonomous（live)
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: EXEC4a <= 1–1.5 day（TS only）；EXEC4b = live(user-initiated)
-- **狀態**: **DRAFT**
+- **狀態**: **EXEC4a DONE（merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(tools/list 只暴露 bounded + schema-no-drift / single-execution-path / deny-by-default / commit-before-effect / 協定 fail-closed,mutation 證實;acp-stdio〔mcpServers 仍 []〕/pipeline/EXEC3a byte-unchanged)。**EXEC4b OPEN**(live;真廣告給真 Hermes = 你的戰略+安全 review 決定)。
 
 ## (0) 動機 + ⚠️ capability-posture 反轉 + 誠實分界（grounded,設計探索 task w5khoz1zi)
 capstone 已 live 雙證:(A) 真 Hermes 提它**自己的**工具 → 全 denied@policy(它不知道我們的 exec.echo/ls);(B) **受控**註冊提案 → 真 OpenShell 真命令 → 真輸出。唯一缺口:**真 Hermes 不知道我們的工具**——因 `session/new.mcpServers` 寫死 `[]`(acp-stdio.ts:345 one-shot / :480 duplex)。EXEC4 = **廣告我們的 registered 工具給 Hermes**,讓它**自主 discover(`tools/list`)+ call(`tools/call`)** → 治理 → 真 exec → 結果回。
@@ -34,11 +34,12 @@ NEW(hermes vendor zone,只 import neutral barrels):
 ## (5) Test-first plan（RED 先行,EXEC4a,對 Fake)
 見 §3 EXEC4a 的 6 條斷言;另:commit-before-effect(tools/call 在 effect 前 append AuditEvent receipt;abort commit → `isError:true`、無假結果)。
 
-## (6) Definition of Done（待實測填）
-- [ ] EXEC4a:RED → `pnpm run verify` exit 0(MCP server 測綠;EXEC3a/EXEC1/2/DHB/pipeline 既有測不變;depcruise/secret-scan clean;live 不在 verify)。
-- [ ] tools/list 只暴露 seed 兩工具(schema 衍生、no-drift)/ bound call 經全治理 / unknown+poisoned+secret → isError:true(substrate/effect 0 calls)/ single-execution-path / commit-before-effect / protocol fail-closed,各 mutation 證非空。
-- [ ] clientCapabilities 仍 frozen-empty(無 fs/terminal)。
-- [ ] EXEC4a 獨立 Opus 4.8 review = PASS。
+## (6) Definition of Done（實測）
+- [x] EXEC4a:RED → `pnpm run verify` **exit 0**(1013 passed + 23 skipped;`exec-mcp-server` 11 測綠;EXEC3a/EXEC1/2/DHB/pipeline 既有測不變;depcruise 145 modules clean〔reviewer deep-import 親證 bite〕;secret-scan clean〔canary runtime-built〕;live 不在 verify)。
+- [x] **tools/list 只暴露 seed 兩工具**(exec.echo/ls,別無他物——無 fs/terminal/argv/shell;description 來自 manifest;**inputSchema byte-derived from strict argSchema**)/ bound call 經全治理(screen→authorize→cost→commit-before-effect→bindingWrappedExecEffect)/ unknown→denied@policy、poisoned argv→strict reject、secret→denied@screen 皆 isError:true 且 **substrate 0 calls** / **single-execution-path**(唯一 `runGovernedToolCall` edge)/ commit-before-effect(receipt 在 effect 前,abort→isError:true)/ protocol fail-closed(malformed/unknown→JSON-RPC error,非假 ok)。reviewer mutation:schema additionalProperties:true→no-drift 測翻紅;handler 直呼 effect bypass→deny+commit 測翻紅。
+- [x] **NEW single-execution-path + schema-no-drift** 各 mutation 證非空;**closure-res.ok deviation 判定 sound**(誠實映 isError、不增第二執行 edge)。
+- [x] clientCapabilities 仍 frozen-empty(無 fs/terminal);**acp-stdio.ts `mcpServers:[]` 未動**(EXEC4a 不做真廣告)。
+- [x] **EXEC4a 獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A;2 MINOR informational〔policy+binding 二層拒;argSchemaToJsonSchema 讀 zod _def,fail-closed + exact-match 釘住〕)。
 - [ ] **EXEC4b(你親跑/授權代跑後填)**:真 Hermes 自主 discover+call our tool → 真 OpenShell exec → >=1 EXECUTED(真 exit=0)+ 其他工具仍 deny-by-default/propose-only;真 mcpServers descriptor 形狀確認;dialect 分歧→fail-closed。
 
 ## (7) Rollback
