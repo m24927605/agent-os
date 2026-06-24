@@ -37,6 +37,10 @@ export {
   type ProviderEnvOutcome,
   OpenShellSandboxAdapter,
 } from "./adapter.js";
+// SLICE-EXEC2 — the thin buffered wrapper reconciling OpenShell's streaming exec onto the substrate
+// port's buffered `ExecCapableSandboxAdapter`, so the credential-blind `makeExecEffect` can drive a
+// REAL OpenShell sandbox.
+export { makeOpenShellExecCapable } from "./exec-buffered.js";
 export {
   type OpenShellGrpcTransportOpts,
   type ExecStreamHandle,

@@ -4,7 +4,7 @@
 - **Branches**: slice/exec2-openshell-exec-buffered（in-repo reconcile)、live = 同檔 gated test
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: <= 1 day；TS only;新增依賴 = 0
-- **狀態**: **DRAFT**
+- **狀態**: **DONE（in-repo reconcile + gated live harness;merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(fail-closed 映射 / credential-blind 透 wrapper / lifecycle 同實例 / UTF-8 / gated skip load-bearing,mutation 證實;OpenShell 既有 exec+39 測+contract+EXEC1+nemoclaw+pipeline 未動)。**live-run = 待跑**(`AGENTOS_LIVE_OPENSHELL=1 pnpm run e2e:live-substrate-exec`)。
 
 ## (0) 動機 + 現況 + ⚠️ 誠實分界（grounded)
 EXEC1 給了 port 的 **buffered** exec(`ExecCapableSandboxAdapter.execSandbox(spec)→ExecResult{ok,exitCode?,stdout,stderr,truncated?}`)+ Fake + credential-blind `makeExecEffect`。OpenShell adapter **早已有自己的 streaming exec**(adapter.ts:54-105,514+):`execSandbox(ctx, sandboxId, cmd: readonly string[], opts?: ExecSandboxOpts)→ExecOutcome`(ok/denied union,內含 `ExecResult{exitCode, stdout: Uint8Array, stderr: Uint8Array}`),且**已 fail-closed + capped**:8 MiB byte-cap(溢位→deny,不 OOM、不假造截斷成功)+ wall-clock deadline(terminal exit 前到期→deny)。**唯一缺口 = 把 OpenShell 的 streaming exec 收斂成 port 的 buffered `ExecResult`,讓 `makeExecEffect` 能驅動真 OpenShell。**
@@ -38,13 +38,14 @@ SLICE-EXEC2 —（a)`makeOpenShellExecCapable(adapter: OpenShellSandboxAdapter):
 - 經 `makeExecEffect`:wrapper + Fake-ish OpenShell double → EffectResult,credential-blind(redact)+ cap 仍成立。
 - gated live(skip 預設):缺 gate → skip/clean BLOCK exit 0(不假綠;非空 guard)。
 
-## (6) Definition of Done（待實測填）
-- [ ] in-repo:RED → `pnpm run verify` exit 0(reconcile 測綠;OpenShell 既有測 + sandbox-adapter contract 不變;depcruise/secret-scan clean;live 不在 verify)。
-- [ ] 映射:ok→buffered ok、denied/deadline/byte-cap→`{ok:false}` 非假造;mutation(denied 當 ok / 假 exit 0)→ 紅。
-- [ ] OpenShell 既有 streaming exec / ExecOutcome / ~40 測 / nemoclaw **未動**(git-diff 證)。
-- [ ] gated live 骨架 skip-under-verify + 缺 gate clean BLOCK + 非空 guard。
-- [ ] 獨立 Opus 4.8 review = PASS。
-- [ ] **live-run(親跑/代跑後填)**:`AGENTOS_LIVE_OPENSHELL=1 …` 對真 OpenShell:create→exec 真命令→真 {exitCode,stdout,stderr} 經 effect(redact+cap)→destroy;綠 / 或揭露差異(fail-closed)。
+## (6) Definition of Done（實測）
+- [x] in-repo:RED → `pnpm run verify` **exit 0**(985 passed + 21 skipped;reconcile 12 測綠;**OpenShell adapter.exec 39 + sandbox-adapter contract 17 + EXEC1 exec-effect 12 不變綠**;depcruise 141 modules clean〔reviewer deep-import 親證 bite〕;secret-scan clean;live SKIPPED、不在 verify)。
+- [x] **映射 fail-closed 非 vacuous**:ok→buffered ok(exitCode 忠實);denied/deadline/byte-cap/transport-refusal→`{ok:false}` 無 exitCode、**never throws、never 假 exit 0**;reviewer mutation(denied 當 ok → 翻 4;hardcode exit 0 → 翻非零-exit 測)。UTF-8 decode 真(多 chunk)。
+- [x] **credential-blind 透 wrapper**:env screen 在 `makeExecEffect` **上游**(raw secret env → deny、adapter `execSandbox` **0 RPC**);輸出 redact 重用(canary→`[REDACTED]`,decode-empty mutation 翻 4 含 redaction+cap);64KB cap held。lifecycle delegate **同 adapter 實例**(shared refById)。
+- [x] OpenShell 既有 streaming exec / `ExecOutcome` / 39 exec 測 / nemoclaw / EXEC1 / pipeline **未動**(git-diff 空;只 6 EXEC2 檔)。
+- [x] gated live 骨架:`exec-buffered.live.test.ts` gate `AGENTOS_LIVE_OPENSHELL=1`(skip-under-verify load-bearing)+ `e2e-live-substrate-exec.sh` 缺 gate clean BLOCK exit 0 + 非空 guard;`afterAll` destroy sandbox(不洩)。
+- [x] **獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A;5 mutation 翻紅;1 MINOR〔depcruise not-to-internal 把 src/runtime/ 視為單一 module 的 pre-existing 廣度限制,非本刀引入、wrapper 正確走 barrel,無需處理〕)。
+- [ ] **live-run(待跑後填)**:`AGENTOS_LIVE_OPENSHELL=1 pnpm run e2e:live-substrate-exec` 對真 OpenShell:create→exec 真命令→真 {exitCode,stdout,stderr} 經 effect(redact+cap)→destroy;綠 / 或揭露差異(fail-closed)。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(wrapper + 測 + live 骨架)。OpenShell 既有碼/EXEC1/pipeline 不受影響。
