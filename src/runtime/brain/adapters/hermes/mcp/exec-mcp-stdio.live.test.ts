@@ -250,19 +250,26 @@ const CTX = {
  * desired output so a tool-capable model reaches for it; the governance net (in the bin + the closed loop)
  * holds regardless of what it actually does (deny-by-default for anything else).
  */
+// Overridable via AGENTOS_LIVE_NUDGE so a live run can target a SPECIFIC advertised tool (e.g. exec.run) to
+// verify the NEW HDI2a/HDI2b tools autonomously; defaults to the exec.echo nudge.
 const NUDGE_INTENT =
+  process.env.AGENTOS_LIVE_NUDGE ??
   "You have an MCP tool named exec.echo that echoes a line of text. Use the exec.echo tool to print the word hello. Use only that tool.";
 
 /** Scan the recorded frames' JSON for evidence the SPAWNED bin's exec tool ran + returned its output. */
 function autonomousExecEvidence(frames: readonly AcpUpdateFrame[]): {
   sawExecTool: boolean;
   sawEchoedOutput: boolean;
+  toolsSeen: readonly string[];
 } {
   const blob = JSON.stringify(frames);
-  const sawExecTool = /exec\.echo|exec\.ls|agentos-exec/.test(blob);
-  // The bin's redacted exec detail carries the real output ("echo hello" / "hello") + "exit=0".
+  // Any of the 8 governed seed tools (HDI2a read-only + HDI2b exec.run) or the server name.
+  const sawExecTool = /exec\.(echo|ls|cat|head|pwd|wc|grep|run)|agentos-exec/.test(blob);
+  // The bin's redacted exec detail carries the real output ("hello") + "exit=0".
   const sawEchoedOutput = /exit=0/.test(blob) && /hello/.test(blob);
-  return { sawExecTool, sawEchoedOutput };
+  // Which specific tool name(s) the frames mention — lets a live run confirm WHICH tool the brain called.
+  const toolsSeen = [...new Set(blob.match(/exec\.[a-z]+/g) ?? [])];
+  return { sawExecTool, sawEchoedOutput, toolsSeen };
 }
 
 dAutonomous(
@@ -347,7 +354,7 @@ dAutonomous(
         );
         console.info(
           `[EXEC4c-b] autonomous-exec evidence from the streamed frames: sawExecTool=${evidence.sawExecTool}, ` +
-            `sawEchoedOutput(exit=0 + hello)=${evidence.sawEchoedOutput}`,
+            `sawEchoedOutput(exit=0 + hello)=${evidence.sawEchoedOutput}, toolsSeen=[${evidence.toolsSeen.join(", ")}]`,
         );
 
         let sharedWormEntries = -1;
@@ -359,7 +366,7 @@ dAutonomous(
           });
           sharedWormEntries = readback.chain.entries.length;
           console.info(
-            `[EXEC4c-b] SHARED kernel chain for partition '${BIN_PARTITION}': entries=${sharedWormEntries} (the spawned bin's tools/call receipts — unified, independently-verifiable evidence)`,
+            `[EXEC4c-b] SHARED kernel chain for partition '${BIN_PARTITION}': entries=${sharedWormEntries} (the spawned bin's tools/call receipts — unified, independently-verifiable evidence). WHICH tool the brain autonomously called is surfaced by toolsSeen above (from the streamed frames).`,
           );
         }
 
