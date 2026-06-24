@@ -4,7 +4,7 @@
 - **Branches**: slice/exec3a-closed-loop-real-exec（in-repo)、slice/exec3b-live-capstone（live)
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 - **Size budget**: EXEC3a <= 1–1.5 day（TS only）；EXEC3b = live(user-initiated)
-- **狀態**: **DRAFT**
+- **狀態**: **EXEC3a DONE（merged）**;writer=Backend Architect/Opus4.8;獨立 Opus4.8 reviewer=PASS(⚠️ 核心 argv-binding 無任意命令 + 7 不變量經 mutation 證實;full-bypass mutation → `bash -c rm -rf /` 達 effect 翻紅;pipeline/EXEC1/2/DHB1-2 byte-unchanged)。**EXEC3b OPEN**(live capstone,user-initiated)。
 
 ## (0) 動機 + ⚠️ 最高風險(不可信 brain 驅動真命令)+ 誠實分界（grounded,設計探索 task wagswj0il)
 所有零件已各自 live:DHB3 閉環(`runClosedLoop`,desktop Hermes propose-only 多輪)、EXEC1/2 真 exec(`makeExecEffect`/`makeOpenShellExecCapable`,真 OpenShell sandbox 跑真命令)。EXEC3 **JOIN**:把 `deps.effect` 由 canned stub 換成真 exec,於是 **desktop Hermes 提案 → 治理 → 真命令(sandbox)→ 真輸出(redacted)→ Hermes 續推**。**這是全產品安全風險最高的接縫——把 UNTRUSTED brain 連到 REAL 命令執行。**
@@ -43,12 +43,12 @@ SLICE-EXEC3 = composer-held command-template binding(`{argvPrefix, argSchema}`)+
 - RED5 commit-before-REAL-effect:appender reject → 真 makeExecEffect/execSandbox **0 calls**、outcome denied@commit、回饋含 "DENIED" 非 "result of"(無假結果)。
 - RED6 ephemeral-sandbox lifecycle:createSandbox/startSandbox 在首提案前、destroySandbox 在 finally(即使 transport throw / maxTurns)皆跑;mutation(不 destroy)→ 紅。
 
-## (6) Definition of Done（待實測填）
-- [ ] EXEC3a:RED → `pnpm run verify` exit 0(join 測 + 6 RED 綠;pipeline/runGovernedToolCall/EXEC1/EXEC2/DHB1-3 既有測不變;depcruise/secret-scan clean;live 不在 verify)。
-- [ ] argv-binding:brain 永不供 argv[0]/raw argv;未知 arg key→deny;argv 純 vector(無 shell-string);mutation(pass-through raw argv / 接受未知 key)→ 紅。
-- [ ] 5 保留 + 2 NEW 不變量各 mutation 證非空。
-- [ ] EXEC3a 獨立 Opus 4.8 review = PASS。
-- [ ] **EXEC3b(你親跑/授權代跑後填)**:`<gated env> …` 真 OpenShell + 真 Hermes:propose→govern→真命令→真輸出→續推,小 maxTurns/緊 cost,綠;sandbox 零真憑證+無 egress 確認;dialect 分歧→fail-closed 揭露。
+## (6) Definition of Done（實測）
+- [x] EXEC3a:RED → `pnpm run verify` **exit 0**(996 passed + 21 skipped;join 測 11/11;**pipeline/runGovernedToolCall/EXEC1/EXEC2/DHB1-2 byte-unchanged + 既有測〔closed-loop 12 / exec-effect 12 / exec-buffered 12〕綠**;depcruise 142 modules clean〔reviewer deep-import 親證 not-to-internal bite〕;secret-scan clean;live 不在 verify;無 orphan)。
+- [x] **⚠️ argv-binding 無任意命令(核心,非 vacuous)**:argv 只在 1 處建(`exec-closed-loop.ts:127` `[...argvPrefix, ...toArgv(validated)]`)、**無 `sh -c`/`bash -c`/shell-string**;未知/多餘 arg key 被 strict argSchema 拒(makeExecEffect 0 calls);**reviewer full-bypass mutation(wrapper 轉 raw args 為 argv)→ `["bash","-c","rm -rf /"]` 達 execSandbox → 6 測翻紅**(證不可信 brain 無法執行任意命令)。
+- [x] 不變量:deny-by-default(未註冊→denied@policy、absent binding→deny、empty argv→ExecCommandSpecSchema.nonempty deny,0 exec)/ commit-before-REAL-effect(appender reject→exec 0、denied@commit)/ credential-blind(env guard deny + double redact + audit 無 raw args)/ fail-closed(無假 exit 0)/ maxTurns(loop_forever+maxTurns=3→execCalls=3)/ ephemeral-sandbox(create-before + **destroy-in-finally 即使 throw/maxTurns**,remove-finally → 兩路翻紅)各 mutation 證非空。
+- [x] **獨立 Opus 4.8 review = PASS**(8 攻擊面 HELD/N/A)。Findings(非阻斷):①`as unknown as TC` cast 降型別檢查(contained);②(test-coverage,→ EXEC3b)測試 `screen` 為 permissive stub,未對 declared args 做 credential-screen——真 composition 接真 screen;env guard+double redact+零憑證 sandbox 已獨立證(defense-in-depth);③(MAJOR-with-tracking,**pre-existing 非本刀引入**)depcruise `not-to-internal` 把 src/runtime/* 視為單一 module、runtime 內 deep import 不抓,本刀只走 barrel,tracked。
+- [ ] **EXEC3b(你親跑/授權代跑後填)**:`<gated env> …` 真 OpenShell + 真 Hermes:propose→govern→真命令→真輸出→續推,小 maxTurns/緊 cost,綠;**接真 inbound screen + 斷言 secret-shaped declared arg → denied@screen(finding②)**;sandbox 零真憑證+無 egress 確認;dialect 分歧→fail-closed 揭露。
 
 ## (7) Rollback
 - `git revert <merge-sha>`(closed-loop.ts 2-行 + 新 exec-closed-loop.ts + 測)。pipeline/EXEC1/2/DHB1-3 不受影響;args optional 向後相容。
