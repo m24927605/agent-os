@@ -35,12 +35,19 @@ import {
   createExecMcpServer,
 } from "./exec-mcp-server.js";
 
-/** The ACP `mcpServers` descriptor Agent OS advertises to Hermes (a single loopback HTTP endpoint). */
+/**
+ * The ACP `mcpServers` descriptor Agent OS advertises to Hermes (a single loopback HTTP endpoint).
+ * Matches the ACP `McpServerHttp` schema (acp/schema.py:488) — `headers` is REQUIRED there (a missing
+ * `headers` makes `session/new` fail with JSON-RPC -32602 Invalid params; pinned by the EXEC4b live run),
+ * so it is always present (empty when we send no headers).
+ */
 export interface ExecMcpServerDescriptor {
   /** A stable name Hermes uses to reference this server (and to namespace its discovered tools). */
   readonly name: string;
   /** The loopback URL Hermes POSTs JSON-RPC to (always `http://127.0.0.1:<ephemeral-port>/<path>`). */
   readonly url: string;
+  /** HTTP headers to set on requests to this server — REQUIRED by ACP McpServerHttp; we send none ([]). */
+  readonly headers: readonly { readonly name: string; readonly value: string }[];
 }
 
 /** The running in-process loopback MCP server. `close()` tears the HTTP listener down (idempotent). */
@@ -102,7 +109,7 @@ export function startExecMcpLoopbackServer(
       const url = `http://127.0.0.1:${address.port}${path}`;
       let closed = false;
       resolve({
-        descriptor: { name, url },
+        descriptor: { name, url, headers: [] },
         close: () =>
           new Promise<void>((resolveClose) => {
             if (closed) {
