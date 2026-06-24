@@ -177,19 +177,28 @@ async function driveCore(
 }
 
 // ==================================================================================================
-// CORE-1 — stdio framing + governed dispatch: a newline-delimited tools/list -> EXACTLY [exec.echo,
-//          exec.ls]; a bound tools/call exec.echo {text:'hi'} -> isError:false + redacted echoed output
-//          + commit-before-effect (audit receipt appended BEFORE the effect ran).
+// CORE-1 — stdio framing + governed dispatch: a newline-delimited tools/list -> EXACTLY the registered
+//          bounded seed tools (HDI2a: the 7 read-only-safe tools), nothing unexpected; a bound tools/call
+//          exec.echo {text:'hi'} -> isError:false + redacted echoed output + commit-before-effect (audit
+//          receipt appended BEFORE the effect ran).
 // ==================================================================================================
 describe("EXEC4c-a — CORE-1 stdio framing dispatches to the governed EXEC4a handler", () => {
-  it("tools/list over the newline-delimited wire = exactly [exec.echo, exec.ls]", async () => {
+  it("tools/list over the newline-delimited wire = exactly the bounded seed tools", async () => {
     const { deps } = await makeCoreKit();
     const { responses } = await driveCore(deps, [
       { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
     ]);
     expect(responses.length).toBe(1);
     const tools = (responses[0]?.result as { tools: { name: string }[] }).tools;
-    expect(tools.map((t) => t.name).sort()).toEqual(["exec.echo", "exec.ls"]);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "exec.cat",
+      "exec.echo",
+      "exec.grep",
+      "exec.head",
+      "exec.ls",
+      "exec.pwd",
+      "exec.wc",
+    ]);
     for (const forbidden of ["fs", "terminal", "shell", "command", "argv", "exec.rm"]) {
       expect(tools.map((t) => t.name)).not.toContain(forbidden);
     }
@@ -295,7 +304,15 @@ describe("EXEC4c-a — CORE-3 stdio framing fail-closed (malformed line -> -3270
     expect((responses[0]?.error as { code: number }).code).toBe(-32700);
     // 2) the loop SURVIVED — the next valid line is served normally.
     const tools = (responses[1]?.result as { tools: { name: string }[] }).tools;
-    expect(tools.map((t) => t.name).sort()).toEqual(["exec.echo", "exec.ls"]);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "exec.cat",
+      "exec.echo",
+      "exec.grep",
+      "exec.head",
+      "exec.ls",
+      "exec.pwd",
+      "exec.wc",
+    ]);
     // The malformed line never reached the substrate.
     expect(substrate.execCalls.length).toBe(0);
   });
@@ -461,9 +478,17 @@ dSub(
           expect(obj.jsonrpc).toBe("2.0");
         }
 
-        // tools/list = exactly the two bounded seed tools.
+        // tools/list = exactly the registered bounded seed tools (HDI2a: the 7 read-only-safe tools).
         const tools = (responses[1]?.result as { tools: { name: string }[] }).tools;
-        expect(tools.map((t) => t.name).sort()).toEqual(["exec.echo", "exec.ls"]);
+        expect(tools.map((t) => t.name).sort()).toEqual([
+          "exec.cat",
+          "exec.echo",
+          "exec.grep",
+          "exec.head",
+          "exec.ls",
+          "exec.pwd",
+          "exec.wc",
+        ]);
 
         // bound tools/call executed over the real wire -> isError:false + the echoed output.
         const callResult = responses[2]?.result as {
@@ -532,7 +557,15 @@ dSub(
         );
         expect((responses[0]?.error as { code: number }).code).toBe(-32700);
         const tools = (responses[1]?.result as { tools: { name: string }[] }).tools;
-        expect(tools.map((t) => t.name).sort()).toEqual(["exec.echo", "exec.ls"]);
+        expect(tools.map((t) => t.name).sort()).toEqual([
+          "exec.cat",
+          "exec.echo",
+          "exec.grep",
+          "exec.head",
+          "exec.ls",
+          "exec.pwd",
+          "exec.wc",
+        ]);
       } finally {
         child.kill("SIGKILL");
       }

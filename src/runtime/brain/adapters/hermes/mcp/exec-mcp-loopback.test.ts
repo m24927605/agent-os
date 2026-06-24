@@ -152,10 +152,11 @@ function rpc(url: string, body: unknown): Promise<{ status: number; json: unknow
 
 // ==================================================================================================
 // RED-L1 — the loopback transport binds 127.0.0.1, advertises ONLY the bounded set, and yields a
-//          descriptor whose URL is reachable. A Fake MCP client POSTing tools/list gets exec.echo/ls.
+//          descriptor whose URL is reachable. A Fake MCP client POSTing tools/list gets EXACTLY the
+//          registered bounded seed tools (HDI2a: the 7 read-only-safe tools), nothing unexpected.
 // ==================================================================================================
-describe("EXEC4b (in-repo) — RED-L1 loopback tools/list advertises exactly the two bounded seed tools", () => {
-  it("binds 127.0.0.1 + a descriptor URL; tools/list over the REAL transport = [exec.echo, exec.ls]", async () => {
+describe("EXEC4b (in-repo) — RED-L1 loopback tools/list advertises exactly the bounded seed tools", () => {
+  it("binds 127.0.0.1 + a descriptor URL; tools/list over the REAL transport = the bounded seed set", async () => {
     const substrate = new SpyFakeSandboxAdapter();
     const server = await startExecMcpLoopbackServer(await makeDeps(substrate));
     try {
@@ -171,7 +172,16 @@ describe("EXEC4b (in-repo) — RED-L1 loopback tools/list advertises exactly the
       });
       expect(status).toBe(200);
       const tools = (json as { result: { tools: { name: string }[] } }).result.tools;
-      expect(tools.map((t) => t.name).sort()).toEqual(["exec.echo", "exec.ls"]);
+      // EXACTLY the registered bounded seed tools (HDI2a grew this to 7), nothing unexpected.
+      expect(tools.map((t) => t.name).sort()).toEqual([
+        "exec.cat",
+        "exec.echo",
+        "exec.grep",
+        "exec.head",
+        "exec.ls",
+        "exec.pwd",
+        "exec.wc",
+      ]);
     } finally {
       await server.close();
     }
