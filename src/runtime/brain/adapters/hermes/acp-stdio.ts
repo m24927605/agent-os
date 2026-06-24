@@ -51,6 +51,15 @@ export interface AcpStdioTransportOptions {
    * secret here — and the parent's full secret-bearing env is deliberately NOT forwarded.
    */
   readonly env?: Record<string, string>;
+  /**
+   * The MCP server descriptors advertised to the agent in `session/new.mcpServers` — so a real Hermes can
+   * AUTONOMOUSLY discover (`tools/list`) + call (`tools/call`) the tools they expose. DEFAULTS to `[]`
+   * (the frozen-empty advertisement every DHB/EXEC3 path relied on — byte-unchanged when omitted). In
+   * EXEC4b this carries ONE descriptor pointing at the Agent-OS-hosted in-process governed MCP loopback
+   * server, so a Hermes `tools/call` re-enters OUR `runGovernedToolCall` (WE-stay-executor). This is
+   * ORTHOGONAL to `clientCapabilities`, which stay frozen-empty (no fs/terminal — see CLIENT_CAPABILITIES).
+   */
+  readonly mcpServers?: readonly unknown[];
   /** Max ms to wait for the spawned child to be usable before failing closed. Default: 10_000. */
   readonly startupTimeoutMs?: number;
   /** Max ms of stream inactivity (no line, no exit) before failing closed. Default: 30_000. */
@@ -139,6 +148,8 @@ export class AcpStdioTransport implements DuplexDesktopHermesTransport {
   private readonly env: Record<string, string> | undefined;
   private readonly startupTimeoutMs: number;
   private readonly idleTimeoutMs: number;
+  /** Advertised MCP servers for session/new. Defaults to [] (frozen-empty — byte-unchanged when omitted). */
+  private readonly mcpServers: readonly unknown[];
 
   constructor(options: AcpStdioTransportOptions = {}) {
     this.command = options.command ?? ["hermes", "acp"];
@@ -146,6 +157,8 @@ export class AcpStdioTransport implements DuplexDesktopHermesTransport {
     this.env = options.env;
     this.startupTimeoutMs = options.startupTimeoutMs ?? 10_000;
     this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
+    // DEFAULT []: every existing DHB2b/DHB3b/EXEC3b path that omits this gets the exact same bytes it had.
+    this.mcpServers = options.mcpServers ?? [];
   }
 
   /**
@@ -166,6 +179,7 @@ export class AcpStdioTransport implements DuplexDesktopHermesTransport {
       startupTimeoutMs: this.startupTimeoutMs,
       idleTimeoutMs: this.idleTimeoutMs,
       firstIntent: intent,
+      mcpServers: this.mcpServers,
     });
     await session.start();
     return session;
@@ -342,7 +356,7 @@ export class AcpStdioTransport implements DuplexDesktopHermesTransport {
         clearTimeout(startupGuard);
         const session = (await request("session/new", {
           cwd: this.cwd ?? process.cwd(),
-          mcpServers: [],
+          mcpServers: this.mcpServers,
         })) as {
           sessionId?: string;
         };
@@ -390,6 +404,8 @@ interface DuplexAcpSessionOptions {
   readonly startupTimeoutMs: number;
   readonly idleTimeoutMs: number;
   readonly firstIntent: string;
+  /** Advertised MCP servers for session/new (defaulted to [] by AcpStdioTransport — frozen-empty if omitted). */
+  readonly mcpServers: readonly unknown[];
 }
 
 /** A turn's accumulation: frames pushed while the prompt was in flight + a gate for its stopReason. */
@@ -477,7 +493,7 @@ class DuplexAcpSession implements HermesLoopSession {
       clearTimeout(startupGuard);
       const session = (await this.request("session/new", {
         cwd: this.opts.cwd ?? process.cwd(),
-        mcpServers: [],
+        mcpServers: this.opts.mcpServers,
       })) as { sessionId?: string };
       this.sessionId = session?.sessionId;
     } catch (error) {
