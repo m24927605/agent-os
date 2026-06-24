@@ -19,3 +19,4 @@ export {
   FakeDesktopHermesTransport,
   parseFrame,
 } from "./desktop.js";
+export { AcpStdioTransport, type AcpStdioTransportOptions } from "./acp-stdio.js";
