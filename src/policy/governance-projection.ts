@@ -29,14 +29,35 @@
  *     can pass; it is best-effort shape-redaction + userinfo-strip + bounding + no-env/stdin/contents.
  * PURE: no I/O, no throw on normal input; defensive on empty / very long argv.
  */
+import { z } from "zod";
 import { redactSecrets } from "../audit/index.js";
+
+/**
+ * Zod schema for the projection (SLICE-R9b-2a). `PolicyRequest.governanceProjection` is
+ * `GovernanceProjectionSchema.optional()` so a request MAY carry the projection; the PDP ignores it
+ * (evaluatePolicy keys only on action/resource/tenant) and only the AGT adapter reads it. The
+ * inferred shape is structurally identical to {@link GovernanceProjection} (the builder's return
+ * type), so `buildExecRunProjection(...)` parses cleanly. `version` is pinned to the literal `1` so a
+ * future contract bump fails closed rather than silently accepting a stale projection.
+ */
+export const GovernanceProjectionSchema = z.object({
+  version: z.literal(1),
+  operationClass: z.string(),
+  argv0: z.string(),
+  argc: z.number().int().nonnegative(),
+  argvRedacted: z.array(z.string()),
+  truncated: z.boolean(),
+  usesShellInterpreter: z.boolean(),
+  networkHosts: z.array(z.string()),
+  destructiveFlags: z.array(z.string()),
+});
 
 /**
  * The minimal, BEST-EFFORT credential-blind action-detail an AGT advisory engine consumes. Vendor-
  * neutral; the PDP ignores it. Every string field is shape-redacted; `argvRedacted` is bounded;
  * `networkHosts` has userinfo stripped. NON-shape credentials in a plain arg can still survive in
  * `argvRedacted` — see the module header; consume ONLY in the local AGT engine, never a log/WORM sink.
- * `version` pins the contract for the (future) AGT adapter that reads it.
+ * `version` pins the contract for the AGT adapter that reads it.
  */
 export interface GovernanceProjection {
   readonly version: 1;

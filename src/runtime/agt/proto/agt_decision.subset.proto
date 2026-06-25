@@ -1,0 +1,97 @@
+// OUR OWN AGT sidecar decision contract — NOT a vendored third-party proto subset.
+//
+// Unlike src/runtime/spendguard/proto/sidecar_adapter.subset.proto (which vendors a SUBSET of an
+// upstream SpendGuard proto pinned to a rev), THIS proto is the contract WE define for the AGT
+// (Agent Governance Toolkit) advisory sidecar. The operator's local Python AGT sidecar IMPLEMENTS
+// this `Evaluate` service; agent-os SPEAKS it. There is no upstream rev to pin against — the pin
+// (agt_decision.subset.sha256) guards OUR contract against accidental drift, mirroring the SpendGuard
+// drift gate mechanically (`pnpm run agt:proto:check`).
+//
+// The transport this generates a types-only stub for (src/runtime/agt/decision-transport.ts) is
+// CREDENTIAL-BLIND: the AgtEvaluateRequest carries ONLY neutral governance identifiers + the
+// already-best-effort-redacted GovernanceProjection (R9b-1). It NEVER carries raw args/env/stdin/the
+// raw toolCall. The GovernanceProjection message below mirrors src/policy/governance-projection.ts
+// field-for-field so the credential-blind contract is fixed at the wire boundary, not just in TS.
+//
+// Self-contained on purpose (mirrors sidecar_adapter.subset.proto): no cross-proto imports, so the
+// generated types-only TS stub is a single self-sufficient file with zero runtime imports.
+
+syntax = "proto3";
+
+package agentos.agt.decision.v1;
+
+// ============================================================================
+// SERVICE — the AGT advisory Evaluate contract (OUR contract; sidecar implements it).
+// ============================================================================
+
+service AgtDecision {
+  // Evaluate one governed tool-call. The transport sends neutral governance fields + the
+  // credential-blind GovernanceProjection; the sidecar returns an advisory decision. Only an
+  // unambiguous { allowed:true, action:"allow" } maps to allow on our side — everything else
+  // (deny/warn/log/require_approval/unknown/malformed) is fail-closed to a deny.
+  rpc Evaluate(AgtEvaluateRequest) returns (AgtEvaluateResponse);
+}
+
+// ============================================================================
+// GovernanceProjection — mirrors src/policy/governance-projection.ts (R9b-1) field-for-field.
+//
+// CREDENTIAL-BLIND: this is the BEST-EFFORT-redacted, BOUNDED action-detail the projection builder
+// produces. It carries NO env/stdin/file-contents/raw toolCall; each string is shape-redacted and
+// `argv_redacted` is bounded (overflow sets `truncated`). It is safe to hand ONLY to the operator's
+// local AGT advisory engine — never a log/WORM/audit sink.
+// ============================================================================
+
+message GovernanceProjection {
+  // Pins the projection contract version (src/policy/governance-projection.ts: version = 1).
+  uint32 version = 1;
+  // Coarse class derived from basename(argv0): filesystem / network / shell / process / unknown.
+  string operation_class = 2;
+  // argv[0], redacted.
+  string argv0 = 3;
+  // Original token count (BEFORE truncation) — truncation is explicit, never silent.
+  uint32 argc = 4;
+  // Each token redactSecrets'd, bounded at MAX_TOKENS.
+  repeated string argv_redacted = 5;
+  // True when argc > MAX_TOKENS (the overflow that argv_redacted dropped).
+  bool truncated = 6;
+  // basename(argv0) is a known shell AND some later token is exactly `-c`.
+  bool uses_shell_interpreter = 7;
+  // host[:port] extracted from URL-like / host:port tokens; userinfo stripped, redacted, de-duped.
+  repeated string network_hosts = 8;
+  // Best-effort intersection with a known destructive-flag set — a HINT for AGT, not exhaustive.
+  repeated string destructive_flags = 9;
+}
+
+// ============================================================================
+// AgtEvaluateRequest — neutral governance fields + the credential-blind projection. NOTHING ELSE.
+//
+// These are the SAME neutral fields the in-process AgtSecondaryPolicy already keys on
+// (src/policy/adapters/agt/adapter.ts AgtEvaluationContext: action/resource/actor/tenant) plus the
+// request/project/task correlation ids. NO field carries a raw arg/env/stdin/credential by
+// construction — credential-blindness is fixed at the wire boundary.
+// ============================================================================
+
+message AgtEvaluateRequest {
+  string request_id = 1;
+  string tenant_id = 2;
+  string project_id = 3;
+  string task_id = 4;
+  string actor_id = 5;
+  string action = 6;
+  string resource = 7;
+  // The credential-blind R9b-1 projection (optional: absent => the sidecar evaluates on neutral
+  // fields alone). NEVER raw args.
+  GovernanceProjection governance_projection = 8;
+}
+
+// ============================================================================
+// AgtEvaluateResponse — AGT's advisory decision (mirrors AgtDecision in adapter.ts: allowed/action/
+// matched_rule/reason). Only allowed===true && action==="allow" maps to allow on our side.
+// ============================================================================
+
+message AgtEvaluateResponse {
+  bool allowed = 1;
+  string action = 2;
+  string matched_rule = 3;
+  string reason = 4;
+}

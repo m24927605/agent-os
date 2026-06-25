@@ -34,8 +34,8 @@ R9a 讓 evaluate 可 async;R9b-1 有了 credential-blind projection。R9b-2a 建
 - proto drift:`agt:proto:check` 綠;改 proto 不 re-pin → check 紅(drift gate 生效)。
 - PolicyRequest:有/無 governanceProjection 都 parse(optional);PDP 不讀它(decision 不受影響)。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(proto gen/check + transport + async adapter;fail-closed〔down/timeout/malformed→deny〕;advisory-only;credential-blind〔只送 neutral+projection,canary redacted〕;**缺省 byte-identical**〔optional 欄位 + inert〕;mutation 證;`agt:proto:check` 加進 verify 且 drift 紅;depcruise no-vendor-in-core 綠〔grpc 限 runtime/agt〕;secret-scan clean;**無新依賴**);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測)
+- [x] **DONE（merged)**:AGT proto(我們的 sidecar Evaluate 契約)+ types-only stub(零 runtime import)+ sha256 pin + `agt:proto:gen/check`(drift gate 進 verify);`createAgtDecisionTransport`(lazy grpc-js UDS,deadline 750ms/cap 2000ms/`AGT_TIMEOUT_MS`,fail-closed;**手寫 proto3 wire codec**)+ `createAgtEndpointSecondary`(async,映射 allow/else-deny + reason redact;down/timeout/malformed → throw → evaluateSecondaries synthetic deny);`PolicyRequest.governanceProjection` optional(PDP 忽略)。RED → verify **exit 0**(1232 passed + 26 skipped;33 新測;down-as-allow mutation 翻 fail-closed、attach-raw-args 翻 credential-blind;`agt:proto:check` drift-bite;depcruise no-vendor-in-core 綠+bite〔grpc 限 runtime/agt〕;secret-scan clean;**無新依賴**)。獨立 Opus4.8 review PASS:**手寫 codec round-trip 正確 + malformed 全 fail-closed(無 buffer 能產 allow;junk allowed=true 因 action="" 被 exact-match 擋成 deny)**、fail-closed down→deny、credential-blind(toAgtRequest 固定 7-欄 allowlist 非 spread)、advisory-only、lazy、deadline-cap、INERT、byte-identical。2 INFO(non-canonical varint allowed=true 為 proto3-correct 且 action gate 擋住;label reserved)無需處理。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(新 proto/transport/adapter + PolicyRequest optional 欄位純加法;adapter inert,revert 無副作用)。

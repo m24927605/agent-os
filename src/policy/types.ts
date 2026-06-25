@@ -6,6 +6,7 @@
  */
 import { z } from "zod";
 import { ActorId, ProjectId, RequestId, TaskId, TenantId } from "../iam/ids.js";
+import { GovernanceProjectionSchema } from "./governance-projection.js";
 
 export const PolicyRequest = z.object({
   requestId: RequestId,
@@ -16,6 +17,12 @@ export const PolicyRequest = z.object({
   action: z.string().trim().min(1),
   resource: z.string().trim().min(1),
   context: z.record(z.unknown()).optional(),
+  /**
+   * SLICE-R9b-2a — OPTIONAL credential-blind governance projection (R9b-1). The PDP IGNORES it
+   * (evaluatePolicy keys only on action/resource/tenant); ONLY the AGT endpoint adapter reads it.
+   * Default `undefined` => the request is byte-identical to before this field existed.
+   */
+  governanceProjection: GovernanceProjectionSchema.optional(),
 });
 export type PolicyRequest = z.infer<typeof PolicyRequest>;
 
