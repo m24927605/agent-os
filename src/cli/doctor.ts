@@ -8,9 +8,9 @@
  *     PASS|FAIL|SKIP  <name> — <hint>
  *
  * Fail-closed law: a non-zero exit if ANY required check FAILs; 0 ONLY when every required check
- * PASSes. A CONDITIONAL check (SpendGuard) SKIPs when unconfigured and never fails the run, but
- * FAILs (fail-closed) when configured-but-unreachable — the operator asked for it, so a missing
- * sidecar is a real problem.
+ * PASSes. A CONDITIONAL check (SpendGuard, AGT advisory) SKIPs when unconfigured and never fails the
+ * run, but FAILs (fail-closed) when configured-but-unreachable — the operator asked for it, so a
+ * missing sidecar is a real problem.
  *
  * Honest scope: doctor is a PREFLIGHT. It changes NO governance and starts NO services and writes NO
  * config — it only reports reachability/registration. Provisioning/starting services and writing
@@ -227,6 +227,25 @@ export async function doctorCommand(
       udsOk
         ? "SPENDGUARD_UDS_PATH socket present"
         : "SPENDGUARD_UDS_PATH set but socket unreachable — start the SpendGuard sidecar",
+      true,
+    );
+  }
+
+  // 7. AGT advisory sidecar (CONDITIONAL) — only if the operator configured AGT_UDS_PATH (R9b-2b
+  //    registers the AGT secondary from it). Unset -> SKIP (AGT off -> advisory abstains, never fails
+  //    the run). Set+unreachable -> FAIL (the operator opted in, so a missing sidecar is a real
+  //    problem). CREDENTIAL-BLIND: report ONLY the ENV KEY NAME + a static hint, NEVER the path VALUE.
+  const agtUdsPath = env.AGT_UDS_PATH;
+  if (agtUdsPath === undefined || agtUdsPath.length === 0) {
+    report("SKIP", "AGT advisory", "AGT_UDS_PATH unset -> AGT off -> advisory abstains", false);
+  } else {
+    const agtOk = probes.fileExists(agtUdsPath);
+    report(
+      agtOk ? "PASS" : "FAIL",
+      "AGT advisory",
+      agtOk
+        ? "AGT_UDS_PATH socket present"
+        : "AGT_UDS_PATH set but socket unreachable — start the AGT sidecar",
       true,
     );
   }
