@@ -230,6 +230,15 @@ export class OpenShellSandboxAdapter implements SandboxAdapter {
       return deny(ctx, "create", "image must be a pinned sha256 digest (fail-closed)");
     }
 
+    // SLICE-CAP5 — DOCUMENTED DEPLOY-INTENT for `spec.egressAllow`. The per-sandbox outbound egress
+    // allowlist (deny-all by default) is the OS-side intent for this sandbox's network policy. The pinned
+    // OpenShell `CreateSandboxRequest` proto subset (client.ts:84-89) types ONLY `spec.template.image` +
+    // `labels` + an optional `name` — it carries NO egress / network-policy field. So we DO NOT fabricate
+    // a wire field: `spec.egressAllow` is honest DEPLOY-INTENT (the REAL no-egress enforcement is the
+    // OpenShell network policy, a deploy fact). When the proto subset gains a network-policy field, set it
+    // HERE from `spec.egressAllow`. Until then the in-repo, testable enforcement is the PDP egress
+    // defense-in-depth (`egressDecisionForProjection`), folded into the bin's authorize closure. The
+    // request below is therefore BYTE-IDENTICAL whether or not `spec.egressAllow` is present.
     const req: CreateSandboxRequest = {
       spec: { template: { image } },
       ...(spec.labels !== undefined ? { labels: spec.labels } : {}),

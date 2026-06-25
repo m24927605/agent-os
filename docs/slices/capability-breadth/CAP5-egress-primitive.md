@@ -31,8 +31,10 @@ brainstorm spine:先建 primitive 再開能力。CAP5 建 **egress-allowlist pri
 - SandboxSpec.egressAllow:absent → deny-all 述語;adapter 傳遞(best-effort,測 adapter 收到 egressAllow);**absent 不改既有 createSandbox 行為**(byte-identical)。
 - byte-identical:既有 inference / substrate / bin / 14-tool / CAP1-4 測不變綠。
 
-## (4) Definition of Done（待實測填）
-- [ ] RED → verify exit 0(egress matcher 抽共用〔inference byte-identical〕+ SandboxSpec.egressAllow + egressDecisionForProjection + bin closure 折入 + wire egress-allowlist 進 bin WIRED;deny-all default;exact/bypass-resistant;合成 networkHosts 端到端〔不在 allowlist→deny〕;**無 networkHosts byte-identical**;mutation 證;depcruise no-vendor-in-core 綠;secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`matchEgressAllow` 抽到 `src/policy/egress-allowlist.ts`(單一源;inference re-import,行為 byte-identical)+ `egressDecisionForProjection`(count-only deny reason,credential-blind)+ `SandboxSpec.egressAllow?`(optional,absent/empty→deny-all)+ OpenShell adapter 標 deploy-intent(proto 無 egress 欄位,wire request byte-identical)+ bin closure 折 egress decision(`AGENTOS_EGRESS_ALLOW`,default 空=deny-all)+ `binWired += "egress-allowlist"`。RED → verify **exit 0**(1388 passed + 29 skipped;policy 18 + inference 14 byte-identical + openshell 2 + cap5 bin 5 測;**neutralize-fold 翻 evil-host、suffix-weaken 同時翻 policy+inference、empty-host-guard 翻**;deny-all + bypass-resistant〔subdomain-prefix/suffix/substring/bare-parent/dot 全 deny〕;無 networkHosts byte-identical;depcruise no-vendor-in-core 綠+bite;secret-scan clean;無新依賴)。獨立 Opus4.8 review PASS。
+- **⚠️ 誠實(reviewer 核實)**:OpenShell `CreateSandboxRequest` proto subset **無 egress 欄位** → `SandboxSpec.egressAllow` 是 **documented deploy-intent**(非捏造 wire 欄位;adapter request with/without 它 byte-identical)。**in-repo 唯一 active 強制 = PDP networkHosts fold(best-effort)**;substrate 強制是「provisioned 後的 PRIMARY 層」(deploy fact,proto 加欄位時在 adapter 設)。**非 overclaim**——「substrate PRIMARY」一致限定為意圖層非現狀。1 MINOR(allow-branch 也設 auditRequired:true = 更多稽核,更安全)。
+- **egress primitive 就位** → CAP6(git.push/net.fetch:containment network-egress,需 egress〔本刀〕+ approval〔CAP4〕+ credential〔CAP6〕都 wired)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(matcher 抽取〔inference re-import〕+ egressAllow? optional + egress decision + bin 折入 純加;缺省 byte-identical)。

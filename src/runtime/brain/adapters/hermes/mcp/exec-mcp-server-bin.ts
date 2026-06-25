@@ -56,6 +56,7 @@ import {
   type PolicyRequest,
   type SecondaryPolicyAdapter,
   combineDecisions,
+  egressDecisionForProjection,
   evaluateSecondaries,
 } from "../../../../../policy/index.js";
 import type { TenantBinding } from "../../../../../tenant/index.js";
@@ -164,6 +165,14 @@ export interface BuildBinOpts {
     resource: string;
     tenantId: string;
   }[];
+  /**
+   * SLICE-CAP5 — inject the bin's PER-SANDBOX EGRESS ALLOWLIST (a TEST seam: a Fake allowlist proves the
+   * bin FOLDS the egress defense-in-depth decision into authorize for a tool whose projection carries
+   * networkHosts). The LIVE bin omits this and reads `egressAllowFromEnv(process.env)` (the
+   * `AGENTOS_EGRESS_ALLOW` allowlist; UNCONFIGURED => EMPTY => deny-all egress, fail-closed). Default
+   * EMPTY => deny-all. A tool with NO networkHosts is never gated by it (byte-identical).
+   */
+  readonly egressAllow?: readonly string[];
 }
 
 /**
@@ -191,6 +200,27 @@ function preAuthFromEnv(env: NodeJS.ProcessEnv): (toolCall: unknown) => boolean 
     const name = (toolCall as { tool?: unknown } | null)?.tool;
     return typeof name === "string" && allow.has(name);
   };
+}
+
+/**
+ * SLICE-CAP5 — the env var carrying the bin's PER-SANDBOX EGRESS ALLOWLIST (comma-separated hosts).
+ * NON-secret config (a host allowlist, not a credential). UNCONFIGURED (unset / blank / only-whitespace)
+ * => an EMPTY list => DENY-ALL egress (the `matchEgressAllow` primitive fail-closes on an empty
+ * allowlist). Per-surface allowlist CONTENT is a deploy/config decision; the default is deny-all.
+ */
+const EGRESS_ALLOW_ENV = "AGENTOS_EGRESS_ALLOW";
+
+/**
+ * Build the bin's egress allowlist from env. Reads `AGENTOS_EGRESS_ALLOW` as a comma-separated host
+ * list. UNCONFIGURED (unset / blank / only-whitespace) => an EMPTY list => deny-all egress (fail-closed).
+ * Pure over env. Mirrors `preAuthFromEnv`'s parse shape.
+ */
+function egressAllowFromEnv(env: NodeJS.ProcessEnv): readonly string[] {
+  const raw = env[EGRESS_ALLOW_ENV] ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 /**
@@ -300,7 +330,14 @@ function buildDeps(
   // so a destructive (approval-requiring) tool can register here AND is gated by the approval stage. The 14
   // seed tools are all in-sandbox (require NO primitive), so wiring "approval" leaves them byte-identical
   // (it only unlocks registration of a tool that DECLARES it needs approval).
-  const binWired: ReadonlySet<Primitive> = new Set<Primitive>(["approval"]);
+  //
+  // SLICE-CAP5 — the bin ALSO WIRES "egress-allowlist", because its authorize closure now FOLDS the egress
+  // defense-in-depth decision (`egressDecisionForProjection`) for any tool whose projection carries
+  // networkHosts (below). COUPLED INVARIANT: the bin enforces egress ⟺ "egress-allowlist" wired for THIS
+  // registry — so a future `containment:"network-egress"` tool (CAP6 git.push / net.fetch) can REGISTER
+  // here. The 14 seed tools are all in-sandbox + carry no networkHosts, so wiring it is byte-identical for
+  // them (it only unlocks registration of a network-egress tool + gates a tool that PROJECTS hosts).
+  const binWired: ReadonlySet<Primitive> = new Set<Primitive>(["approval", "egress-allowlist"]);
   const extraSeedTools = opts.extraSeedTools ?? [];
   const registry = seedRegistry(
     binWired,
@@ -363,6 +400,13 @@ function buildDeps(
   // all false => the stage is skipped => byte-identical; the approver is never even called for them).
   const approve: (toolCall: unknown) => MaybePromise<ApprovalOutcome> =
     opts.approve ?? createBudgetApprover(preAuthFromEnv(process.env));
+  // SLICE-CAP5 — the bin's PER-SANDBOX EGRESS ALLOWLIST. A TEST seam (opts.egressAllow) takes precedence;
+  // the LIVE bin reads `egressAllowFromEnv(process.env)` (AGENTOS_EGRESS_ALLOW; UNCONFIGURED => EMPTY =>
+  // deny-all egress, fail-closed). FAKE mode is unaffected (the subprocess test injects no egressAllow and
+  // its seed tools carry no networkHosts, so the fold never fires). This is the COUPLED counterpart of
+  // wiring "egress-allowlist" into the registry above: the bin both (a) lets a network-egress tool register
+  // AND (b) folds the egress decision for a tool whose projection carries networkHosts.
+  const binEgressAllow: readonly string[] = opts.egressAllow ?? egressAllowFromEnv(process.env);
   return {
     substrate,
     sandboxId,
@@ -408,15 +452,27 @@ function buildDeps(
       if (projection !== undefined) req.governanceProjection = projection;
       // PDP = the SOLE deny authority (deny-by-default for an unregistered tool). It is a `PolicyDecision`.
       const pdp: PolicyDecision = authorizeToolInvoke(req, registry, allowRules);
+      // SLICE-CAP5 — the EGRESS defense-in-depth fold. When the tool's credential-blind projection carries
+      // networkHosts, build `egressDecisionForProjection(networkHosts, binEgressAllow)` and fold it in as
+      // an extra decision (any-deny-wins; PDP sovereign). PRESENT-ONLY: a tool with NO projection or NO
+      // networkHosts contributes NOTHING (`[]`), so the 14 seed tools are BYTE-IDENTICAL (the egress check
+      // never fires for them). The substrate seal is PRIMARY; this is best-effort defense-in-depth, NOT a
+      // second runtime path — it only NARROWS the decision (deny-precedence), never relaxes a PDP deny.
+      // NON-VACUITY: drop this fold and a tool projecting an UNALLOWED host (e.g. "evil.com") would NOT
+      // deny — the bin's CAP5 evil-host e2e test flips RED.
+      const egressDecisions: PolicyDecision[] =
+        projection !== undefined && projection.networkHosts.length > 0
+          ? [egressDecisionForProjection(projection.networkHosts, binEgressAllow)]
+          : [];
       // Fold the advisory secondaries: any-deny-wins, PDP sovereign (an allow secondary can NEVER relax a
       // PDP deny). `evaluateSecondaries` is fail-closed (a throwing/rejecting advisor => a synthetic deny).
       // SLICE-R9a: it is async (it may await a cross-language advisory), so this closure is `async` and
       // `await`s it; the fold + redact semantics are otherwise unchanged. The structural `req` satisfies
       // `PolicyRequest` shape; the branded-id cast is the same object the PDP just validated.
-      const combined = combineDecisions(
-        pdp,
-        await evaluateSecondaries(secondaries, req as unknown as PolicyRequest),
-      );
+      const combined = combineDecisions(pdp, [
+        ...(await evaluateSecondaries(secondaries, req as unknown as PolicyRequest)),
+        ...egressDecisions,
+      ]);
       // SLICE-AGT1-A: redact the combined reason before it leaves the authorize boundary (mirrors the
       // three surfaces' `redactSecrets(combined.reason)` after their fold). An UNTRUSTED advisory
       // secondary's reason can carry a secret; without this scrub it would flow into the commit-before-
