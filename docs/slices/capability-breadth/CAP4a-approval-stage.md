@@ -34,8 +34,9 @@ brainstorm 揪出 fail-open:`requiresApproval` 每個 manifest 都宣告、destr
 - PDP deny → 停在 policy stage,approval 不執行(approval 不能救 PDP deny)。
 - byte-identical:既有 pipeline/三面/bin/EXEC4c 測全綠(approve/requiresApproval optional 缺省)。
 
-## (4) Definition of Done（待實測填）
-- [ ] RED → verify exit 0(approval stage + `approve?` seam + `AuthorizeDecision.requiresApproval?` + `GovernedStage` "approval";fail-closed〔無 seam / denied / reject → denied@approval,effect 0〕;requiresApproval:false 跳過 byte-identical;PDP sovereign;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:pipeline approval stage(authorize-allow 後、cost.reserve 前)+ `ApprovalOutcome` + `deps.approve?`(MaybePromise)+ `AuthorizeDecision.requiresApproval?` + `GovernedStage` "approval";requiresApproval!==true → skip;===true 無 seam/denied/reject → `denied@approval`(**fail-closed**,靜態 reason,downstream 0)。**type-forced deviation(必要)**:`GovernedStage` 加 "approval" 流進 `task/session.ts` 的 `StepOutcome` zod enum → 加 "approval"(否則真 denied@approval step 在 ledger zod 邊界被拒,連拒絕本身 fail-closed 於持久化)。RED → verify **exit 0**(1346 passed + 29 skipped;8 approval 測;missing-approve-proceeds mutation 翻 fail-closed、!==false 翻 skip;PDP deny 在 approval 前短路;reject canary 不入 reason)。獨立 Opus4.8 review PASS:fail-closed 非 vacuous、byte-identical skip、PDP-sovereign、**GovernedStage "approval" 傳播完整**(session.ts:47 唯一 stage zod enum,widening 經驗證必要+完整,無 consumer 漏接)、靜態 reason。1 MINOR(下游 serializer 插 outcome.reason——CAP4b 須續守不轉發 untrusted approver reason)。
+- **runtime fail-open 已修**(pipeline 現真 enforce requiresApproval)。**CAP4b**:Personal 預授權 budget approve seam + Enterprise maker-checker approve seam + 把 "approval" 接進 WIRED → 解鎖 real destructive 工具(現 CAP3 gate 仍擋,故 CAP4a 以合成工具證)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(optional 欄位 + 新 stage 純加;缺省 byte-identical)。
