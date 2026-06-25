@@ -135,10 +135,12 @@ async function makeServerKit(): Promise<ServerKit> {
   return { deps, substrate, appendCalls, effectOrder };
 }
 
-// The full seed set after CAP1 — sorted. EXACT (a tool removed/added wrongly flips this). SLICE-HDI2b
+// The full seed set after CAP2 — sorted. EXACT (a tool removed/added wrongly flips this). SLICE-HDI2b
 // added the ONE bounded general exec tool `exec.run` (a full argv vector, run DIRECTLY — never a shell
-// string). SLICE-CAP1 adds the FIRST capability-breadth tool `exec.write_file` (in-sandbox file write —
-// argv ["tee","--",path], content via stdin bytes, never argv/shell), so the set of 8 becomes 9.
+// string). SLICE-CAP1 added the FIRST capability-breadth tool `exec.write_file` (in-sandbox file write —
+// argv ["tee","--",path], content via stdin bytes, never argv/shell), so the set of 8 became 9. SLICE-CAP2
+// adds the in-sandbox GIT FAMILY (git.status/diff/log/add/commit — each a FIXED-subcommand argvPrefix,
+// string-only args), so 9 becomes 14. git.push (network/destructive) is DEFERRED — NOT in the set.
 const FULL_SEED_SET = [
   "exec.cat",
   "exec.echo",
@@ -149,6 +151,11 @@ const FULL_SEED_SET = [
   "exec.run",
   "exec.wc",
   "exec.write_file",
+  "git.add",
+  "git.commit",
+  "git.diff",
+  "git.log",
+  "git.status",
 ];
 
 // ==================================================================================================
@@ -157,7 +164,7 @@ const FULL_SEED_SET = [
 //           NON-VACUITY: the exact-set assertion flips RED if a tool were removed or an extra advertised.
 // ==================================================================================================
 describe("HDI2a-1 tools/list advertises the full read-only seed set, each schema-derived", () => {
-  it("returns exactly the 9 bounded seed tools, each with a DERIVED inputSchema, nothing else", async () => {
+  it("returns exactly the 14 bounded seed tools, each with a DERIVED inputSchema, nothing else", async () => {
     const { deps } = await makeServerKit();
     const server = createExecMcpServer(deps);
 

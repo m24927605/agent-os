@@ -200,8 +200,13 @@ describe("EXEC4c-a — CORE-1 stdio framing dispatches to the governed EXEC4a ha
       "exec.run",
       "exec.wc",
       "exec.write_file",
+      "git.add",
+      "git.commit",
+      "git.diff",
+      "git.log",
+      "git.status",
     ]);
-    for (const forbidden of ["fs", "terminal", "shell", "command", "argv", "exec.rm"]) {
+    for (const forbidden of ["fs", "terminal", "shell", "command", "argv", "exec.rm", "git.push"]) {
       expect(tools.map((t) => t.name)).not.toContain(forbidden);
     }
   });
@@ -316,6 +321,11 @@ describe("EXEC4c-a — CORE-3 stdio framing fail-closed (malformed line -> -3270
       "exec.run",
       "exec.wc",
       "exec.write_file",
+      "git.add",
+      "git.commit",
+      "git.diff",
+      "git.log",
+      "git.status",
     ]);
     // The malformed line never reached the substrate.
     expect(substrate.execCalls.length).toBe(0);
@@ -482,7 +492,7 @@ dSub(
           expect(obj.jsonrpc).toBe("2.0");
         }
 
-        // tools/list = exactly the registered bounded seed tools (HDI2b: 7 read-only + exec.run = 8).
+        // tools/list = exactly the registered bounded seed tools (CAP2: 9 existing + 5 git = 14).
         const tools = (responses[1]?.result as { tools: { name: string }[] }).tools;
         expect(tools.map((t) => t.name).sort()).toEqual([
           "exec.cat",
@@ -494,6 +504,11 @@ dSub(
           "exec.run",
           "exec.wc",
           "exec.write_file",
+          "git.add",
+          "git.commit",
+          "git.diff",
+          "git.log",
+          "git.status",
         ]);
 
         // bound tools/call executed over the real wire -> isError:false + the echoed output.
@@ -573,6 +588,11 @@ dSub(
           "exec.run",
           "exec.wc",
           "exec.write_file",
+          "git.add",
+          "git.commit",
+          "git.diff",
+          "git.log",
+          "git.status",
         ]);
       } finally {
         child.kill("SIGKILL");

@@ -165,9 +165,11 @@ describe("EXEC4a — RED1 tools/list advertises exactly the bounded seed tools, 
 
     // EXACTLY the registered bounded seed tools, nothing else (no fs/terminal/raw-argv/shell/command
     // tool). SLICE-HDI2a grew the read-only-safe set from 2 to 7; SLICE-HDI2b added the ONE bounded
-    // general exec tool `exec.run` (a full argv vector, never a shell string) -> 8; SLICE-CAP1 adds the
-    // FIRST capability-breadth tool `exec.write_file` (in-sandbox write, content via stdin bytes) -> 9.
-    // The invariant is unchanged — ONLY the registered bounded seed tools are advertised, nothing unexpected.
+    // general exec tool `exec.run` (a full argv vector, never a shell string) -> 8; SLICE-CAP1 added the
+    // FIRST capability-breadth tool `exec.write_file` (in-sandbox write, content via stdin bytes) -> 9;
+    // SLICE-CAP2 adds the in-sandbox GIT FAMILY (git.status/diff/log/add/commit — fixed-subcommand,
+    // string-only args) -> 14. The invariant is unchanged — ONLY the registered bounded seed tools are
+    // advertised, nothing unexpected (git.push, the network/destructive edge, is DEFERRED — not a tool).
     expect(tools.map((t) => t.name).sort()).toEqual([
       "exec.cat",
       "exec.echo",
@@ -178,11 +180,25 @@ describe("EXEC4a — RED1 tools/list advertises exactly the bounded seed tools, 
       "exec.run",
       "exec.wc",
       "exec.write_file",
+      "git.add",
+      "git.commit",
+      "git.diff",
+      "git.log",
+      "git.status",
     ]);
     const names = tools.map((t) => t.name);
     // `exec.run` is now a REGISTERED bounded tool (no longer forbidden); the raw `argv`/`shell`/
-    // `command`/`terminal`/`fs` capabilities remain not-tools.
-    for (const forbidden of ["fs", "fs/read", "terminal", "shell", "command", "argv", "exec.rm"]) {
+    // `command`/`terminal`/`fs` capabilities remain not-tools; `git.push` (network/destructive) is DEFERRED.
+    for (const forbidden of [
+      "fs",
+      "fs/read",
+      "terminal",
+      "shell",
+      "command",
+      "argv",
+      "exec.rm",
+      "git.push",
+    ]) {
       expect(names).not.toContain(forbidden);
     }
 
