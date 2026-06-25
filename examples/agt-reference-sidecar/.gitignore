@@ -1,0 +1,4 @@
+# The sidecar venv + generated proto stubs are BUILT on demand (see README.md / gen-stubs.sh),
+# never committed — grpcio is a heavy binary dep and the stubs are reproducible from the proto.
+.venv/
+_generated/

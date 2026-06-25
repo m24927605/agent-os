@@ -1,0 +1,15 @@
+{
+  "openshell": {
+    "endpoint": "127.0.0.1:17670",
+    "mtlsDir": "~/.config/openshell/gateways/openshell/mtls",
+    "image": "ghcr.io/your-org/openclaw@sha256:REPLACE_WITH_PINNED_DIGEST"
+  },
+  "kernel": {
+    "ingestEndpoint": "127.0.0.1:50051"
+  },
+  "agt": {
+    "udsPath": "/tmp/agt.sock",
+    "scope": "effectful",
+    "timeoutMs": 750
+  }
+}
