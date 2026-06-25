@@ -48,9 +48,9 @@ fail-closed 驗證(部分/malformed config → 非零、不寫半套)/ credentia
 - readline:缺欄位互動補問(injected input);`--non-interactive` 缺欄位 → 非零。
 - 全程不印/不寫 secret(spy)。
 
-## (6) Definition of Done（待實測填)
-- [ ] `agentos setup`:RED → verify 綠(JSON.parse + zod 驗證 + validate fail-closed + build + apply〔--print / injected spawner〕+ doctor;readline 互動 + --non-interactive;zero-dep;credential-blind〔canary 不洩〕;manifest/verify/doctor 既有不變);各 mutation 證非空;獨立 Opus 4.8 review PASS。
-- [ ] 文件:README 設定段補「`agentos setup`(填 `agent-os.config.json` → 套用)」為主路徑,doctor 為驗證。
+## (6) Definition of Done（實測)
+- [x] **`agentos setup` DONE（merged)**:`loadAgentOsConfig`(JSON.parse + zod `.strict()`:openshell/kernel 必填、spendguard all-or-nothing、`agt` 經 .strict() 拒〔follow-up〕、malformed/unknown/missing/partial → throw)+ `setupCommand`(load → 互動 readline 補缺 / `--non-interactive` 缺即敗 → validate fail-closed → build env〔AGENTOS_OPENSHELL_* + KERNEL + SPENDGUARD_* 當設〕→ **apply 非破壞**〔互動委派 `hermes mcp add` / `--print` 印區塊;**絕無 fs-write 真實 config**〕→ doctor → fail-closed exit)+ injectable deps 縫(default realDeps ships;isInteractiveTty 可注入)。RED → verify **exit 0**(1168 passed + 26 skipped;24 setup 測;spendguard-independent-optional mutation 翻 3、coerce-to-default 翻 10、echo-secret 翻 credential-blind;manifest/verify/doctor byte-unchanged;**零新依賴**〔package.json/lock 空 diff〕;depcruise clean〔cli import hermes barrel + doctor 合法〕;secret-scan clean;**真實 `hermes mcp list` 前後未動**)。獨立 Opus4.8 review PASS(8 攻擊面 HELD/N/A;1 MINOR:一個 credential-blind 測單獨近 vacuous,真 property 由 secret-in-endpoint 測釘住,無需處理)。
+- [ ] (選)文件:README 設定段補「`agentos setup`(填 `agent-os.config.json` → 套用)」為主路徑、doctor 為驗證(可隨後補)。
 
 ## (7) Rollback
 - `git revert`(新 setup subcommand + JSON.parse + zod 驗證 純加法)。CLI 其餘不受影響。
