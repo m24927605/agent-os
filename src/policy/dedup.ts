@@ -11,33 +11,43 @@
  * landing under src/policy/adapters/<vendor>/ in a later slice). This module imports only policy types
  * — no vendor, no evaluate.ts.
  */
-import type { PolicyDecision, PolicyRequest } from "./types.js";
+import type { MaybePromise, PolicyDecision, PolicyRequest } from "./types.js";
 
-/** An ADVISORY policy engine (e.g. AGT, OpenShell OPA). Never the deny authority — its decision is an input to `combineDecisions`. */
+/**
+ * An ADVISORY policy engine (e.g. AGT, OpenShell OPA). Never the deny authority — its decision is an
+ * input to `combineDecisions`. `evaluate` is `MaybePromise` (SLICE-R9a): a sync advisor returns a plain
+ * `PolicyDecision`; an async advisor (e.g. a cross-language AGT engine over a transport) returns a
+ * `Promise<PolicyDecision>`. `evaluateSecondaries` awaits both fail-closed.
+ */
 export interface SecondaryPolicyAdapter {
-  evaluate(req: PolicyRequest): PolicyDecision;
+  evaluate(req: PolicyRequest): MaybePromise<PolicyDecision>;
 }
 
 /**
- * Run each secondary adapter fail-closed: an adapter that throws yields a SYNTHETIC deny (deny-by-
- * default), so a crashing advisor cannot silently let an action through.
+ * Run each secondary adapter fail-closed and return the resolved decisions in INPUT ORDER (`Promise.all`
+ * preserves index order regardless of resolution timing). An adapter that THROWS or whose promise
+ * REJECTS yields the SAME SYNTHETIC deny (deny-by-default), so a crashing advisor — sync or async —
+ * cannot silently let an action through. `combineDecisions` consumes the already-resolved array and
+ * stays PURE SYNC.
  */
 export function evaluateSecondaries(
   adapters: readonly SecondaryPolicyAdapter[],
   req: PolicyRequest,
-): PolicyDecision[] {
-  return adapters.map((adapter) => {
-    try {
-      return adapter.evaluate(req);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      return {
-        effect: "deny",
-        reason: `secondary policy adapter errored — deny-by-default (fail-closed): ${reason}`,
-        auditRequired: true,
-      };
-    }
-  });
+): Promise<PolicyDecision[]> {
+  return Promise.all(
+    adapters.map(async (adapter) => {
+      try {
+        return await adapter.evaluate(req);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return {
+          effect: "deny",
+          reason: `secondary policy adapter errored — deny-by-default (fail-closed): ${reason}`,
+          auditRequired: true,
+        } satisfies PolicyDecision;
+      }
+    }),
+  );
 }
 
 /**

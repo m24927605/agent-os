@@ -237,7 +237,7 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
       const r = screenBrainEvent(tc as never, detectSecret);
       return r.status === "ok" ? { ok: true as const } : { ok: false as const, reason: r.reason };
     },
-    authorize: (tc) => {
+    authorize: async (tc) => {
       const req = { ...tc.context, action: "tool:invoke", resource: tc.tool } as PolicyRequest;
       // SLICE-DVx: with an injected registry, the registry deny-by-default runs IN FRONT of the
       // EXISTING `personal:*` PDP (`authorizeToolInvoke` = deny-by-default pre-screen -> evaluatePolicy);
@@ -247,11 +247,13 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
       const decision = opts.toolRegistry
         ? authorizeToolInvoke(req, opts.toolRegistry, allow)
         : evaluatePolicy(req, allow);
-      // SLICE-IT1a: evaluate the INJECTED advisory secondaries fail-closed (a throwing adapter -> a
-      // synthetic deny), then fold them into the decision. ABSENT => `[]` adapters -> `[]` decisions,
+      // SLICE-IT1a: evaluate the INJECTED advisory secondaries fail-closed (a throwing/rejecting adapter
+      // -> a synthetic deny), then fold them into the decision. ABSENT => `[]` adapters -> `[]` decisions,
       // byte-identical to today's `combineDecisions(decision, [])`. combineDecisions is any-deny-wins /
       // PDP-sovereign: a secondary can only deny more — it never grants/relaxes a PDP deny.
-      const secondaryDecisions = evaluateSecondaries(opts.secondaries ?? [], req);
+      // SLICE-R9a: `evaluateSecondaries` is async (it may await a cross-language advisory), so this
+      // closure is `async` and `await`s it; the fold + redact semantics are otherwise unchanged.
+      const secondaryDecisions = await evaluateSecondaries(opts.secondaries ?? [], req);
       const combined = combineDecisions(decision, secondaryDecisions);
       // The combined reason folds UNTRUSTED secondary `reason` strings (an external/vendor seam); scrub
       // them before the reason flows into the committed AuditEvent's policyDecision.reason (the appender

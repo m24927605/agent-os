@@ -126,14 +126,14 @@ describe("AgtSecondaryPolicy — a throwing AGT engine synthesises a DENY (deny-
     throw new Error("agt python engine blew up");
   });
 
-  it("evaluateSecondaries turns an AGT throw into a synthetic deny", () => {
-    const decisions = evaluateSecondaries([throwing], req);
+  it("evaluateSecondaries turns an AGT throw into a synthetic deny", async () => {
+    const decisions = await evaluateSecondaries([throwing], req);
     expect(decisions).toHaveLength(1);
     expect(decisions[0]?.effect).toBe("deny");
   });
 
-  it("a throwing AGT advisory makes the combined decision deny even when PDP allowed", () => {
-    const out = combineDecisions(pdpAllow, evaluateSecondaries([throwing], req));
+  it("a throwing AGT advisory makes the combined decision deny even when PDP allowed", async () => {
+    const out = combineDecisions(pdpAllow, await evaluateSecondaries([throwing], req));
     expect(out.effect).toBe("deny");
   });
 });

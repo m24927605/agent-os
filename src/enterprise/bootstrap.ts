@@ -450,7 +450,7 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         const r = screenBrainEvent(tc as never, detectSecret);
         return r.status === "ok" ? { ok: true as const } : { ok: false as const, reason: r.reason };
       },
-      authorize: (tc) => {
+      authorize: async (tc) => {
         const req = {
           ...(tc.context as object),
           action: "tool:invoke",
@@ -465,12 +465,13 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
         const decision = opts.toolRegistry
           ? authorizeToolInvoke(req, opts.toolRegistry, allow)
           : evaluatePolicy(req, allow);
-        // SLICE-IT1a: evaluate the INJECTED shared advisory secondaries fail-closed (a throwing adapter
-        // -> a synthetic deny), then fold them into THIS tenant's decision. ABSENT => `[]` adapters ->
-        // `[]` decisions, byte-identical to ES1's `combineDecisions(decision, [])`. combineDecisions is
+        // SLICE-IT1a: evaluate the INJECTED shared advisory secondaries fail-closed (a throwing/rejecting
+        // adapter -> a synthetic deny), then fold them into THIS tenant's decision. ABSENT => `[]` adapters
+        // -> `[]` decisions, byte-identical to ES1's `combineDecisions(decision, [])`. combineDecisions is
         // any-deny-wins / per-tenant-PDP-sovereign: a secondary can only deny more — it never grants,
         // and (deny-only advisory) it does not affect this tenant's routing/isolation.
-        const secondaryDecisions = evaluateSecondaries(opts.secondaries ?? [], req);
+        // SLICE-R9a: `evaluateSecondaries` is async, so this closure is `async` and `await`s it.
+        const secondaryDecisions = await evaluateSecondaries(opts.secondaries ?? [], req);
         const combined = combineDecisions(decision, secondaryDecisions);
         // Scrub UNTRUSTED secondary `reason` text before it flows into THIS tenant's committed
         // AuditEvent (the appender writes `decisionReason` -> the per-tenant WORM). ABSENT => identity.

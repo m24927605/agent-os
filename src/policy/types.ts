@@ -19,6 +19,15 @@ export const PolicyRequest = z.object({
 });
 export type PolicyRequest = z.infer<typeof PolicyRequest>;
 
+/**
+ * A value that MAY be a promise — `T` or `Promise<T>`. The async seam (SLICE-R9a) for the policy path:
+ * a port typed `MaybePromise<T>` accepts BOTH a sync implementation (a plain `T`) and an async one (a
+ * `Promise<T>`), so an async advisory (e.g. a future cross-language AGT engine) can be folded in without
+ * forcing every existing sync closure/fake to change. The pipeline `await`s such a value, on which a
+ * plain `T` resolves to itself — so the absent/sync path stays behaviorally byte-identical.
+ */
+export type MaybePromise<T> = T | Promise<T>;
+
 export type PolicyEffect = "allow" | "deny";
 
 export interface PolicyDecision {

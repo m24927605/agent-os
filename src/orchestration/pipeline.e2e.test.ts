@@ -69,11 +69,12 @@ function makeDeps(opts: {
       const r = screenBrainEvent(tc, detectSecret);
       return r.status === "ok" ? { ok: true as const } : { ok: false as const, reason: r.reason };
     },
-    authorize: (tc: ToolCall) => {
+    authorize: async (tc: ToolCall) => {
       const req = { ...tc.context, action: "tool:invoke", resource: tc.tool } as PolicyRequest;
+      // SLICE-R9a: evaluateSecondaries is async (MaybePromise seam) — await it; combineDecisions stays sync.
       const combined = combineDecisions(
         evaluatePolicy(req, ruleSet),
-        evaluateSecondaries(secondaries, req),
+        await evaluateSecondaries(secondaries, req),
       );
       return { effect: combined.effect, reason: combined.reason };
     },

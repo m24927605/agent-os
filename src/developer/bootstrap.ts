@@ -268,16 +268,17 @@ export function createDeveloperKit(opts: DeveloperKitOpts = {}): DeveloperKit {
       const r = screenBrainEvent(tc as never, detectSecret);
       return r.status === "ok" ? { ok: true as const } : { ok: false as const, reason: r.reason };
     },
-    authorize: (tc) => {
+    authorize: async (tc) => {
       const req = { ...tc.context, action: "tool:invoke", resource: tc.tool } as PolicyRequest;
       // authorizeToolInvoke is the deny-only registry pre-screen IN FRONT of the PDP: an UNREGISTERED
       // tool is denied deny-by-default; a REGISTERED tool is delegated to evaluatePolicy(req, rules).
       const decision = authorizeToolInvoke(req, registry, rules);
-      // SLICE-IT1a: evaluate the INJECTED advisory secondaries fail-closed (a throwing adapter -> a
-      // synthetic deny), then fold them into the decision. ABSENT => `[]` adapters -> `[]` decisions,
+      // SLICE-IT1a: evaluate the INJECTED advisory secondaries fail-closed (a throwing/rejecting adapter
+      // -> a synthetic deny), then fold them into the decision. ABSENT => `[]` adapters -> `[]` decisions,
       // byte-identical to today's `combineDecisions(decision, [])`. combineDecisions is any-deny-wins /
       // PDP-sovereign: a secondary can only deny more — it never grants/relaxes a registry/PDP deny.
-      const secondaryDecisions = evaluateSecondaries(opts.secondaries ?? [], req);
+      // SLICE-R9a: `evaluateSecondaries` is async, so this closure is `async` and `await`s it.
+      const secondaryDecisions = await evaluateSecondaries(opts.secondaries ?? [], req);
       const combined = combineDecisions(decision, secondaryDecisions);
       // Scrub UNTRUSTED secondary `reason` text before it flows into the committed AuditEvent (replayFold
       // folds the RAW WORM, so write-side redaction is the defense). ABSENT path => identity redact.

@@ -39,8 +39,8 @@ R9 要把 async AGT 接進 policy path,但 `authorize`/`SecondaryPolicyAdapter.e
 - 三面 + bin:async authorize closure 回 Promise,經 runGovernedToolCall await → 與今日同結果(sync secondary `[]` → byte-identical;注入 async deny secondary → denied)。
 - 既有全測(EXEC4c/SETUP1a/AGT1-A/三面)**不改語義**綠。
 
-## (5) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(async authorize/secondary;reject→fail-closed;combineDecisions sync;**缺省 byte-identical**;restore 未碰;mutation 證;depcruise/secret-scan clean);獨立 Opus 4.8 review PASS。
+## (5) Definition of Done（實測)
+- [x] **DONE（merged)**:`MaybePromise<T>`(src/policy/types.ts,barrel re-export);pipeline `authorize → MaybePromise` + `await deps.authorize` + fail-closed try/catch(throw 與 reject 都 → `denied@policy` 靜態 reason,不洩 message);`evaluateSecondaries` async(`Promise.all`,reject → synthetic deny,順序保留);`SecondaryPolicyAdapter.evaluate → MaybePromise`;**`combineDecisions` 純 sync**;4 個 authorize closure(personal/developer/enterprise/bin)→ async + `await evaluateSecondaries`(redactSecrets/PDP-sovereign 不變);`ExecMcpServerDeps.authorize` 型別 widening(passthrough,無新 await)。RED → verify **exit 0**(1185 passed + 26 skipped;3 新測 + 4 既有測加 await;**drop-await mutation 翻 async-deny+reject〔canary 經 unhandled rejection 洩 console=正是 await 防的 fail-open〕、leak-message 翻〔靜態 reason load-bearing〕、drop-Promise.all 翻 5**;typecheck clean;depcruise/secret-scan clean)。獨立 Opus4.8 review PASS(**latent-sync-consumer 獵捕全安全**——每個 .authorize/.evaluate/combineDecisions consumer await 狀態列舉,無未-await Promise-reader;**restore.ts 未碰**〔RestoreDeps.authorize 不同 sync 型別〕;無 AGT 加入;byte-identical sync path;8 攻擊面 HELD/N/A;零 finding)。
 
 ## (6) Rollback / Depends-on
 - Rollback:`git revert`(型別 widening + await 加法;sync 仍相容,低風險)。

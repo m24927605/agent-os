@@ -36,6 +36,7 @@ import type { CostGate } from "../../../../../cost/index.js";
 import {
   type AuthorizeDecision,
   type GovernedToolCallDeps,
+  type MaybePromise,
   type ScreenOutcome,
   runGovernedToolCall,
 } from "../../../../../orchestration/index.js";
@@ -219,8 +220,12 @@ export interface ExecMcpServerDeps {
   };
   /** Credential-blind screen (deps.screen) — the FIRST governed gate. */
   readonly screen: (toolCall: BoundExecCall) => ScreenOutcome;
-  /** The SOLE authorization decision (deps.authorize). */
-  readonly authorize: (toolCall: BoundExecCall) => AuthorizeDecision;
+  /**
+   * The SOLE authorization decision (deps.authorize). `MaybePromise` (SLICE-R9a): a sync OR async
+   * closure. The passthrough into `runGovernedToolCall` (which now `await`s authorize) needs no new
+   * await here — the MCP server only forwards the seam.
+   */
+  readonly authorize: (toolCall: BoundExecCall) => MaybePromise<AuthorizeDecision>;
   /** Budget hard-cap (deps.cost). */
   readonly cost: CostGate;
   /** Token estimator (deps.estimateTokens). */

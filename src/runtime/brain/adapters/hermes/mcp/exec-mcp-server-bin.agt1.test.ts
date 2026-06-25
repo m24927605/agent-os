@@ -152,7 +152,8 @@ describe("AGT1-A NON-LEAK-AUTHORIZE — the bin authorize redacts an advisory se
     // Call the authorize boundary DIRECTLY with the bin's own context (the authorize reads c.requestId
     // etc. off `deps.context`, which is the bin's BIN_CONTEXT). exec.echo is PDP-allowed, and the
     // secondary ALLOWS, so the combined effect is "allow" and the combined reason folds in the secret.
-    const decision = deps.authorize({ tool: "exec.echo", context: deps.context });
+    // SLICE-R9a: the bin authorize closure is now async (it awaits evaluateSecondaries) — `await` it.
+    const decision = await deps.authorize({ tool: "exec.echo", context: deps.context });
 
     // The fold did not relax the allow (PDP allow + advisory allow).
     expect(decision.effect).toBe("allow");
@@ -178,7 +179,7 @@ describe("AGT1-A CLEAN-REASON-IDENTITY — redact is identity on a secret-free r
       // no `secondaries` => combineDecisions(pdp, []) === pdp.
     });
 
-    const decision = deps.authorize({ tool: "exec.echo", context: deps.context });
+    const decision = await deps.authorize({ tool: "exec.echo", context: deps.context });
     expect(decision.effect).toBe("allow");
     // The PDP's reason is secret-free, so redactSecrets is the identity: the returned reason equals
     // exactly what redactSecrets(reason) yields — i.e. no change vs. the un-wrapped value.
