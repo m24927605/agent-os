@@ -173,7 +173,9 @@ describe("EXEC4b (in-repo) — RED-L1 loopback tools/list advertises exactly the
       expect(status).toBe(200);
       const tools = (json as { result: { tools: { name: string }[] } }).result.tools;
       // EXACTLY the registered bounded seed tools (HDI2a grew this to 7; HDI2b adds exec.run -> 8;
-      // CAP1 adds exec.write_file -> 9; CAP2 adds the git family -> 14), nothing unexpected.
+      // CAP1 adds exec.write_file -> 9; CAP2 adds the git family -> 14), nothing unexpected. SLICE-CAP6's
+      // net.fetch (network-egress) is NOT here — this loopback kit uses the DEFAULT (egress-UNWIRED)
+      // seedRegistry()/seedBindings(); net.fetch advertises ONLY where egress is wired (the bin).
       expect(tools.map((t) => t.name).sort()).toEqual([
         "exec.cat",
         "exec.echo",

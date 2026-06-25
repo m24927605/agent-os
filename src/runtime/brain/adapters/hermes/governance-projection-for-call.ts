@@ -52,6 +52,12 @@ export type ManifestLookup = (toolName: string) => ToolManifest | undefined;
 function isInScope(manifest: ToolManifest, scope: AgtScope): boolean {
   if (scope === "all") return true;
   const effectful: ReadonlySet<ToolSideEffect> = new Set<ToolSideEffect>(["write", "destructive"]);
+  // SLICE-CAP6 — a SEAL-PUNCHING containment (network-egress / host-fs-write) is ALWAYS in-scope under
+  // `effectful`, regardless of sideEffect. A network READ (net.fetch: sideEffect:"read") still punches
+  // the sandbox seal to the network, so its projection (networkHosts) MUST be built so the bin's egress
+  // fold can GATE it — the whole point of CAP6. BYTE-IDENTICAL for the existing tools: every prior seed
+  // tool is `containment:"in-sandbox"`, so this clause never fires for them.
+  if (manifest.containment !== "in-sandbox") return true;
   return effectful.has(manifest.sideEffect) || manifest.requiresApproval;
 }
 

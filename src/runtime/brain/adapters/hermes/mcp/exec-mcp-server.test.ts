@@ -168,8 +168,10 @@ describe("EXEC4a — RED1 tools/list advertises exactly the bounded seed tools, 
     // general exec tool `exec.run` (a full argv vector, never a shell string) -> 8; SLICE-CAP1 added the
     // FIRST capability-breadth tool `exec.write_file` (in-sandbox write, content via stdin bytes) -> 9;
     // SLICE-CAP2 adds the in-sandbox GIT FAMILY (git.status/diff/log/add/commit — fixed-subcommand,
-    // string-only args) -> 14. The invariant is unchanged — ONLY the registered bounded seed tools are
-    // advertised, nothing unexpected (git.push, the network/destructive edge, is DEFERRED — not a tool).
+    // string-only args) -> 14. SLICE-CAP6's net.fetch (network-egress) is NOT here: this kit uses the
+    // DEFAULT (egress-UNWIRED) seedRegistry()/seedBindings(), and net.fetch registers + advertises ONLY
+    // where egress is WIRED + enforced (the bin). The invariant is unchanged — ONLY the registered bounded
+    // seed tools are advertised, nothing unexpected (git.push, the network/destructive edge, is DEFERRED).
     expect(tools.map((t) => t.name).sort()).toEqual([
       "exec.cat",
       "exec.echo",

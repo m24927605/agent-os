@@ -395,6 +395,9 @@ describe("CAP2-(e) git.commit commit-before-effect (receipt appended BEFORE the 
 //          NON-VACUITY: the exact-set assertion flips RED if a git tool were missing or an extra advertised;
 //          a hand-written/drifted schema would diverge from argSchemaToJsonSchema(binding).
 // ==================================================================================================
+// SLICE-CAP6's net.fetch (network-egress) is NOT here: this kit uses the DEFAULT (egress-UNWIRED)
+// seedRegistry()/seedBindings(); net.fetch registers + advertises ONLY where egress is WIRED + enforced
+// (the bin — see exec-mcp-server-bin.cap6.test.ts).
 const FULL_SEED_SET_14 = [
   "exec.cat",
   "exec.echo",

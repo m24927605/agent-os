@@ -140,7 +140,10 @@ async function makeServerKit(): Promise<ServerKit> {
 // string). SLICE-CAP1 added the FIRST capability-breadth tool `exec.write_file` (in-sandbox file write —
 // argv ["tee","--",path], content via stdin bytes, never argv/shell), so the set of 8 became 9. SLICE-CAP2
 // adds the in-sandbox GIT FAMILY (git.status/diff/log/add/commit — each a FIXED-subcommand argvPrefix,
-// string-only args), so 9 becomes 14. git.push (network/destructive) is DEFERRED — NOT in the set.
+// string-only args), so 9 becomes 14. SLICE-CAP6's net.fetch (network-egress) is NOT here: this kit uses
+// the DEFAULT (egress-UNWIRED) seedRegistry()/seedBindings(), and net.fetch registers + advertises ONLY
+// where egress is WIRED + enforced (the bin — see exec-mcp-server-bin.cap6.test.ts). git.push (egress not
+// argv-visible + destructive) is DEFERRED to CAP6b — NOT in the set.
 const FULL_SEED_SET = [
   "exec.cat",
   "exec.echo",

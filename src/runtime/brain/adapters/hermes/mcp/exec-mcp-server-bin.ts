@@ -101,6 +101,13 @@ const BIN_TENANT_BINDING: TenantBinding = {
 /** A sandbox spec for the ephemeral sandbox the bin provisions on startup. */
 interface BinSandboxSpec {
   readonly image: string;
+  /**
+   * SLICE-CAP6 — the per-sandbox EGRESS ALLOWLIST carried INTO sandbox creation (deny-all default). The
+   * REAL OpenShell adapter carries this toward its network policy (the PRIMARY no-egress enforcement, a
+   * deploy fact); the Fake substrate records it. This is the SAME allowlist the PDP egress fold uses, so
+   * the substrate policy and the in-repo defense-in-depth never skew.
+   */
+  readonly egressAllow?: readonly string[];
 }
 
 /** What `buildSubstrate` returns: the substrate + the spec to create an ephemeral sandbox against. */
@@ -221,6 +228,17 @@ function egressAllowFromEnv(env: NodeJS.ProcessEnv): readonly string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * SLICE-CAP6 — the SINGLE source of the bin's per-sandbox egress allowlist: a TEST seam (`opts.egressAllow`)
+ * else `egressAllowFromEnv(process.env)` (AGENTOS_EGRESS_ALLOW; UNCONFIGURED => EMPTY => deny-all). Hoisted
+ * so the SAME allowlist drives BOTH (a) the substrate `SandboxSpec.egressAllow` (deploy-intent the REAL
+ * OpenShell adapter carries toward its network policy — the PRIMARY no-egress enforcement) AND (b) the PDP
+ * egress fold in the authorize closure (the in-repo defense-in-depth). One source => no skew between them.
+ */
+function resolveBinEgressAllow(opts: BuildBinOpts): readonly string[] {
+  return opts.egressAllow ?? egressAllowFromEnv(process.env);
 }
 
 /**
@@ -360,6 +378,17 @@ function buildDeps(
       resource: "git.**",
       tenantId: BIN_CONTEXT.tenantId,
     },
+    // SLICE-CAP6 — the FIRST real network-egress tool `net.fetch` is registered + advertised on the bin
+    // (its "egress-allowlist" primitive is wired below), so it must also be AUTHORIZABLE. PURE ADDITION: a
+    // third allow rule alongside exec.**/git.** (OR-combined). The egress fold (below) still GATES it: an
+    // allow rule admits the NAME, but a non-allowlisted host is denied@policy by the egress decision. The
+    // unregistered git.push is still denied-by-default (an allow rule never admits an unregistered name).
+    {
+      id: "allow-net",
+      action: "tool:invoke",
+      resource: "net.**",
+      tenantId: BIN_CONTEXT.tenantId,
+    },
     // SLICE-CAP4b — EXTRA allow rules (TEST seam: makes an injected synthetic tool PDP-authorizable). Empty
     // by default => byte-identical (the live bin injects none — no extra tools, no extra rules).
     ...(opts.extraAllowRules ?? []),
@@ -386,10 +415,15 @@ function buildDeps(
   // is unconfigured, integ.agtScope is absent — but the projection only MATTERS to a configured AGT
   // secondary (an absent secondary never reads it), so building it is harmless and the no-AGT path stays
   // byte-identical (no projection consumer => no behavioural change).
+  // SLICE-CAP6 — pass `binWired` so seedBindings INCLUDES net.fetch's binding (and thus its tools/list
+  // advertisement) ONLY because the bin has wired "egress-allowlist" AND folds the egress decision below.
+  // A composition that has NOT wired egress (the default seedBindings()) advertises neither net.fetch's
+  // binding nor its manifest — "a WIRED primitive ⟺ enforcement present" stays honest.
   const bindings = seedBindings(
     new Map<string, ExecToolBinding>(
       extraSeedTools.map((t) => [(t.manifest as { name: string }).name, t.binding]),
     ),
+    binWired,
   );
   const agtScope: AgtScope = integ.agtScope ?? "effectful";
   // SLICE-CAP4b — the bin's PERSONAL approve seam. A TEST seam (opts.approve) takes precedence; the LIVE
@@ -406,7 +440,7 @@ function buildDeps(
   // its seed tools carry no networkHosts, so the fold never fires). This is the COUPLED counterpart of
   // wiring "egress-allowlist" into the registry above: the bin both (a) lets a network-egress tool register
   // AND (b) folds the egress decision for a tool whose projection carries networkHosts.
-  const binEgressAllow: readonly string[] = opts.egressAllow ?? egressAllowFromEnv(process.env);
+  const binEgressAllow: readonly string[] = resolveBinEgressAllow(opts);
   return {
     substrate,
     sandboxId,
@@ -454,16 +488,31 @@ function buildDeps(
       const pdp: PolicyDecision = authorizeToolInvoke(req, registry, allowRules);
       // SLICE-CAP5 — the EGRESS defense-in-depth fold. When the tool's credential-blind projection carries
       // networkHosts, build `egressDecisionForProjection(networkHosts, binEgressAllow)` and fold it in as
-      // an extra decision (any-deny-wins; PDP sovereign). PRESENT-ONLY: a tool with NO projection or NO
-      // networkHosts contributes NOTHING (`[]`), so the 14 seed tools are BYTE-IDENTICAL (the egress check
-      // never fires for them). The substrate seal is PRIMARY; this is best-effort defense-in-depth, NOT a
-      // second runtime path — it only NARROWS the decision (deny-precedence), never relaxes a PDP deny.
-      // NON-VACUITY: drop this fold and a tool projecting an UNALLOWED host (e.g. "evil.com") would NOT
-      // deny — the bin's CAP5 evil-host e2e test flips RED.
-      const egressDecisions: PolicyDecision[] =
-        projection !== undefined && projection.networkHosts.length > 0
-          ? [egressDecisionForProjection(projection.networkHosts, binEgressAllow)]
-          : [];
+      // an extra decision (any-deny-wins; PDP sovereign). For an IN-SANDBOX tool with NO projection or NO
+      // networkHosts this contributes NOTHING (`[]`), so the 14 seed tools are BYTE-IDENTICAL.
+      //
+      // SLICE-CAP6 — FAIL-CLOSED for a `containment:"network-egress"` MANIFEST: such a tool punches the seal
+      // to the network, so its egress MUST be decided. If its projection is MISSING or carries NO host (a
+      // broken/removed projector, an unparseable URL), the gate cannot see the destination -> DENY (never
+      // skip). So net.fetch is fail-closed even if its projector were stripped (a hard non-vacuity that does
+      // not rely on the e2e host test). An IN-SANDBOX tool is unaffected (no network-egress containment).
+      const toolContainment = registry.lookup(tc.tool)?.containment;
+      let egressDecisions: PolicyDecision[];
+      if (projection !== undefined && projection.networkHosts.length > 0) {
+        egressDecisions = [egressDecisionForProjection(projection.networkHosts, binEgressAllow)];
+      } else if (toolContainment === "network-egress") {
+        // A network-egress tool with no projectable host => fail-closed deny (the destination is unknown).
+        egressDecisions = [
+          {
+            effect: "deny",
+            reason:
+              "egress: network-egress tool with no projectable host — denied (fail-closed, CAP6)",
+            auditRequired: true,
+          },
+        ];
+      } else {
+        egressDecisions = [];
+      }
       // Fold the advisory secondaries: any-deny-wins, PDP sovereign (an allow secondary can NEVER relax a
       // PDP deny). `evaluateSecondaries` is fail-closed (a throwing/rejecting advisor => a synthetic deny).
       // SLICE-R9a: it is async (it may await a cross-language advisory), so this closure is `async` and
@@ -513,7 +562,14 @@ export async function buildBinDeps(
   opts: BuildBinOpts = {},
 ): Promise<{ deps: ExecMcpServerDeps; substrate: ExecCapableSandboxAdapter; sandboxId: string }> {
   const { substrate, sandboxSpec } = await buildSubstrate(fake, opts.substrate);
-  const created = await substrate.createSandbox(BIN_CONTEXT, sandboxSpec);
+  // SLICE-CAP6 — thread the bin's egress allowlist INTO the sandbox spec (deny-all default), so the
+  // substrate (the PRIMARY no-egress enforcement) gets the SAME policy the PDP egress fold uses. The REAL
+  // OpenShell adapter carries it toward its network policy; the Fake records it. One source, no skew.
+  const binEgressAllow = resolveBinEgressAllow(opts);
+  const created = await substrate.createSandbox(BIN_CONTEXT, {
+    ...sandboxSpec,
+    egressAllow: binEgressAllow,
+  });
   if (created.status !== "ok") {
     throw new Error(`buildBinDeps: sandbox create denied — ${created.reason}`);
   }

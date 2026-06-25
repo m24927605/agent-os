@@ -151,13 +151,16 @@ export function argSchemaToJsonSchema(argSchema: z.ZodType<unknown>): JsonSchema
   const required: string[] = [];
   for (const [key, field] of Object.entries(shape)) {
     // Unwrap a single ZodOptional layer (an optional field is derived but NOT required).
-    const fieldDef = (field as { _def?: unknown })._def as
+    type FieldDef =
       | {
           typeName?: string;
-          innerType?: { _def?: { typeName?: string; type?: { _def?: { typeName?: string } } } };
+          innerType?: { _def?: FieldDef };
+          // ZodEffects (.refine/.transform) carries its inner type under `schema`.
+          schema?: { _def?: FieldDef };
           type?: { _def?: { typeName?: string } };
         }
       | undefined;
+    const fieldDef = (field as { _def?: unknown })._def as FieldDef;
     let typeName = fieldDef?.typeName;
     let optional = false;
     // The (possibly unwrapped) def carrying the array element type — set when we descend into Optional.
@@ -165,6 +168,15 @@ export function argSchemaToJsonSchema(argSchema: z.ZodType<unknown>): JsonSchema
     if (typeName === "ZodOptional") {
       optional = true;
       resolvedDef = fieldDef?.innerType?._def;
+      typeName = resolvedDef?.typeName;
+    }
+    // SLICE-CAP6 — unwrap a single ZodEffects (`.refine(...)` runtime predicate, e.g. net.fetch's
+    // `z.string().min(1).refine(isAllowedFetchUrl)`). The advertised JSON-Schema is the INNER type's
+    // schema (a refined string advertises `{type:"string"}`); the refinement is an ENFORCEMENT detail (it
+    // can only NARROW what is accepted, never widen) — so the advertised schema stays faithful (no-drift:
+    // a value the schema claims valid may still be rejected by the refine, which is the safe direction).
+    if (typeName === "ZodEffects") {
+      resolvedDef = resolvedDef?.schema?._def;
       typeName = resolvedDef?.typeName;
     }
 
