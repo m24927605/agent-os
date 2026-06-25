@@ -45,10 +45,18 @@
 import { pathToFileURL } from "node:url";
 import type { AppendTransport } from "../../../../../audit/index.js";
 import type { CommitAppender } from "../../../../../commitgate/index.js";
-import { type CostGate, InMemoryCostGate } from "../../../../../cost/index.js";
+import { type CostGate, InMemoryCostGate, failClosedCostGate } from "../../../../../cost/index.js";
+import {
+  type PolicyDecision,
+  type PolicyRequest,
+  type SecondaryPolicyAdapter,
+  combineDecisions,
+  evaluateSecondaries,
+} from "../../../../../policy/index.js";
 import type { TenantBinding } from "../../../../../tenant/index.js";
 import { authorizeToolInvoke } from "../../../../../tools/index.js";
 import { createPartitionedIngestSink, createRpcAppendTransport } from "../../../../ingest/index.js";
+import { integrationsFromEnv } from "../../../../spendguard/index.js";
 import type { ExecCapableSandboxAdapter } from "../../../../substrate/index.js";
 import { FakeSandboxAdapter } from "../../../../substrate/index.js";
 import { makeArgsCredentialScreen } from "../args-credential-screen.js";
@@ -107,6 +115,22 @@ export interface BuildBinOpts {
   readonly substrate?: ExecCapableSandboxAdapter;
   /** Test hook invoked the moment the REAL effect starts (proves commit-before-effect order). */
   readonly onEffect?: () => void;
+  /**
+   * SLICE-SETUP1a — inject the cost gate (a TEST seam: a Fake always-deny / throwing gate proves the bin
+   * GATES the autonomous path WITHOUT a real SpendGuard sidecar). The LIVE bin omits this and the gate is
+   * derived from env via `integrationsFromEnv(process.env).costGate` (SPENDGUARD_* in the descriptor's
+   * `mcp_servers.env`) — falling back to the byte-identical `InMemoryCostGate` when unset. Always wrapped
+   * by `failClosedCostGate` (a thrown reserve/commit becomes a structured deny, never an escaping throw).
+   */
+  readonly costGate?: CostGate;
+  /**
+   * SLICE-SETUP1a — inject advisory secondaries (a TEST seam: an always-deny / always-allow secondary
+   * proves the bin folds them via `combineDecisions` exactly as the three surfaces do — advisory,
+   * any-deny-wins, PDP sovereign). The LIVE bin omits this and uses `integrationsFromEnv().secondaries`
+   * (absent => []). Env alone cannot carry a code object, so an AGT-style endpoint-backed secondary is a
+   * follow-up; this is the plumbing that lets it land without a bin rewrite.
+   */
+  readonly secondaries?: readonly SecondaryPolicyAdapter[];
 }
 
 /**
@@ -184,12 +208,32 @@ export function buildBinAppender(
   return { append: (event) => sink(event as never) };
 }
 
-/** Assemble the full EXEC4a governed deps over a (pre-provisioned) ephemeral sandbox + a WORM appender. */
+/**
+ * Assemble the full EXEC4a governed deps over a (pre-provisioned) ephemeral sandbox + a WORM appender.
+ *
+ * SLICE-SETUP1a — the bin's governance is now wired FROM ENV so the IT1 SpendGuard/AGT turnkey gates the
+ * AUTONOMOUS Hermes path (Hermes -> this spawned bin -> `runGovernedToolCall`), not just the three
+ * surfaces. `integrationsFromEnv(process.env)` reads the descriptor's `mcp_servers.env`:
+ *   - costGate: `failClosedCostGate(opts.costGate ?? integ.costGate ?? new InMemoryCostGate(...))`.
+ *     SPENDGUARD_* set => a SpendGuardCostGate gates the budget (grpc-js LAZY: constructing it connects to
+ *     nothing); unset => the byte-identical InMemoryCostGate. `opts.costGate` is a TEST seam (a Fake gate,
+ *     no sidecar). `failClosedCostGate` wraps WHICHEVER gate so a thrown reserve/commit -> structured deny.
+ *   - authorize: `combineDecisions(<PDP decision>, evaluateSecondaries(secondaries, <req>))`. The PDP
+ *     (`authorizeToolInvoke`) stays the SOLE deny authority; advisory secondaries can only NARROW (any-
+ *     deny-wins), never relax. `secondaries` defaults to [] => `combineDecisions(pdp, []) === pdp`
+ *     (byte-identical). This is the SAME fold the three surfaces use — the bin path's governance == them.
+ *
+ * DEFAULT BYTE-IDENTICAL: no SPENDGUARD_* env + no opts => InMemoryCostGate (failClosedCostGate is
+ * transparent over a non-throwing gate) + `combineDecisions(pdp, [])` === the PDP decision. FAKE mode
+ * (`fake === true`, the EXEC4c-a subprocess test) NEVER reads env integrations at all — it is InMemory +
+ * [] regardless of ambient SPENDGUARD_*, so the subprocess test is byte-identical by construction.
+ */
 function buildDeps(
+  fake: boolean,
   substrate: ExecCapableSandboxAdapter,
   sandboxId: string,
   appender: CommitAppender<unknown, unknown>,
-  onEffect: (() => void) | undefined,
+  opts: BuildBinOpts,
 ): ExecMcpServerDeps {
   const registry = seedRegistry();
   const allowRules = [
@@ -200,7 +244,21 @@ function buildDeps(
       tenantId: BIN_CONTEXT.tenantId,
     },
   ];
-  const cost: CostGate = new InMemoryCostGate(1_000_000);
+  // SLICE-SETUP1a — derive integrations FROM ENV (descriptor `mcp_servers.env`) in REAL mode ONLY. Throws
+  // fail-closed on a PARTIAL SpendGuard config (IT1b). FAKE mode skips the env read entirely so the
+  // subprocess test stays byte-identical (InMemory + []) regardless of any ambient SPENDGUARD_* on the
+  // developer's machine — FAKE never reaches a sidecar, so it must never honor SpendGuard env.
+  const integ: { costGate?: CostGate; secondaries?: readonly SecondaryPolicyAdapter[] } = fake
+    ? {}
+    : integrationsFromEnv(process.env);
+  // The cost gate that GATES the autonomous path: injected (test) | env (SpendGuard) | InMemory default,
+  // ALWAYS wrapped fail-closed (a thrown reserve/commit from an external gate -> a structured deny@cost).
+  const cost: CostGate = failClosedCostGate(
+    opts.costGate ?? integ.costGate ?? new InMemoryCostGate(1_000_000),
+  );
+  // Advisory secondaries folded into authorize (advisory, any-deny-wins, PDP sovereign). [] => no-op.
+  const secondaries: readonly SecondaryPolicyAdapter[] =
+    opts.secondaries ?? integ.secondaries ?? [];
   return {
     substrate,
     sandboxId,
@@ -209,26 +267,37 @@ function buildDeps(
     screen: makeArgsCredentialScreen(),
     authorize: (tc) => {
       const c = tc.context as typeof BIN_CONTEXT;
-      const decision = authorizeToolInvoke(
-        {
-          requestId: c.requestId,
-          tenantId: c.tenantId,
-          projectId: c.projectId,
-          taskId: c.taskId,
-          actorId: c.actorId,
-          action: "tool:invoke",
-          resource: tc.tool,
-        },
-        registry,
-        allowRules,
+      // The SAME request object fed to BOTH the PDP and the advisory secondaries (a faithful fold — the
+      // advisors see EXACTLY what the PDP saw). For `tool:invoke`, `resource` IS the tool name. Built as a
+      // plain structural object: `authorizeToolInvoke` takes `unknown` and fail-closed `safeParse`s it
+      // (deny-by-default on a malformed shape), so we keep the bin's existing fail-closed PDP semantics
+      // unchanged rather than `.parse`-throwing on the branded-id schema.
+      const req = {
+        requestId: c.requestId,
+        tenantId: c.tenantId,
+        projectId: c.projectId,
+        taskId: c.taskId,
+        actorId: c.actorId,
+        action: "tool:invoke",
+        resource: tc.tool,
+      };
+      // PDP = the SOLE deny authority (deny-by-default for an unregistered tool). It is a `PolicyDecision`.
+      const pdp: PolicyDecision = authorizeToolInvoke(req, registry, allowRules);
+      // Fold the advisory secondaries: any-deny-wins, PDP sovereign (an allow secondary can NEVER relax a
+      // PDP deny). `evaluateSecondaries` is fail-closed (a throwing advisor => a synthetic deny). The
+      // structural `req` satisfies `PolicyRequest` shape; the branded-id cast is the same object the PDP
+      // just validated.
+      const combined = combineDecisions(
+        pdp,
+        evaluateSecondaries(secondaries, req as unknown as PolicyRequest),
       );
-      return { effect: decision.effect, reason: decision.reason };
+      return { effect: combined.effect, reason: combined.reason };
     },
     cost,
     estimateTokens: () => 10,
     appender,
     context: BIN_CONTEXT,
-    ...(onEffect !== undefined ? { onEffect } : {}),
+    ...(opts.onEffect !== undefined ? { onEffect: opts.onEffect } : {}),
   };
 }
 
@@ -255,7 +324,7 @@ export async function buildBinDeps(
     throw new Error(`buildBinDeps: sandbox start denied — ${started.reason}`);
   }
   const appender = buildBinAppender(fake, opts);
-  const deps = buildDeps(substrate, sandboxId, appender, opts.onEffect);
+  const deps = buildDeps(fake, substrate, sandboxId, appender, opts);
   return { deps, substrate, sandboxId };
 }
 
