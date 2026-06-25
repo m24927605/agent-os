@@ -34,6 +34,7 @@ import { redactSecrets } from "../../../../../audit/index.js";
 import type { CommitAppender } from "../../../../../commitgate/index.js";
 import type { CostGate } from "../../../../../cost/index.js";
 import {
+  type ApprovalOutcome,
   type AuthorizeDecision,
   type GovernedToolCallDeps,
   type MaybePromise,
@@ -226,6 +227,14 @@ export interface ExecMcpServerDeps {
    * await here — the MCP server only forwards the seam.
    */
   readonly authorize: (toolCall: BoundExecCall) => MaybePromise<AuthorizeDecision>;
+  /**
+   * OPTIONAL pre-effect approval seam (deps.approve / SLICE-CAP4a). Forwarded VERBATIM into
+   * `runGovernedToolCall`, which consults it ONLY when the PDP allow carries `requiresApproval === true`
+   * (otherwise NEVER called — the stage is skipped, byte-identical). SLICE-CAP4b wires the bin's budget
+   * approver here; absent => a tool that declared it needs approval is denied@approval (fail-closed). The
+   * 14 seed tools are all `requiresApproval:false`, so an absent approve is byte-identical for them.
+   */
+  readonly approve?: (toolCall: BoundExecCall) => MaybePromise<ApprovalOutcome>;
   /** Budget hard-cap (deps.cost). */
   readonly cost: CostGate;
   /** Token estimator (deps.estimateTokens). */
@@ -351,6 +360,10 @@ async function handleToolsCall(
   const governedDeps: GovernedToolCallDeps<BoundExecCall, unknown> = {
     screen: deps.screen,
     authorize: deps.authorize,
+    // SLICE-CAP4b — forward the OPTIONAL approve seam VERBATIM. `runGovernedToolCall` consults it ONLY
+    // when the PDP allow carries `requiresApproval === true` (the stage is skipped otherwise). Present-only
+    // so the 14 requiresApproval:false seed tools stay byte-identical (the stage is never reached for them).
+    ...(deps.approve !== undefined ? { approve: deps.approve } : {}),
     cost: deps.cost,
     estimateTokens: deps.estimateTokens,
     appender: deps.appender,
