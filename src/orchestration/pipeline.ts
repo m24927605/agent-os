@@ -2,7 +2,8 @@
  * Governed intent->effect pipeline — the composition layer that ties the vendor-neutral ports into one
  * ordered, fail-closed flow for a single brain-proposed ToolCall:
  *
- *   screen (credential-blind) -> authorize (PDP sole deny authority) -> cost.reserve (budget hard-cap)
+ *   screen (credential-blind) -> authorize (PDP sole deny authority) -> approval (fail-closed, only when
+ *   the PDP allow carries requiresApproval) -> cost.reserve (budget hard-cap)
  *   -> commit-before-effect (append AuditEvent, await receipt) -> effect -> cost.commit
  *
  * Each gate SHORT-CIRCUITS to a denied outcome; the effect runs ONLY after every gate passes AND the
@@ -36,8 +37,29 @@ export interface GovernedCall {
 }
 
 export type ScreenOutcome = { ok: true } | { ok: false; reason: string };
-export type AuthorizeDecision = { effect: "allow" | "deny"; reason: string };
+/**
+ * The PDP decision. `requiresApproval?` (SLICE-CAP4a) is an OPTIONAL, additive flag the composition
+ * root's authorize closure will set from the tool manifest (`requiresApproval`) in CAP4b — the manifest
+ * schema FORCES `sideEffect:"destructive" => requiresApproval:true`. When `=== true`, the pipeline
+ * enforces a fail-CLOSED APPROVAL stage (a SECOND, pre-effect authorization) AFTER this allow and BEFORE
+ * cost.reserve. Absent / `false` => the stage is SKIPPED (byte-identical to pre-CAP4a; the 14 existing
+ * tools are all `requiresApproval:false`). This flag is PDP-SUBORDINATE: it can only ADD a gate on an
+ * allow — it can never appear on (or relax) a `deny`, which short-circuits at the policy stage first.
+ */
+export type AuthorizeDecision = {
+  effect: "allow" | "deny";
+  reason: string;
+  readonly requiresApproval?: boolean;
+};
 export type EffectResult = { ok: boolean; detail?: string; tokensUsed?: number };
+
+/**
+ * The outcome of the injected approval seam (SLICE-CAP4a). `"approved"` is the ONLY value that lets the
+ * pipeline proceed to cost/commit/effect; anything else (including a throw/reject) is fail-closed to
+ * `denied@approval`. The composition root wires the real policy in CAP4b (Personal pre-authorized-budget
+ * auto-approve; Enterprise non-interactive maker-checker) — CAP4a only defines the surface-agnostic seam.
+ */
+export type ApprovalOutcome = { status: "approved" | "denied"; reason: string };
 
 export interface GovernedToolCallDeps<TC extends GovernedCall, R> {
   /** Credential-blind / structural screen of the brain's proposed call. */
@@ -49,6 +71,14 @@ export interface GovernedToolCallDeps<TC extends GovernedCall, R> {
    * the absent/sync path is behaviorally byte-identical. A THROW or a promise REJECTION is fail-closed.
    */
   readonly authorize: (toolCall: TC) => MaybePromise<AuthorizeDecision>;
+  /**
+   * OPTIONAL pre-effect approval seam (SLICE-CAP4a). Consulted ONLY when the PDP allow carries
+   * `requiresApproval === true` (otherwise NEVER called — the stage is skipped, byte-identical). Like
+   * `authorize` it is `MaybePromise` (a sync auto-approve OR an async maker-checker). FAIL-CLOSED: if a
+   * decision REQUIRES approval but this seam is ABSENT, the call is denied (a tool that declared it needs
+   * approval must NEVER run unapproved); a non-`"approved"` outcome OR a throw/reject is denied too.
+   */
+  readonly approve?: (toolCall: TC) => MaybePromise<ApprovalOutcome>;
   readonly cost: CostGate;
   readonly estimateTokens: (toolCall: TC) => number;
   /** Append-before-effect appender (commitgate). */
@@ -57,7 +87,7 @@ export interface GovernedToolCallDeps<TC extends GovernedCall, R> {
   readonly effect: (toolCall: TC) => Promise<EffectResult>;
 }
 
-export type GovernedStage = "screen" | "policy" | "cost" | "commit";
+export type GovernedStage = "screen" | "policy" | "approval" | "cost" | "commit";
 
 /**
  * The outcome of settling the REAL cost AFTER the effect ran (`cost.commit`). Surfaced on every
@@ -105,6 +135,39 @@ export async function runGovernedToolCall<TC extends GovernedCall, R>(
   }
   if (decision.effect === "deny") {
     return { status: "denied", stage: "policy", reason: decision.reason };
+  }
+
+  // 2b) approval (SLICE-CAP4a) — a SECOND, pre-effect authorization that runs ONLY when the PDP allow
+  // carries `requiresApproval === true`. It is PDP-SUBORDINATE: it cannot relax a deny (that already
+  // short-circuited at policy above), it can only ADD a gate on an allow. FAIL-CLOSED at every branch:
+  //   - requiresApproval !== true              -> SKIP (byte-identical: the 14 existing tools, all false);
+  //   - requiresApproval === true, no `approve` -> denied@approval (a tool that DECLARED it needs approval
+  //                                                must NEVER run unapproved — close the manifest fail-open);
+  //   - approve resolves non-"approved"         -> denied@approval (STATIC reason; the outcome reason is
+  //                                                NOT forwarded raw — it may carry untrusted text);
+  //   - approve THROWS / REJECTS                -> denied@approval (STATIC reason; error message NEVER
+  //                                                leaks — mirrors the R9a authorize reject->deny pattern).
+  // Cost.reserve, the commit-before-effect append, and the effect do NOT run unless approval passes.
+  if (decision.requiresApproval === true) {
+    if (deps.approve === undefined) {
+      return {
+        status: "denied",
+        stage: "approval",
+        reason: "approval required but no approver wired (deny-by-default)",
+      };
+    }
+    try {
+      const approval = await deps.approve(toolCall);
+      if (approval.status !== "approved") {
+        return { status: "denied", stage: "approval", reason: "approval denied (deny-by-default)" };
+      }
+    } catch {
+      return {
+        status: "denied",
+        stage: "approval",
+        reason: "approval failed closed (deny-by-default)",
+      };
+    }
   }
 
   // 3) cost reserve (budget hard-cap) — before the audit/effect

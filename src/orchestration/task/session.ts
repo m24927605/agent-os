@@ -41,7 +41,10 @@ export const StepOutcome = z.discriminatedUnion("status", [
   z
     .object({
       status: z.literal("denied"),
-      stage: z.enum(["screen", "policy", "cost", "commit"]),
+      // Mirrors P2-I `GovernedStage`: `"approval"` added in SLICE-CAP4a so a fail-closed
+      // `denied@approval` step is faithfully persisted (the schema must not reject a stage the pipeline
+      // can emit, or the denial record itself would fail closed at the ledger boundary).
+      stage: z.enum(["screen", "policy", "approval", "cost", "commit"]),
       reason: nonEmpty,
     })
     .strict(),
