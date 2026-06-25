@@ -11,3 +11,7 @@ export * from "./dedup.js";
 // `buildExecRunProjection` via this barrel (never a deep import). `GovernanceProjectionSchema` is the
 // same schema `types.ts` folds into `PolicyRequest.governanceProjection`.
 export * from "./governance-projection.js";
+// SLICE-CAP5 — the vendor-neutral egress-allowlist PRIMITIVE: `matchEgressAllow` (the single source of
+// truth the inference second-chokepoint gate re-uses) + `egressDecisionForProjection` (the PDP-side
+// defense-in-depth decision the bin's authorize folds in for a tool whose projection carries networkHosts).
+export * from "./egress-allowlist.js";

@@ -37,6 +37,21 @@ export type SandboxLifecycleEvent = z.infer<typeof SandboxLifecycleEvent>;
 export interface SandboxSpec {
   readonly image?: string;
   readonly labels?: Readonly<Record<string, string>>;
+  /**
+   * SLICE-CAP5 — the per-sandbox OUTBOUND EGRESS ALLOWLIST (deny-all by default). The exact, vendor-
+   * neutral host list a sandbox is permitted to reach. OPTIONAL: absent OR empty => DENY-ALL (the
+   * `matchEgressAllow` primitive fail-closes on an empty allowlist), so every existing `SandboxSpec`
+   * literal (none carry `egressAllow`) is BYTE-IDENTICAL — absent maps to today's behavior (no network
+   * tool exists yet, so deny-all is the status quo).
+   *
+   * HONEST BOUNDARY: the REAL no-egress enforcement is a DEPLOY FACT (the OpenShell network policy). A
+   * substrate adapter carries this allowlist toward its network-policy configuration BEST-EFFORT; where
+   * the substrate's create request has NO field to carry it (the pinned OpenShell `CreateSandboxRequest`
+   * proto subset does NOT), the adapter treats it as DOCUMENTED DEPLOY-INTENT (see the OpenShell adapter
+   * `createSandbox`), never fabricating a wire field. The substrate seal is PRIMARY; the PDP egress
+   * decision (`egressDecisionForProjection`) is the in-repo, testable defense-in-depth layer.
+   */
+  readonly egressAllow?: readonly string[];
 }
 
 export type AdapterResult =
