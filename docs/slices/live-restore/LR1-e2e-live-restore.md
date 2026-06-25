@@ -35,10 +35,13 @@
 - non-vacuity(在測內,不改生產碼):若可,注入一個「截斷式」假 appender 對照真 runRestore 證 forward-only 斷言會抓到差異;或斷言 pre-restore 序號計數 restore 前後單調不減。
 - `e2e:live-restore` 不在 verify;ungated vitest → skip;sh 無 kernel → BLOCKED。
 
-## (4) Definition of Done（待實測填）
-- [ ] RED → verify exit 0(gated 測 skip-when-ungated、不在 verify;既有全綠;depcruise/secret-scan clean;無新依賴)。
-- [ ] **LIVE 跑 `pnpm run e2e:live-restore` PASS**(對真 kernel:restore-to-S 重建正確、forward-append 兩 RestoreEvent、不截斷、admin-deny、fail-closed)。
-- [ ] 獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測)
+- [x] **DONE（merged)**:gated `src/orchestration/restore.live-kernel.e2e.test.ts`(`describe.skip` 無 `AGENTOS_LIVE_KERNEL_ENDPOINT`)+ `scripts/e2e-live-restore.sh`(go build + spawn kernel + 跑測 + teardown;BLOCKED 非零不假綠)+ package.json `e2e:live-restore`(不在 verify)。
+  - **⚠️ 修正過一個 harness 設計 bug**(coordinator 代跑時發現、診斷、重寫):kernel ingest appender 是 **client 端 per-source 序號**(dedup keys (sourceId,sequence));原 harness 把 RestoreEvents 發到第二 source(`${sourceId}-restore`)→ 序號從 0 重起 → 插進全-source ListEntries 讀回 → `replay` non-monotonic throw → restore abort;且 3 測共用 chain 用絕對 marker 計數 → 互相干擾。**修法**:(i) RestoreEvents 用**同一個 appender 實例**(序號續 M+1,M+2);(ii) 以 `requestId` 前綴 `req-<sourceId>-` 隔離每測事件後再 fold/斷言(LogEntry 無 sourceId)。
+  - RED → verify **exit 0**(restore.live 測 gated-skip;1275 passed + 29 skipped;depcruise/secret-scan clean;無新依賴;**production restore.ts/replay.ts/snapshot.ts 未動**)。
+  - **🟢 LIVE PASS**:`pnpm run e2e:live-restore` 對真 Go kernel **3/3**(restore-to-S replay 重建正確〔content-hash 比對〕、forward-append 兩 RestoreEvent @ M+1/M+2、forward-only 不截斷〔per-(seq,entryHash) fingerprint〕、admin-deny abort@validating、fail-closed abort@rebuilding 無 RestoreCompleted),"restore-to-S verified on the REAL kernel chain"。
+- [x] **獨立 Opus 4.8 review PASS,零 finding**:reviewer **自己也 live 跑了 3/3** + 兩個 mutation(破 mine()→fail;改回第二 source→重現原 bug→fail)證實修正因果必要 + 斷言 load-bearing;harness 忠實(真 transport+kernel+ListEntries+runRestore,無 mock);gated 不假綠;production 未動。
+- **snapshot restore 由「單元建好」升至「LIVE-PROVEN against the real kernel」,與 AGT/kernel 同級。**
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 test + script + 可能的 harness export)。
