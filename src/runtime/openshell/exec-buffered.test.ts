@@ -155,6 +155,28 @@ describe("makeOpenShellExecCapable — ExecOutcome ok -> buffered ExecResult ok 
     expect(t.execCalls).toHaveLength(1);
     expect(t.execCalls[0]?.environment).toEqual({ TOKEN: "openshell:resolve:env:v3_TOKEN" });
   });
+
+  // SLICE-CAP1 — the END-TO-END stdin link. `exec.write_file` delivers file content as stdin BYTES
+  // (`tee -- <path>`). The wrapper's `optsFromSpec` MUST forward `spec.stdin` -> ExecSandboxOpts.stdin ->
+  // (ExecOptsSchema accepts + 8 MiB caps) -> the underlying adapter -> the recorded ExecSandboxRequest.stdin.
+  // NON-VACUITY: without the one-line forward in optsFromSpec, spec.stdin is DROPPED and the recorded RPC
+  // carries NO stdin -> `tee` would write an EMPTY file -> this assertion flips RED.
+  it("forwards spec.stdin -> the OpenShell ExecSandboxRequest.stdin bytes (write_file's content path)", async () => {
+    const t = execTransport({ execEvents: [exitEvent(0)] });
+    const adapter = new OpenShellSandboxAdapter(t);
+    const wrapper = makeOpenShellExecCapable(adapter);
+    const id = await createMapped(adapter);
+
+    const content = "file body line 1\nline 2\n";
+    const stdin = enc(content);
+    await wrapper.execSandbox(CTX, id, { argv: ["tee", "--", "/tmp/out.txt"], stdin });
+
+    expect(t.execCalls).toHaveLength(1);
+    // The stdin bytes reached the RPC request VERBATIM (not dropped by the wrapper).
+    expect(t.execCalls[0]?.stdin).toEqual(stdin);
+    // argv carries the program/path; the content is NOT in argv (it travels as stdin bytes).
+    expect(t.execCalls[0]?.command).toEqual(["tee", "--", "/tmp/out.txt"]);
+  });
 });
 
 describe("makeOpenShellExecCapable — fail-closed mapping (denied -> { ok:false }, NEVER ok / exit 0)", () => {

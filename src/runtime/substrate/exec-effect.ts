@@ -70,6 +70,12 @@ export interface ExecToolCall {
     readonly argv: readonly string[];
     readonly env?: Readonly<Record<string, string>>;
     readonly timeoutMs?: number;
+    /**
+     * OPTIONAL stdin payload (raw bytes), delivered to the command's stdin (e.g. `exec.write_file`'s
+     * file content via `tee -- <path>` — never argv/shell). Screened by the credential-blind INPUT
+     * guard below: a secret-shaped stdin is DENIED fail-closed and `execSandbox` is NEVER called.
+     */
+    readonly stdin?: Uint8Array;
   };
 }
 
@@ -98,6 +104,7 @@ export function makeExecEffect(
   return async (toolCall: ExecToolCall): Promise<EffectResult> => {
     try {
       const env = toolCall.args?.env;
+      const stdin = toolCall.args?.stdin;
 
       // (1) CREDENTIAL-BLIND INPUT — reject a raw secret in any env VALUE BEFORE calling execSandbox.
       // Fail-closed: a detector that throws is treated as "secret present" (deny), never let through.
@@ -119,10 +126,32 @@ export function makeExecEffect(
         }
       }
 
+      // (1b) CREDENTIAL-BLIND INPUT (stdin) — content delivered on stdin (e.g. exec.write_file's file
+      // content) is screened too (defense-in-depth: the args screen already saw it as a declared arg).
+      // Decode the bytes to a string and run the SAME injected detector; a secret-shaped stdin DENIES
+      // fail-closed and execSandbox is NEVER called. Only runs when stdin is present — the no-stdin path
+      // is byte-identical to before. Fail-closed: a decode/detector throw is treated as "secret present".
+      if (stdin !== undefined) {
+        let flagged: boolean;
+        try {
+          flagged = detectSecret(new TextDecoder().decode(stdin));
+        } catch {
+          flagged = true;
+        }
+        if (flagged) {
+          return {
+            ok: false,
+            detail:
+              "credential-blind: raw secret in exec stdin — content must not carry a literal secret",
+          };
+        }
+      }
+
       const spec: ExecCommandSpec = {
         argv: toolCall.args.argv,
         ...(env !== undefined ? { env } : {}),
         ...(toolCall.args.timeoutMs !== undefined ? { timeoutMs: toolCall.args.timeoutMs } : {}),
+        ...(stdin !== undefined ? { stdin } : {}),
       };
 
       const result = await substrate.execSandbox(toolCall.context, sandboxId, spec);

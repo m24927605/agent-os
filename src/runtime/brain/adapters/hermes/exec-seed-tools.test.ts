@@ -135,9 +135,10 @@ async function makeServerKit(): Promise<ServerKit> {
   return { deps, substrate, appendCalls, effectOrder };
 }
 
-// The full seed set after HDI2b — sorted. EXACT (a tool removed/added wrongly flips this). SLICE-HDI2b
-// adds the ONE bounded general exec tool `exec.run` (a full argv vector, run DIRECTLY — never a shell
-// string), so the read-only-safe HDI2a set of 7 becomes 8. `exec.run` is now a REGISTERED bounded tool.
+// The full seed set after CAP1 — sorted. EXACT (a tool removed/added wrongly flips this). SLICE-HDI2b
+// added the ONE bounded general exec tool `exec.run` (a full argv vector, run DIRECTLY — never a shell
+// string). SLICE-CAP1 adds the FIRST capability-breadth tool `exec.write_file` (in-sandbox file write —
+// argv ["tee","--",path], content via stdin bytes, never argv/shell), so the set of 8 becomes 9.
 const FULL_SEED_SET = [
   "exec.cat",
   "exec.echo",
@@ -147,6 +148,7 @@ const FULL_SEED_SET = [
   "exec.pwd",
   "exec.run",
   "exec.wc",
+  "exec.write_file",
 ];
 
 // ==================================================================================================
@@ -155,7 +157,7 @@ const FULL_SEED_SET = [
 //           NON-VACUITY: the exact-set assertion flips RED if a tool were removed or an extra advertised.
 // ==================================================================================================
 describe("HDI2a-1 tools/list advertises the full read-only seed set, each schema-derived", () => {
-  it("returns exactly the 8 bounded seed tools, each with a DERIVED inputSchema, nothing else", async () => {
+  it("returns exactly the 9 bounded seed tools, each with a DERIVED inputSchema, nothing else", async () => {
     const { deps } = await makeServerKit();
     const server = createExecMcpServer(deps);
 

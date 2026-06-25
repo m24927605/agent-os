@@ -6,8 +6,10 @@
  * The OpenShell adapter ALREADY owns the hard parts (it is NOT touched here): `execSandbox(...cmd, opts)`
  * drives the `ExecSandbox` server-stream, accumulates stdout/stderr, converges on the terminal exit, and
  * is already FAIL-CLOSED + capped — an 8 MiB byte-cap overflow DENIES (never OOM, never a truncated
- * success) and a wall-clock deadline that elapses before a terminal exit DENIES (never a fabricated exit
- * 0). This wrapper is a pure SHAPE adapter; it adds NO new fail-closed logic and removes none.
+ * success), a wall-clock deadline that elapses before a terminal exit DENIES (never a fabricated exit 0),
+ * and an over-8-MiB `stdin` payload DENIES at `ExecOptsSchema` (SLICE-CAP1). This wrapper is a pure SHAPE
+ * adapter; it adds NO new fail-closed logic and removes none — it only forwards the port spec's fields
+ * (env / timeoutMs / stdin) into the OpenShell opts the adapter already validates and forwards.
  *
  * The reconcile is two collisions:
  *   1. SHAPE — OpenShell exposes a `{status:"ok"|"denied"}` union (`OsExecOutcome`) carrying its OWN
@@ -49,8 +51,7 @@ import type {
 const decode = (bytes: Uint8Array): string => new TextDecoder("utf-8").decode(bytes);
 
 /**
- * Translate a port `ExecCommandSpec` into the OpenShell `ExecSandboxOpts`. Only the two fields the port
- * carries are mapped:
+ * Translate a port `ExecCommandSpec` into the OpenShell `ExecSandboxOpts`. The port fields are mapped:
  *   • `spec.env`        -> `ExecSandboxOpts.env`         (placeholder-only — raw secrets are rejected
  *                                                         UPSTREAM by makeExecEffect; the OpenShell
  *                                                         adapter ALSO re-checks the credential marker).
@@ -58,6 +59,12 @@ const decode = (bytes: Uint8Array): string => new TextDecoder("utf-8").decode(by
  *                                                         exec stream; expiry before a terminal exit =>
  *                                                         deny). `timeoutSeconds` (the in-sandbox command
  *                                                         timeout) is left unset.
+ *   • `spec.stdin`      -> `ExecSandboxOpts.stdin`       (SLICE-CAP1 — the byte payload streamed to the
+ *                                                         command's stdin; e.g. `exec.write_file`'s file
+ *                                                         CONTENT via `tee -- <path>`, never argv/shell.
+ *                                                         The OpenShell adapter's `ExecOptsSchema` accepts
+ *                                                         + 8 MiB-caps it fail-closed (oversized => deny)
+ *                                                         and forwards it to `ExecSandboxRequest.stdin`).
  * The OpenShell adapter's own resource caps (the 8 MiB `maxOutputBytes` default, the deadline default)
  * are left at their defaults — the port-level 64KB cap is enforced separately in makeExecEffect.
  */
@@ -65,6 +72,7 @@ function optsFromSpec(spec: ExecCommandSpec): ExecSandboxOpts {
   return {
     ...(spec.env !== undefined ? { env: spec.env } : {}),
     ...(spec.timeoutMs !== undefined ? { deadlineMs: spec.timeoutMs } : {}),
+    ...(spec.stdin !== undefined ? { stdin: spec.stdin } : {}),
   };
 }
 

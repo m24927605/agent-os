@@ -231,10 +231,60 @@ export const runBinding: ExecToolBinding = {
   governanceProjector: (a) => buildExecRunProjection({ argv: (a as { argv: string[] }).argv }),
 };
 
+// ------------------------------------------------------------------------------------------------
+// SLICE-CAP1 — the FIRST capability-breadth tool: an IN-SANDBOX FILE WRITE. The clean way to write a
+// file without the content EVER touching argv/shell is `tee -- <path>` with the content delivered on
+// STDIN as bytes (the `toStdin?` binding seam). argv is ALWAYS exactly ["tee","--",<path>] (a pure
+// string vector — the `--` literal-guard, mirroring grep's `-e`, stops a `-`-leading path being parsed
+// as a tee flag); the content is STDIN BYTES, so `"; rm -rf /"` is written as DATA, never interpreted.
+//
+// `sideEffect:"write"` (it mutates the ephemeral sandbox fs), `idempotent:false`, `requiresApproval:false`
+// (same posture as exec.run: the boundary is the governance pipeline + the SEALED ephemeral zero-credential
+// no-egress sandbox, NOT an interactive gate — and the write lands ONLY on the ephemeral sandbox fs,
+// destroyed with the sandbox; it is NOT host-persistent — that is a later slice with a write-target
+// allowlist). The content is SCREENED (credential-blind) but NOT projected to the AGT: the
+// governanceProjector projects only the argv (tee/--/path = the write TARGET), never the content — the
+// screen governs the content. `apply_patch` is deferred to a later slice.
+// ------------------------------------------------------------------------------------------------
+
+/** A valid `exec.write_file` ToolManifest — in-sandbox file write (content via stdin, never argv/shell). */
+export const writeFileManifest = {
+  name: "exec.write_file",
+  version: "1.0.0",
+  description: "write a file in the sandbox (content delivered via stdin, never argv/shell)",
+  action: "tool:invoke",
+  resourcePattern: "exec/write_file",
+  sideEffect: "write" as const,
+  idempotent: false,
+  requiresApproval: false,
+  bundleRefOnly: false,
+};
+
+/**
+ * exec.write_file binding: argvPrefix ["tee","--"], strict {path, content}, toArgv -> [path] (content is
+ * NOT in argv), toStdin -> the content's UTF-8 bytes. So argv is the pure vector ["tee","--",<path>] and
+ * the content travels as STDIN BYTES — never a shell string, never an argv element. The `--` stops a
+ * `-`-leading path being parsed as a tee flag; `path.min(1)` rejects an empty path; `.strict()` rejects
+ * any smuggled extra key (e.g. an `argv`/`stdin` second channel).
+ */
+export const writeFileBinding: ExecToolBinding = {
+  argvPrefix: ["tee", "--"],
+  argSchema: z.object({ path: z.string().min(1), content: z.string() }).strict(),
+  toArgv: (a) => [(a as { path: string }).path],
+  toStdin: (a) => new TextEncoder().encode((a as { content: string }).content),
+  // SLICE-CAP1 — exec.write_file is EFFECTFUL (sideEffect:"write"), so it declares a governance projector:
+  // a thin wrapper that builds the R9b-1 credential-blind projection over the tool's ARGV (tee/--/path =
+  // the write TARGET). The content is NOT projected (credential-blind: the screen governs the content;
+  // the AGT advisory sees the target, not the bytes). `buildProjectionForCall` only calls this AFTER
+  // `argSchema.safeParse` succeeds, so `a` is the validated `{ path, content }`.
+  governanceProjector: (a) =>
+    buildExecRunProjection({ argv: ["tee", "--", (a as { path: string }).path] }),
+};
+
 /**
  * A fresh ToolRegistry holding the seed exec tools (so authorize can admit only these names).
  * SLICE-HDI2a grew this from the two EXEC3a tools to the read-only-safe set; SLICE-HDI2b adds the ONE
- * bounded general exec tool `exec.run`.
+ * bounded general exec tool `exec.run`; SLICE-CAP1 adds the FIRST capability-breadth tool `exec.write_file`.
  */
 export function seedRegistry(): ToolRegistry {
   const r = new ToolRegistry();
@@ -246,6 +296,7 @@ export function seedRegistry(): ToolRegistry {
   r.register(wcManifest);
   r.register(grepManifest);
   r.register(runManifest);
+  r.register(writeFileManifest);
   return r;
 }
 
@@ -260,5 +311,6 @@ export function seedBindings(): ReadonlyMap<string, ExecToolBinding> {
     ["exec.wc", wcBinding],
     ["exec.grep", grepBinding],
     ["exec.run", runBinding],
+    ["exec.write_file", writeFileBinding],
   ]);
 }

@@ -164,9 +164,10 @@ describe("EXEC4a — RED1 tools/list advertises exactly the bounded seed tools, 
     ).tools;
 
     // EXACTLY the registered bounded seed tools, nothing else (no fs/terminal/raw-argv/shell/command
-    // tool). SLICE-HDI2a grew the read-only-safe set from 2 to 7; SLICE-HDI2b adds the ONE bounded
-    // general exec tool `exec.run` (a full argv vector, never a shell string) -> 8. The invariant is
-    // unchanged — ONLY the registered bounded seed tools are advertised, nothing unexpected.
+    // tool). SLICE-HDI2a grew the read-only-safe set from 2 to 7; SLICE-HDI2b added the ONE bounded
+    // general exec tool `exec.run` (a full argv vector, never a shell string) -> 8; SLICE-CAP1 adds the
+    // FIRST capability-breadth tool `exec.write_file` (in-sandbox write, content via stdin bytes) -> 9.
+    // The invariant is unchanged — ONLY the registered bounded seed tools are advertised, nothing unexpected.
     expect(tools.map((t) => t.name).sort()).toEqual([
       "exec.cat",
       "exec.echo",
@@ -176,6 +177,7 @@ describe("EXEC4a — RED1 tools/list advertises exactly the bounded seed tools, 
       "exec.pwd",
       "exec.run",
       "exec.wc",
+      "exec.write_file",
     ]);
     const names = tools.map((t) => t.name);
     // `exec.run` is now a REGISTERED bounded tool (no longer forbidden); the raw `argv`/`shell`/

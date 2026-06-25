@@ -199,6 +199,7 @@ describe("EXEC4c-a — CORE-1 stdio framing dispatches to the governed EXEC4a ha
       "exec.pwd",
       "exec.run",
       "exec.wc",
+      "exec.write_file",
     ]);
     for (const forbidden of ["fs", "terminal", "shell", "command", "argv", "exec.rm"]) {
       expect(tools.map((t) => t.name)).not.toContain(forbidden);
@@ -314,6 +315,7 @@ describe("EXEC4c-a — CORE-3 stdio framing fail-closed (malformed line -> -3270
       "exec.pwd",
       "exec.run",
       "exec.wc",
+      "exec.write_file",
     ]);
     // The malformed line never reached the substrate.
     expect(substrate.execCalls.length).toBe(0);
@@ -491,6 +493,7 @@ dSub(
           "exec.pwd",
           "exec.run",
           "exec.wc",
+          "exec.write_file",
         ]);
 
         // bound tools/call executed over the real wire -> isError:false + the echoed output.
@@ -569,6 +572,7 @@ dSub(
           "exec.pwd",
           "exec.run",
           "exec.wc",
+          "exec.write_file",
         ]);
       } finally {
         child.kill("SIGKILL");
