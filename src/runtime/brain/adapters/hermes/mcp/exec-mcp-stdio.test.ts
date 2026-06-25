@@ -492,7 +492,10 @@ dSub(
           expect(obj.jsonrpc).toBe("2.0");
         }
 
-        // tools/list = exactly the registered bounded seed tools (CAP2: 9 existing + 5 git = 14).
+        // tools/list = exactly the registered bounded seed tools. This is the REAL BIN (it wires
+        // "egress-allowlist" + folds the egress decision), so net.fetch IS advertised: CAP2's 14 + CAP6's
+        // net.fetch = 15. (The in-process CORE kits above use the default egress-UNWIRED seedRegistry and
+        // stay at 14 — net.fetch advertises ONLY where egress is wired + enforced.)
         const tools = (responses[1]?.result as { tools: { name: string }[] }).tools;
         expect(tools.map((t) => t.name).sort()).toEqual([
           "exec.cat",
@@ -509,6 +512,7 @@ dSub(
           "git.diff",
           "git.log",
           "git.status",
+          "net.fetch",
         ]);
 
         // bound tools/call executed over the real wire -> isError:false + the echoed output.
@@ -593,6 +597,7 @@ dSub(
           "git.diff",
           "git.log",
           "git.status",
+          "net.fetch",
         ]);
       } finally {
         child.kill("SIGKILL");

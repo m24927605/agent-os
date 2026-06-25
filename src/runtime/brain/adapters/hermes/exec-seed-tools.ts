@@ -22,6 +22,7 @@
  * via the hermes barrel.
  */
 import { z } from "zod";
+import { placeholderForKey } from "../../../../credential/index.js";
 import { buildExecRunProjection } from "../../../../policy/index.js";
 import { type Primitive, ToolRegistry, WIRED_PRIMITIVES } from "../../../../tools/index.js";
 import type { ExecToolBinding } from "./exec-closed-loop.js";
@@ -440,11 +441,175 @@ export const gitCommitBinding: ExecToolBinding = {
     buildExecRunProjection({ argv: ["git", "commit", "-m", (a as { message: string }).message] }),
 };
 
+// ------------------------------------------------------------------------------------------------
+// SLICE-CAP6 — the FIRST real network-egress tool: `net.fetch` (config/proxy-disabled `curl`). It DECLARES
+// `containment:"network-egress"` (CAP3 demands "egress-allowlist" WIRED to register), and its URL is IN
+// argv so `buildExecRunProjection` extracts `networkHosts = [URL host]` -> the bin egress fold (CAP5)
+// gates it in-repo. (git.push's egress target is NOT argv-visible -> CAP6b.) Posture: read / non-idempotent
+// / no-approval (a network READ is gated by EGRESS, not approval). Honest boundary: the egress GATING is
+// real in-repo (the PDP networkHosts fold); real network reach + the SecretResolver-at-egress credential
+// resolution are deploy/EXEC2-gated (unauthenticated-to-allowlisted until EXEC2). See CAP6-net-fetch.md.
+// ------------------------------------------------------------------------------------------------
+
+/** A valid `net.fetch` ToolManifest — the FIRST real network-egress tool (config/proxy-disabled curl). */
+export const netFetchManifest = {
+  name: "net.fetch",
+  version: "1.0.0",
+  description: "fetch a URL over the network (curl -sS -- <url>) — gated by the egress allowlist",
+  action: "tool:invoke",
+  resourcePattern: "net/fetch",
+  sideEffect: "read" as const,
+  idempotent: false,
+  requiresApproval: false,
+  bundleRefOnly: false,
+  containment: "network-egress" as const,
+};
+
+/**
+ * SLICE-CAP6 — the env var naming the OPTIONAL auth-token KEY net.fetch's `toEnv` emits a PLACEHOLDER for.
+ * NON-secret config (it names a KEY, never a value). UNCONFIGURED (unset / blank) => NO auth env =>
+ * net.fetch is unauthenticated-to-allowlisted (the EXEC2-until honest boundary). The KEY's real value is
+ * resolved by OpenShell's SecretResolver at the sandbox egress boundary; agent-os only ever assembles the
+ * PLACEHOLDER, never the secret.
+ */
+const NET_FETCH_AUTH_KEY_ENV = "AGENTOS_NET_FETCH_AUTH_KEY";
+
+/**
+ * A safe env-KEY shape: an UPPERCASE C-identifier (`[A-Z][A-Z0-9_]*`). This is the contract net.fetch's
+ * auth key must satisfy. It deliberately excludes control names that alter curl's network/credential
+ * behavior — proxy routing (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`/`FTP_PROXY`), config home
+ * (`CURL_HOME`/`HOME`/`CURLOPT_*`), CA bundle (`CURL_CA_BUNDLE`/`SSL_CERT_*`) — which are denied explicitly
+ * below even though some match the shape.
+ */
+const SAFE_ENV_KEY = /^[A-Z][A-Z0-9_]*$/;
+
+/** Env names that would alter curl's network destination / TLS / config resolution — NEVER an auth key. */
+const FORBIDDEN_AUTH_KEYS: ReadonlySet<string> = new Set([
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "FTP_PROXY",
+  "CURL_HOME",
+  "HOME",
+  "CURL_CA_BUNDLE",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+]);
+
+/**
+ * Build net.fetch's OPTIONAL auth env from a configured token KEY. PURE over its argument. The key MUST be
+ * an uppercase C-identifier (`SAFE_ENV_KEY`) AND NOT a curl-control/proxy name (`FORBIDDEN_AUTH_KEYS`) —
+ * otherwise it returns `{}` (fail-closed: an unsafe/blank/undefined key yields NO auth env, never a curl-
+ * behavior-altering env). A valid key returns `{ [key]: placeholderForKey(key) }` — a CREDENTIAL
+ * PLACEHOLDER in OpenShell's `openshell:resolve:env:<KEY>` grammar, NEVER a literal secret. This is the
+ * seam EXEC2's SecretResolver-at-egress resolves; `makeExecEffect`'s INPUT guard PASSES the placeholder
+ * and REJECTS any literal secret.
+ */
+export function netFetchAuthEnv(authKey: string | undefined): Readonly<Record<string, string>> {
+  const key = (authKey ?? "").trim();
+  if (key.length === 0) return {};
+  if (!SAFE_ENV_KEY.test(key)) return {}; // not a plain uppercase env-key shape — deny
+  if (FORBIDDEN_AUTH_KEYS.has(key)) return {}; // a curl-control/proxy name — never an auth key
+  return { [key]: placeholderForKey(key) };
+}
+
+/**
+ * A PLAIN DNS hostname (or localhost): dot-separated `[A-Za-z0-9-]` labels where the FINAL label (the TLD)
+ * contains at least one LETTER, OR the literal `localhost`. The letter-in-TLD requirement DELIBERATELY
+ * rejects dotted-numeric IPv4 literals (`127.0.0.1`) AND the AMBIGUOUS integer/octal/hex IP forms
+ * (`2130706433` / `0x7f000001`) that the WHATWG parser normalizes to a DIFFERENT string than
+ * `buildExecRunProjection`'s raw-token extraction sees. Bracketed IPv6 (`[::1]`) is rejected too (the `[`
+ * is not in the label charset). The point: the host the PDP egress fold gates (the projection's raw token)
+ * MUST equal the host curl connects to — admit ONLY a plain DNS name whose normalized + raw forms agree.
+ */
+const PLAIN_DNS_HOST = /^(?:localhost|(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*)$/;
+
+/**
+ * DENY-BY-DEFAULT URL validator: ONLY an absolute http/https URL whose authority is a PLAIN DNS hostname
+ * (or localhost), with NO userinfo, NO port-only/IP-literal ambiguity. Closes the egress-bypass fail-open:
+ *  - a no-authority scheme (file:///, mailto:, data:) / host-less URL projects NO networkHosts, so the bin
+ *    egress fold (fires only for networkHosts.length > 0) would not gate it -> denied here;
+ *  - an IP-literal / integer-IP host (`http://2130706433/`) where the WHATWG-normalized connect host
+ *    (`127.0.0.1`) DIFFERS from the projection's raw token (`2130706433`) -> denied here (projected host
+ *    MUST equal the real destination);
+ *  - userinfo (`user:pass@host`) -> denied (a credential never rides the URL — use the toEnv placeholder).
+ * Requiring a plain DNS host means EVERY admitted url's projected token == its curl connect host AND is
+ * subject to the egress decision. Pure; fail-closed on any throw.
+ */
+function isAllowedFetchUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (u.username.length > 0 || u.password.length > 0) return false;
+  if (!PLAIN_DNS_HOST.test(u.hostname)) return false;
+  // The projection extracts the raw authority token (up to the first /?#); require the raw host substring
+  // to EQUAL the normalized host, so the gated token is byte-identical to the connect host (no normalization
+  // skew). `URL` lowercases the host; we compare case-insensitively against the raw authority's host part.
+  const rawAuthority = raw.replace(/^https?:\/\//i, "").split(/[/?#]/, 1)[0] ?? "";
+  const rawHost = (rawAuthority.split("@").pop() ?? "").split(":", 1)[0] ?? "";
+  if (rawHost.toLowerCase() !== u.hostname.toLowerCase()) return false;
+  return true;
+}
+
+/**
+ * HARDENED net.fetch argv prefix. `-q` (FIRST, before any other flag) makes curl IGNORE every config file
+ * (`.curlrc` / `-K`), so an agent that can write the sandbox fs (e.g. exec.write_file) CANNOT plant a
+ * config that redirects/proxies the request to a host other than the one projected into networkHosts.
+ * `--noproxy "*"` neutralizes ALL proxy env (HTTP(S)_PROXY/ALL_PROXY) so the real destination is the URL
+ * host — NOT a proxy. `--globoff` disables curl URL globbing so `https://host/[1-1000]` is a LITERAL path
+ * (no fan-out, no host-glob that would make the real destinations differ from the projected token). The
+ * trailing `--` makes the url a SINGLE literal token (never a curl flag, never shell). So the PDP-projected
+ * host == the real curl destination, the CAP6 egress claim holds.
+ */
+export const NET_FETCH_ARGV_PREFIX: readonly string[] = [
+  "curl",
+  "-q",
+  "--globoff",
+  "--noproxy",
+  "*",
+  "-sS",
+  "--",
+];
+
+/**
+ * net.fetch binding. argvPrefix = NET_FETCH_ARGV_PREFIX (config/proxy-disabled curl + `--` guard). The url
+ * is validated by `isAllowedFetchUrl` (http/https + plain DNS host + no userinfo) so EVERY admitted url
+ * produces a host subject to the egress fold. `.strict()` rejects a smuggled extra key. `toEnv` emits the
+ * OPTIONAL credential PLACEHOLDER (never a literal secret; default unset => `{}`).
+ *
+ * `governanceProjector` builds the credential-blind projection over the argv, then OVERRIDES `networkHosts`
+ * to the BARE `new URL(url).hostname` (NO port). The bin's egress allowlist (`AGENTOS_EGRESS_ALLOW`) is a
+ * HOST list, so the gated token must be host-only: `https://api.allowed.example:443/x` projects
+ * `api.allowed.example` and matches the allowlist entry `api.allowed.example` (a default OR non-default
+ * port no longer needs a separate `host:port` allowlist entry). NON-VACUITY: remove this projector => no
+ * networkHosts => the network-egress fail-closed gate denies (the destination is unknown).
+ */
+export const netFetchBinding: ExecToolBinding = {
+  argvPrefix: NET_FETCH_ARGV_PREFIX,
+  argSchema: z.object({ url: z.string().min(1).refine(isAllowedFetchUrl) }).strict(),
+  toArgv: (a) => [(a as { url: string }).url],
+  toEnv: () => netFetchAuthEnv(process.env[NET_FETCH_AUTH_KEY_ENV]),
+  governanceProjector: (a) => {
+    const url = (a as { url: string }).url;
+    const base = buildExecRunProjection({ argv: [...NET_FETCH_ARGV_PREFIX, url] });
+    // Override networkHosts to the BARE hostname (no port): the egress allowlist is host-based. The url is
+    // already validated (http/https + plain DNS host), so `new URL` cannot throw here.
+    return { ...base, networkHosts: [new URL(url).hostname] };
+  },
+};
+
 /**
  * A fresh ToolRegistry holding the seed exec tools (so authorize can admit only these names).
  * SLICE-HDI2a grew this from the two EXEC3a tools to the read-only-safe set; SLICE-HDI2b adds the ONE
  * bounded general exec tool `exec.run`; SLICE-CAP1 adds the FIRST capability-breadth tool `exec.write_file`;
- * SLICE-CAP2 adds the in-sandbox GIT FAMILY (git.status/diff/log/add/commit). `git.push` is DEFERRED.
+ * SLICE-CAP2 adds the in-sandbox GIT FAMILY (git.status/diff/log/add/commit); SLICE-CAP6 adds the FIRST
+ * real network-egress tool `net.fetch` — but ONLY when egress is WIRED + enforced (see below). `git.push`
+ * is DEFERRED (CAP6b — egress not argv-visible).
  *
  * SLICE-CAP4b — OPTIONAL params so the BIN (the autonomous path) can (a) build the registry with a `wired`
  * set INCLUDING "approval" (because it injects an `approve` seam — coupled: an approve seam ⟺ "approval"
@@ -452,6 +617,14 @@ export const gitCommitBinding: ExecToolBinding = {
  * could not register without "approval" wired). BOTH default to today's values (`WIRED_PRIMITIVES` empty +
  * no extras), so every existing `seedRegistry()` call is byte-identical (the 14 in-sandbox seed tools
  * require NO primitive, so they register under any wired set).
+ *
+ * SLICE-CAP6 — `net.fetch` (`containment:"network-egress"`) is registered ONLY when the composition's
+ * `wired` set actually contains "egress-allowlist". This keeps "a WIRED primitive ⟺ enforcement is
+ * present" HONEST: net.fetch appears ONLY in a composition that has wired egress (the BIN, which folds the
+ * egress decision in its authorize closure). A composition that has NOT wired egress (the DEFAULT
+ * `seedRegistry()` over the empty `WIRED_PRIMITIVES`) does NOT register net.fetch at all — exactly the
+ * CAP3 ordering ("composition without egress wired refuses the network-egress tool"). The 14 in-sandbox
+ * tools are byte-identical (they require no primitive).
  */
 export function seedRegistry(
   wired: ReadonlySet<Primitive> = WIRED_PRIMITIVES,
@@ -472,6 +645,11 @@ export function seedRegistry(
   r.register(gitLogManifest);
   r.register(gitAddManifest);
   r.register(gitCommitManifest);
+  // SLICE-CAP6 — net.fetch (network-egress) registers ONLY where egress is WIRED + enforced (the bin). A
+  // composition without "egress-allowlist" wired never sees it (the CAP3 ordering — and the egress fold,
+  // which lives in the bin authorize closure, is the matching enforcement). Defense-in-depth: even if it
+  // were registered here, the ToolRegistry's own CAP3 gate would THROW without the primitive wired.
+  if (wired.has("egress-allowlist")) r.register(netFetchManifest);
   for (const m of extra) r.register(m);
   return r;
 }
@@ -480,11 +658,20 @@ export function seedRegistry(
  * The composer-held bindings map for the seed exec tools (parallel to the registry). SLICE-CAP4b — an
  * OPTIONAL `extra` map of (name -> binding) so the BIN can add the binding for an extra seed tool
  * (parallel to `seedRegistry`'s `extra`). Default empty => byte-identical to today (the 14 seed tools).
+ *
+ * SLICE-CAP6 — `net.fetch`'s binding is included ONLY when the composition's `wired` set contains
+ * "egress-allowlist" (PARALLEL to `seedRegistry`'s conditional registration). The MCP server advertises
+ * EXACTLY the `seedBindings()` keys, so a tool advertised WITHOUT egress enforcement would be unsafe; and
+ * a binding with no corresponding registered manifest would be inert. `wired` is the SECOND optional param
+ * (after `extra`) so every existing `seedBindings()` / `seedBindings(extra)` call is byte-identical (empty
+ * `WIRED_PRIMITIVES` => the 14-tool map). The bin passes its `{"approval","egress-allowlist"}` superset =>
+ * the 15-tool map including net.fetch.
  */
 export function seedBindings(
   extra: ReadonlyMap<string, ExecToolBinding> = new Map(),
+  wired: ReadonlySet<Primitive> = WIRED_PRIMITIVES,
 ): ReadonlyMap<string, ExecToolBinding> {
-  return new Map<string, ExecToolBinding>([
+  const entries: [string, ExecToolBinding][] = [
     ["exec.echo", echoBinding],
     ["exec.ls", lsBinding],
     ["exec.cat", catBinding],
@@ -499,6 +686,10 @@ export function seedBindings(
     ["git.log", gitLogBinding],
     ["git.add", gitAddBinding],
     ["git.commit", gitCommitBinding],
-    ...extra,
-  ]);
+  ];
+  // SLICE-CAP6 — net.fetch's binding (and thus its tools/list advertisement) appears ONLY where egress is
+  // wired + enforced (PARALLEL to seedRegistry's conditional registration). No egress wired => not
+  // advertised, not invocable (its manifest is also not registered).
+  if (wired.has("egress-allowlist")) entries.push(["net.fetch", netFetchBinding]);
+  return new Map<string, ExecToolBinding>([...entries, ...extra]);
 }
