@@ -46,6 +46,12 @@ export {
 } from "./exec-seed-tools.js";
 export { makeArgsCredentialScreen } from "./args-credential-screen.js";
 export {
+  type AgtScope,
+  type ManifestLookup,
+  type ProjectableCall,
+  buildProjectionForCall,
+} from "./governance-projection-for-call.js";
+export {
   type HermesMcpAddOptions,
   buildHermesMcpAddArgv,
   renderHermesConfigYamlSnippet,

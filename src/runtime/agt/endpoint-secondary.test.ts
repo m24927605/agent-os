@@ -36,6 +36,11 @@ function skCanary(): string {
 
 const REDACTED = "[REDACTED]";
 
+// SLICE-R9b-2b — the AGT secondary now ABSTAINS (allow, no transport call) when the request carries NO
+// governance projection (the scope gate's runtime effect). So the R9b-2a mapping / fail-closed /
+// credential-blind invariants — which all require the transport to be CONSULTED — must pass an IN-SCOPE
+// request that CARRIES a projection. This shared `req` does. (The abstain path is proven in the dedicated
+// endpoint-secondary.scope-skip.test.ts.)
 const req = PolicyRequest.parse({
   requestId: "req-1",
   tenantId: "tenant-a",
@@ -44,6 +49,7 @@ const req = PolicyRequest.parse({
   actorId: "agent:claude",
   action: "exec.run",
   resource: "exec/run",
+  governanceProjection: buildExecRunProjection({ argv: ["ls", "-la"] }),
 });
 
 const pdpAllow: PolicyDecision = {

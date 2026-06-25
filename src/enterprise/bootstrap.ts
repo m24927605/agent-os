@@ -66,6 +66,7 @@ import {
   evaluatePolicy,
   evaluateSecondaries,
 } from "../policy/index.js";
+import { buildProjectionForCall } from "../runtime/brain/adapters/hermes/index.js";
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { FakeSandboxAdapter } from "../runtime/substrate/index.js";
 import {
@@ -456,6 +457,21 @@ export function createEnterpriseFleet(opts: EnterpriseFleetOpts): EnterpriseFlee
           action: "tool:invoke",
           resource: tc.tool,
         } as PolicyRequest;
+        // SLICE-R9b-2b — call the SHARED projection helper for parity with the bin closure. The Enterprise
+        // fleet governs bare `GovernedCall`s (no `args`, no exec `ExecToolBinding` map), so
+        // `bindings === undefined` and the helper ALWAYS returns `undefined`: NO projection is attached and
+        // THIS tenant's `req` is byte-identical (a configured AGT secondary would ABSTAIN). Sanctioned degrade.
+        const projection = buildProjectionForCall(
+          { tool: tc.tool, args: undefined },
+          undefined,
+          () => undefined,
+          "effectful",
+        );
+        // The schema-inferred field type uses mutable arrays; the projection's are `readonly` (same
+        // shape, it `safeParse`s cleanly). On this surface `projection` is always `undefined`, so the cast
+        // guards a structurally-identical assignment that never actually runs here.
+        if (projection !== undefined)
+          req.governanceProjection = projection as PolicyRequest["governanceProjection"];
         // SLICE-DVx: with an injected PLATFORM registry, the registry deny-by-default runs IN FRONT of
         // the EXISTING per-tenant `fleet:*` PDP (`authorizeToolInvoke` = deny-by-default pre-screen ->
         // evaluatePolicy over THIS tenant's `allow`); an UNREGISTERED tool is denied before the PDP. It

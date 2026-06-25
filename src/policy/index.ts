@@ -6,3 +6,8 @@
 export * from "./types.js";
 export * from "./evaluate.js";
 export * from "./dedup.js";
+// SLICE-R9b-2b — the credential-blind governance projection (R9b-1) is now part of the policy public
+// surface: the autonomous-path projector + the AGT adapter consume `GovernanceProjection` /
+// `buildExecRunProjection` via this barrel (never a deep import). `GovernanceProjectionSchema` is the
+// same schema `types.ts` folds into `PolicyRequest.governanceProjection`.
+export * from "./governance-projection.js";
