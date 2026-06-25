@@ -21,11 +21,13 @@ meant to dissolve into "telling a computer what you want."
   and an **independently-verifiable** evidence chain) that makes it *safe* to let an autonomous agent run
   your computer — or your company. It is load-bearing support, never the headline.
 
-> **Status:** the **spine + the three surfaces + the seatbelt** are built and pass a 13-leg `verify`
-> gate (~851 tests); the real-vendor wires (OpenShell / NemoClaw / SpendGuard / Hermes / the Go kernel)
-> are proven by **opt-in, infra-gated** live e2e scripts. The full "say anything, the whole computer does
-> it" experience is the **north star**; what ships today is the governed spine + surfaces + verifiable
-> evidence. See [Status](#status-honest).
+> **Status:** the **spine + three surfaces + seatbelt** are built and pass a 13-leg `verify` gate
+> (1125 tests). **The autonomous loop is LIVE, end-to-end:** a real Hermes Desktop **autonomously
+> discovers + calls** Agent OS's governed tools (incl. a general `exec.run`) → **real OpenShell exec** →
+> unified, independently-verifiable WORM — proven by opt-in, infra-gated live e2e over **both** the ACP
+> and the Desktop `config.yaml` paths. The experience surface **is Hermes Desktop** (no separate UI).
+> The remaining work is **deployment-environment**, not code (real KMS/HSM trust root, CI, observability,
+> real multi-tenant provisioning). See [Status](#status-honest).
 
 ---
 
@@ -181,23 +183,31 @@ pnpm run verifier:release           # builds the standalone + WASM verifier, wit
 
 ## Status (honest)
 
-- **Built & proven hermetically.** All three surfaces are runnable composition roots; the spine, the 5
+- **Built & proven hermetically.** All three surfaces are runnable composition roots; the spine, the
   vendor-neutral ports (each with ≥2 implementations + a contract test), the 3 monopolies (deny-by-default
   PDP / credential-blind secret model / Go WORM kernel), the offline verifier, and the
-  no-vendor-in-core + cross-tenant gates all pass `pnpm run verify` (~851 tests). 305+ commits.
-- **Live, but infra-gated.** The opt-in `e2e:live-*` scripts prove the real wires (OpenShell; NemoClaw;
-  SpendGuard; a local **desktop Hermes driving the brain over ACP** + the NemoClaw-sandbox Hermes-adopt path;
-  the Go kernel + offline verifier + per-tenant isolation). They live *outside* `verify`, self-clean, and exit
-  cleanly when the infra is absent; reproducing them needs your infra.
-- **Default runtime is in-memory.** The composition roots default to in-memory log / cost / sandbox fakes,
-  so everything runs without external services; the live adapters are injected when you point at real infra.
-- **North star vs today.** "Say anything, the whole computer does it" is the vision. What ships is the
-  governed spine + the three surfaces + verifiable evidence. Honest gaps are tracked in `docs/slices/`
-  (e.g. real STT vendor; a **substrate exec primitive** — the desktop-Hermes closed loop is live-verified, but the
-  governed effect's result is a canned stub today because the ExecutionSubstrate port has no run/exec method yet, so
-  real command output can't be fed back to Hermes until that lands; **operator-unforgeable trust-root** — the kernel
-  process no longer holds the signing key, but a hardware/KMS root that even the operator can't forge is a
-  deployment step, not yet wired).
+  no-vendor-in-core + cross-tenant gates all pass `pnpm run verify` (**1125 tests**).
+- **The autonomous loop is LIVE (infra-gated).** A real Hermes Desktop, handed our governed MCP server,
+  **autonomously discovers (`tools/list`) + calls (`tools/call`)** Agent OS's tools — including the
+  maximum-utility `exec.run` (an explicit argv vector, never a shell string) — over a **real OpenShell**
+  sandbox; every call routes through the single governed edge (`runGovernedToolCall`) and its receipt lands
+  in the **shared, independently-verifiable WORM kernel chain**. Proven over **both** registration paths:
+  ACP (`session/new.mcpServers`) and the Desktop **`~/.hermes/config.yaml`** path — so a real desktop user
+  gets Agent OS by adding one config entry. The substrate exec primitive is real: **actual command output
+  is fed back** to the brain (no canned stubs). `e2e:live-exec-mcp-stdio`, `e2e:live-hermes-desktop`,
+  `e2e:live-spendguard`, `e2e:live-kernel`, … live *outside* `verify`, self-clean, and clean-block when the
+  infra is absent; reproducing them needs your infra (Hermes credits, OpenShell, a kernel, Docker).
+- **Default runtime is in-memory; integrations are config-driven.** The composition roots default to
+  in-memory log / cost / sandbox; the live adapters are injected when you point at real infra. SpendGuard and
+  AGT are turnkey: set `SPENDGUARD_*` env (fail-closed on partial config) and/or pass an `AgtSecondaryPolicy`
+  — see [Enabling SpendGuard / AGT](#enabling-spendguard--agt-config-driven).
+- **What remains is deployment, not code.** The experience surface is **Hermes Desktop** (no separate UI, by
+  design). The honest remaining work needs *your environment*, not more in-repo slices: an
+  **operator-unforgeable trust root** (KMS/HSM/remote-attestation — the kernel process no longer holds the
+  raw signing key, but a root even the operator can't forge is a deployment step; today's per-tenant keys are
+  process-held = attester==operator to the process boundary); the sandbox's **zero-credential, no-egress
+  provisioning** (the real boundary for `exec.run`); CI/CD; an observability backend; and real multi-tenant
+  provisioning (per-tenant DB / process isolation). Tracked in `docs/slices/`.
 
 ## Built with Looping Engineering
 
