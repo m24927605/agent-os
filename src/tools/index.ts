@@ -8,5 +8,6 @@
  * `src/index.ts` and never built this module barrel; the SDK barrel has no legal path to R3 without it.
  */
 export * from "./manifest.js";
+export * from "./capability-containment.js";
 export * from "./registry.js";
 export * from "./authorize.js";

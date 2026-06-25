@@ -11,12 +11,31 @@ const valid: ToolManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox",
 };
 
 describe("parseToolManifest", () => {
-  it("accepts a well-formed 9-field manifest and returns all fields", () => {
+  it("accepts a well-formed 10-field manifest and returns all fields", () => {
     const parsed = parseToolManifest({ ...valid });
     expect(parsed).toEqual(valid);
+  });
+
+  it("requires containment (fail-closed: a manifest missing it fails parse, no default)", () => {
+    const { containment: _omit, ...missing } = valid;
+    expect(() => parseToolManifest(missing)).toThrow();
+  });
+
+  it("rejects a containment value that is not in the enum (fail-closed)", () => {
+    expect(() => parseToolManifest({ ...valid, containment: "host-network" })).toThrow();
+    expect(() => parseToolManifest({ ...valid, containment: "" })).toThrow();
+  });
+
+  it("accepts each of the three valid containment values", () => {
+    for (const containment of ["in-sandbox", "network-egress", "host-fs-write"] as const) {
+      // network-egress/host-fs-write are legal MANIFESTS (schema-valid); the registration gate (CAP3,
+      // assertRegisterable) is the layer that refuses them while their primitive is unwired — NOT the schema.
+      expect(parseToolManifest({ ...valid, containment })).toMatchObject({ containment });
+    }
   });
 
   it("rejects unknown fields (.strict, fail-closed)", () => {

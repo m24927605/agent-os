@@ -38,6 +38,7 @@ export const exampleToolManifest: unknown = {
   idempotent: false,
   requiresApproval: false,
   bundleRefOnly: true,
+  containment: "in-sandbox",
 };
 
 /** Load the example as a validated `ToolManifest` (fail-closed via R3 `parseToolManifest`). */

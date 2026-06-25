@@ -68,7 +68,7 @@ describe("sdk barrel — exposes the author-facing surface", () => {
     expect(new sdk.FakeSandboxAdapter()).toBeInstanceOf(sdk.FakeSandboxAdapter);
   });
 
-  it("re-exports the REAL R3 schema: a valid 9-field manifest parses; an unknown field throws", () => {
+  it("re-exports the REAL R3 schema: a valid 10-field manifest parses; an unknown field throws", () => {
     const valid = {
       name: "demo.read",
       version: "1.0.0",
@@ -79,6 +79,7 @@ describe("sdk barrel — exposes the author-facing surface", () => {
       idempotent: true,
       requiresApproval: false,
       bundleRefOnly: true,
+      containment: "in-sandbox",
     };
     expect(sdk.parseToolManifest(valid)).toMatchObject({ name: "demo.read", sideEffect: "read" });
     // `.strict()` schema => unknown field is a parse failure (fail-closed), proving this is R3's

@@ -37,6 +37,7 @@ export const echoManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `exec.ls` ToolManifest. */
@@ -50,6 +51,7 @@ export const lsManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** exec.echo binding: argvPrefix ["echo"], strict {text}, toArgv -> [text]. */
@@ -84,6 +86,7 @@ export const catManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `exec.head` ToolManifest (read-only; default 10 lines, no numeric arg — string-only). */
@@ -97,6 +100,7 @@ export const headManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `exec.pwd` ToolManifest (read-only; no args). */
@@ -110,6 +114,7 @@ export const pwdManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `exec.wc` ToolManifest (read-only). */
@@ -123,6 +128,7 @@ export const wcManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `exec.grep` ToolManifest (read-only). */
@@ -136,6 +142,7 @@ export const grepManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** exec.cat binding: argvPrefix ["cat"], strict {path}, toArgv -> [path]. */
@@ -211,6 +218,7 @@ export const runManifest = {
   idempotent: false,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /**
@@ -258,6 +266,7 @@ export const writeFileManifest = {
   idempotent: false,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /**
@@ -315,6 +324,7 @@ export const gitStatusManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `git.diff` ToolManifest (read-only; working-tree diff). */
@@ -328,6 +338,7 @@ export const gitDiffManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `git.log` ToolManifest (read-only; last 50 commits, one line each). */
@@ -341,6 +352,7 @@ export const gitLogManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `git.add` ToolManifest (write; stage a path in the sandbox work-tree). */
@@ -354,6 +366,7 @@ export const gitAddManifest = {
   idempotent: false,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** A valid `git.commit` ToolManifest (write; in-sandbox commit — NOT destructive, NOT a push). */
@@ -367,6 +380,7 @@ export const gitCommitManifest = {
   idempotent: false,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 
 /** git.status binding: argvPrefix ["git","status","--porcelain"], EMPTY strict object, toArgv -> []. */

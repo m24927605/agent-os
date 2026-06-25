@@ -26,13 +26,14 @@ import { exampleToolManifest, loadExampleToolManifest } from "./index.js";
 const jsonPath = fileURLToPath(new URL("./tool-manifest.example.json", import.meta.url));
 
 describe("ToolManifest authoring template (R9-S4)", () => {
-  it("the in-tree exampleToolManifest parses via R3 parseToolManifest (legal 9-field, guardrails met)", () => {
+  it("the in-tree exampleToolManifest parses via R3 parseToolManifest (legal 10-field, guardrails met)", () => {
     const m = parseToolManifest(exampleToolManifest);
-    // All nine declared fields survive parse.
+    // All ten declared fields survive parse (CAP3 added the required `containment` field).
     expect(Object.keys(m).sort()).toEqual(
       [
         "action",
         "bundleRefOnly",
+        "containment",
         "description",
         "idempotent",
         "name",

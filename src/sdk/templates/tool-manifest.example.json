@@ -7,5 +7,6 @@
   "sideEffect": "write",
   "idempotent": false,
   "requiresApproval": false,
-  "bundleRefOnly": true
+  "bundleRefOnly": true,
+  "containment": "in-sandbox"
 }

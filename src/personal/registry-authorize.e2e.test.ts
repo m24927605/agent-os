@@ -53,6 +53,7 @@ function manifestFor(name: string): Record<string, unknown> {
     idempotent: true,
     requiresApproval: false,
     bundleRefOnly: true,
+    containment: "in-sandbox",
   };
 }
 
