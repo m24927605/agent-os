@@ -41,6 +41,7 @@ const validManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox",
 };
 
 function writeJson(name: string, value: unknown): string {

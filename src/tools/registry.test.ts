@@ -12,6 +12,7 @@ const valid: ToolManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox",
 };
 
 describe("ToolRegistry", () => {
@@ -58,6 +59,25 @@ describe("ToolRegistry", () => {
 
   it("seed: duplicate names inside seed => constructor throws (fail-closed)", () => {
     expect(() => new ToolRegistry([{ ...valid }, { ...valid }])).toThrow();
+  });
+
+  it("CAP3 gate: a network-egress manifest is REFUSED at register (unwired primitive, fail-closed)", () => {
+    const reg = new ToolRegistry();
+    expect(() =>
+      reg.register({ ...valid, name: "net.fetch", containment: "network-egress" }),
+    ).toThrow();
+    // fail-closed: the refused manifest did NOT enter the registry.
+    expect(reg.has("net.fetch")).toBe(false);
+  });
+
+  it("CAP3 gate: a refused manifest in a seed aborts construction (no half registry)", () => {
+    expect(
+      () =>
+        new ToolRegistry([
+          { ...valid },
+          { ...valid, name: "net.fetch", containment: "network-egress" },
+        ]),
+    ).toThrow();
   });
 
   it("adversarial lookup/has: empty/non-string => undefined/false, no crash", () => {

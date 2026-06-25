@@ -18,6 +18,7 @@ const fsReadManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox",
 } as const;
 
 /** A registry that knows exactly one tool: `fs.read`. */

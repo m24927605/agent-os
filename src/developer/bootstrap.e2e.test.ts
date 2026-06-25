@@ -60,6 +60,7 @@ function validManifest(name = "dev:echo"): Record<string, unknown> {
     idempotent: true,
     requiresApproval: false,
     bundleRefOnly: true,
+    containment: "in-sandbox",
   };
 }
 

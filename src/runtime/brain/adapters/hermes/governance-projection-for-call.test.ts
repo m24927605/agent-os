@@ -46,6 +46,7 @@ const readWithProjectorManifest = {
   idempotent: true,
   requiresApproval: false,
   bundleRefOnly: false,
+  containment: "in-sandbox" as const,
 };
 const readWithProjectorBinding: ExecToolBinding = {
   argvPrefix: ["true"],

@@ -105,6 +105,7 @@ function manifestForTool(tool: string): Record<string, unknown> {
     idempotent: true,
     requiresApproval: false,
     bundleRefOnly: true,
+    containment: "in-sandbox",
   };
 }
 

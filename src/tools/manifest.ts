@@ -10,6 +10,17 @@ import { z } from "zod";
 
 export type ToolSideEffect = "none" | "read" | "write" | "destructive";
 
+/**
+ * Where a capability's effect is contained — the single-source-of-truth for whether it PUNCHES the
+ * sandbox seal (and thus which fail-closed governance primitive it needs). `in-sandbox` = the effect
+ * lives entirely inside the ephemeral zero-credential no-egress sandbox (rides pipeline + seal, needs
+ * NO primitive). `network-egress`/`host-fs-write` = it punches the seal and names its primitive. This
+ * field is REQUIRED (no default): a manifest that omits it FAILS parse — fail-closed, because an
+ * unclassified capability is an unknown blast radius, not a safe default. The capability CLASSIFIER
+ * (`capability-containment.ts`) reads this field; the REFUSE-to-register gate enforces it.
+ */
+export type ToolContainment = "in-sandbox" | "network-egress" | "host-fs-write";
+
 const nonEmpty = z.string().trim().min(1);
 
 export const ToolManifest = z
@@ -23,6 +34,7 @@ export const ToolManifest = z
     idempotent: z.boolean(),
     requiresApproval: z.boolean(),
     bundleRefOnly: z.boolean(),
+    containment: z.enum(["in-sandbox", "network-egress", "host-fs-write"]),
   })
   .strict()
   .superRefine((m, ctx) => {
