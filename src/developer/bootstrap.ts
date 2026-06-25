@@ -68,6 +68,7 @@ import {
   combineDecisions,
   evaluateSecondaries,
 } from "../policy/index.js";
+import { buildProjectionForCall } from "../runtime/brain/adapters/hermes/index.js";
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { FakeSandboxAdapter } from "../runtime/substrate/index.js";
 import {
@@ -270,6 +271,21 @@ export function createDeveloperKit(opts: DeveloperKitOpts = {}): DeveloperKit {
     },
     authorize: async (tc) => {
       const req = { ...tc.context, action: "tool:invoke", resource: tc.tool } as PolicyRequest;
+      // SLICE-R9b-2b — call the SHARED projection helper for parity with the bin closure. The Developer
+      // surface registers vendor-neutral ToolManifests but holds NO exec `ExecToolBinding` map, so
+      // `bindings === undefined` and the helper ALWAYS returns `undefined`: NO projection is attached and
+      // `req` is byte-identical (a configured AGT secondary would ABSTAIN). Sanctioned degrade.
+      const projection = buildProjectionForCall(
+        { tool: tc.tool, args: tc.args },
+        undefined,
+        () => undefined,
+        "effectful",
+      );
+      // The schema-inferred field type uses mutable arrays; the projection's are `readonly` (same shape,
+      // it `safeParse`s cleanly). On this surface `projection` is always `undefined`, so the cast guards
+      // a structurally-identical assignment that never actually runs here.
+      if (projection !== undefined)
+        req.governanceProjection = projection as PolicyRequest["governanceProjection"];
       // authorizeToolInvoke is the deny-only registry pre-screen IN FRONT of the PDP: an UNREGISTERED
       // tool is denied deny-by-default; a REGISTERED tool is delegated to evaluatePolicy(req, rules).
       const decision = authorizeToolInvoke(req, registry, rules);

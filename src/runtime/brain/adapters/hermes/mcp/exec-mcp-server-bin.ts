@@ -61,6 +61,7 @@ import type { ExecCapableSandboxAdapter } from "../../../../substrate/index.js";
 import { FakeSandboxAdapter } from "../../../../substrate/index.js";
 import { makeArgsCredentialScreen } from "../args-credential-screen.js";
 import { seedBindings, seedRegistry } from "../exec-seed-tools.js";
+import { type AgtScope, buildProjectionForCall } from "../governance-projection-for-call.js";
 import type { ExecMcpServerDeps } from "./exec-mcp-server.js";
 import { runExecMcpStdio } from "./exec-mcp-stdio.js";
 
@@ -248,9 +249,11 @@ function buildDeps(
   // fail-closed on a PARTIAL SpendGuard config (IT1b). FAKE mode skips the env read entirely so the
   // subprocess test stays byte-identical (InMemory + []) regardless of any ambient SPENDGUARD_* on the
   // developer's machine — FAKE never reaches a sidecar, so it must never honor SpendGuard env.
-  const integ: { costGate?: CostGate; secondaries?: readonly SecondaryPolicyAdapter[] } = fake
-    ? {}
-    : integrationsFromEnv(process.env);
+  const integ: {
+    costGate?: CostGate;
+    secondaries?: readonly SecondaryPolicyAdapter[];
+    agtScope?: AgtScope;
+  } = fake ? {} : integrationsFromEnv(process.env);
   // The cost gate that GATES the autonomous path: injected (test) | env (SpendGuard) | InMemory default,
   // ALWAYS wrapped fail-closed (a thrown reserve/commit from an external gate -> a structured deny@cost).
   const cost: CostGate = failClosedCostGate(
@@ -259,10 +262,17 @@ function buildDeps(
   // Advisory secondaries folded into authorize (advisory, any-deny-wins, PDP sovereign). [] => no-op.
   const secondaries: readonly SecondaryPolicyAdapter[] =
     opts.secondaries ?? integ.secondaries ?? [];
+  // SLICE-R9b-2b — the bin's bindings + AGT scope drive the governance projection. The scope is "effectful"
+  // by default; it is only set non-default when AGT is configured (integ.agtScope from AGT_SCOPE). When AGT
+  // is unconfigured, integ.agtScope is absent — but the projection only MATTERS to a configured AGT
+  // secondary (an absent secondary never reads it), so building it is harmless and the no-AGT path stays
+  // byte-identical (no projection consumer => no behavioural change).
+  const bindings = seedBindings();
+  const agtScope: AgtScope = integ.agtScope ?? "effectful";
   return {
     substrate,
     sandboxId,
-    bindings: seedBindings(),
+    bindings,
     registry,
     screen: makeArgsCredentialScreen(),
     authorize: async (tc) => {
@@ -272,7 +282,16 @@ function buildDeps(
       // plain structural object: `authorizeToolInvoke` takes `unknown` and fail-closed `safeParse`s it
       // (deny-by-default on a malformed shape), so we keep the bin's existing fail-closed PDP semantics
       // unchanged rather than `.parse`-throwing on the branded-id schema.
-      const req = {
+      const req: {
+        requestId: string;
+        tenantId: string;
+        projectId: string;
+        taskId: string;
+        actorId: string;
+        action: string;
+        resource: string;
+        governanceProjection?: ReturnType<typeof buildProjectionForCall>;
+      } = {
         requestId: c.requestId,
         tenantId: c.tenantId,
         projectId: c.projectId,
@@ -281,6 +300,18 @@ function buildDeps(
         action: "tool:invoke",
         resource: tc.tool,
       };
+      // SLICE-R9b-2b — for an IN-SCOPE effectful tool (exec.run) build the R9b-1 governance projection from
+      // the BINDING-VALIDATED args and ATTACH it to the request. PRESENT-ONLY: a read-only / out-of-scope /
+      // invalid-args / no-projector call yields `undefined`, so the request is left UNCHANGED (byte-identical).
+      // The projection is what a configured AGT secondary consumes; an absent AGT secondary never reads it,
+      // so attaching it when AGT is unconfigured is a behavioural no-op (PDP ignores it; [] secondaries skip it).
+      const projection = buildProjectionForCall(
+        { tool: tc.tool, ...(tc.args !== undefined ? { args: tc.args } : {}) },
+        bindings,
+        (name) => registry.lookup(name),
+        agtScope,
+      );
+      if (projection !== undefined) req.governanceProjection = projection;
       // PDP = the SOLE deny authority (deny-by-default for an unregistered tool). It is a `PolicyDecision`.
       const pdp: PolicyDecision = authorizeToolInvoke(req, registry, allowRules);
       // Fold the advisory secondaries: any-deny-wins, PDP sovereign (an allow secondary can NEVER relax a

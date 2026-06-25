@@ -37,6 +37,7 @@
  */
 import type { z } from "zod";
 import type { EffectResult, GovernedToolCallDeps } from "../../../../orchestration/index.js";
+import type { GovernanceProjection } from "../../../../policy/index.js";
 import {
   type ExecCapableSandboxAdapter,
   type ExecSecretDetector,
@@ -66,6 +67,16 @@ export interface ExecToolBinding {
    * `makeExecEffect`'s credential-blind INPUT guard BEFORE any exec — the substrate/process never sees it.
    */
   readonly toEnv?: (validatedArgs: unknown) => Readonly<Record<string, string>>;
+  /**
+   * SLICE-R9b-2b — OPTIONAL tool-declared governance projector. An EFFECTFUL tool (e.g. `exec.run`) that
+   * wants the AGT advisory to opine on it declares a thin wrapper around its R9b-1 projection builder
+   * (over the VALIDATED args — the screen already ran, then the projection best-effort redacts). A
+   * READ-ONLY tool (echo/ls/cat/...) declares NONE: with no projector it is OUT-OF-SCOPE by construction,
+   * so the AGT secondary abstains (no transport round-trip). The projector is PURE: validated args ->
+   * a credential-blind {@link GovernanceProjection}. Never given raw args — `buildProjectionForCall`
+   * validates with `argSchema` first.
+   */
+  readonly governanceProjector?: (validatedArgs: unknown) => GovernanceProjection;
 }
 
 /** Options for {@link bindingWrappedExecEffect} (forwarded to `makeExecEffect`). */

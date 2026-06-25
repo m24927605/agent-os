@@ -22,6 +22,7 @@
  * via the hermes barrel.
  */
 import { z } from "zod";
+import { buildExecRunProjection } from "../../../../policy/index.js";
 import { ToolRegistry } from "../../../../tools/index.js";
 import type { ExecToolBinding } from "./exec-closed-loop.js";
 
@@ -223,6 +224,11 @@ export const runBinding: ExecToolBinding = {
   argvPrefix: [],
   argSchema: z.object({ argv: z.array(z.string()).min(1) }).strict(),
   toArgv: (a) => [...(a as { argv: string[] }).argv],
+  // SLICE-R9b-2b — exec.run is EFFECTFUL (sideEffect:"write"), so it declares a governance projector: a
+  // thin wrapper that extracts the VALIDATED `{ argv }` and builds the R9b-1 credential-blind projection
+  // the AGT advisory consumes. `buildProjectionForCall` only ever calls this AFTER `argSchema.safeParse`
+  // succeeds, so `a` is the validated `{ argv: string[] }`. Read-only seed tools declare NONE.
+  governanceProjector: (a) => buildExecRunProjection({ argv: (a as { argv: string[] }).argv }),
 };
 
 /**

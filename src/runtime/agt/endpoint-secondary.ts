@@ -88,6 +88,18 @@ class AgtEndpointSecondary implements SecondaryPolicyAdapter {
    * propagates so evaluateSecondaries records the canonical synthetic deny (down -> deny).
    */
   async evaluate(req: PolicyRequest): Promise<PolicyDecision> {
+    // SLICE-R9b-2b — the scope gate's RUNTIME effect: a request with NO governance projection is
+    // OUT-OF-SCOPE (read-only tool / no projector / build skipped). ABSTAIN — return advisory allow
+    // WITHOUT a transport round-trip. This is safe (AGT is advisory; abstain = no opinion, NOT a grant —
+    // the PDP stays sovereign via combineDecisions) and it is the latency cut (only effectful tools pay
+    // the UDS round-trip). The in-scope effectful path (projection present) below is unchanged.
+    if (req.governanceProjection === undefined) {
+      return {
+        effect: "allow",
+        reason: "agt abstained (no governance projection / out of scope)",
+        auditRequired: true,
+      };
+    }
     const agtReq = toAgtRequest(req);
     // No try/catch: a reject (down / timeout / protocol error) propagates -> evaluateSecondaries deny.
     const raw: unknown = await this.transport.evaluate(agtReq);

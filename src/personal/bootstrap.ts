@@ -51,6 +51,7 @@ import {
   evaluatePolicy,
   evaluateSecondaries,
 } from "../policy/index.js";
+import { buildProjectionForCall } from "../runtime/brain/adapters/hermes/index.js";
 import { type SecretDetector, screenBrainEvent } from "../runtime/brain/index.js";
 import { type AdapterResult, FakeSandboxAdapter } from "../runtime/substrate/index.js";
 import { type ToolRegistry, authorizeToolInvoke } from "../tools/index.js";
@@ -239,6 +240,22 @@ export function createPersonalShell(opts: PersonalShellOpts = {}): PersonalShell
     },
     authorize: async (tc) => {
       const req = { ...tc.context, action: "tool:invoke", resource: tc.tool } as PolicyRequest;
+      // SLICE-R9b-2b — call the SHARED projection helper for uniformity with the bin closure. The Personal
+      // surface has NO exec `ExecToolBinding` map (it governs `personal:*` tools, not the bounded exec
+      // bindings), so `bindings === undefined` and the helper ALWAYS returns `undefined`: NO projection is
+      // attached, `req` is byte-identical, and a (configured) AGT secondary would ABSTAIN. This is the
+      // sanctioned degrade — wired for parity, behaviourally a no-op on this surface.
+      const projection = buildProjectionForCall(
+        { tool: tc.tool, args: tc.args },
+        undefined,
+        () => undefined,
+        "effectful",
+      );
+      // The schema-inferred field type uses mutable arrays; the projection's are `readonly` (same shape,
+      // it `safeParse`s cleanly). On this surface `projection` is always `undefined`, so the cast guards
+      // a structurally-identical assignment that never actually runs here.
+      if (projection !== undefined)
+        req.governanceProjection = projection as PolicyRequest["governanceProjection"];
       // SLICE-DVx: with an injected registry, the registry deny-by-default runs IN FRONT of the
       // EXISTING `personal:*` PDP (`authorizeToolInvoke` = deny-by-default pre-screen -> evaluatePolicy);
       // an UNREGISTERED tool is denied before the PDP. WITHOUT a registry, this is BYTE-IDENTICAL to S1:

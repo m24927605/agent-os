@@ -32,8 +32,9 @@ R9b-2a 的 AGT secondary 是 inert。R9b-2b 接線:在 authorize closure 為 in-
 - **byte-identical**:AGT 未配置 → 三面 + bin + EXEC4c + SETUP1a 全測不變綠。
 - credential-blind:in-scope call 帶 canary args → 送 transport 的只有 neutral+redacted projection,無 raw args。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(projector 宣告 + helper + 4 closures 接 + secondary scope-skip + integrationsFromEnv AGT;**AGT 未配置 byte-identical**;read-tool abstain〔transport 未呼叫〕;effectful+down→deny;PDP sovereign;credential-blind;partial-config fail-closed;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測)
+- [x] **DONE（merged)**:`ExecToolBinding.governanceProjector?`(exec.run 宣告 `buildExecRunProjection`;讀取型無)+ `buildProjectionForCall`(3-gate:scope〔effectful 預設/all〕→ projector → `argSchema.safeParse(tc.args)`)+ 4 closures 接(present 才附 `req.governanceProjection`)+ AGT secondary scope-skip(無 projection → allow abstain,**不呼叫 transport**)+ `integrationsFromEnv` AGT 註冊(`AGT_UDS_PATH`+`AGT_SCOPE`/`AGT_TIMEOUT_MS`,fail-closed,merge `extra.secondaries`)。RED → verify **exit 0**(1258 passed + 26 skipped;4 新測檔 44 測;**always-append mutation 翻 7〔byte-identical〕、drop-skip 兩層翻 count-0、isInScope→true 翻 read、drop-attach 翻 3、invalid-config 翻 fail-closed**;depcruise no-vendor-in-core 綠+bite;secret-scan clean;無新依賴)。獨立 Opus4.8 review PASS:AGT-未配置 byte-identical(`===` verbatim)、scope gate 跳 transport、effectful participates + PDP-sovereign + down→deny、credential-blind 端到端、surface degrade 誠實(靜態 no-op + 每處明示 + cast 安全)。**1 MINOR**(三面 parity scaffolding〔`bindings:undefined`→恆 undefined,只有 bin 真建 projection〕已誠實註解、選擇性未來清理,無需動作)。
+- **誠實**:**AGT 實際 gate 的是 bin(autonomous)路徑**(三面 SDK surfaces 因不走 exec bindings → degrade no-op)。這正是使用者實際走的路徑。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(binding optional 欄位 + helper + closure 接點 + secondary skip + config AGT 純加法;未配置 byte-identical)。
