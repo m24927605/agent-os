@@ -23,7 +23,7 @@
  */
 import { z } from "zod";
 import { buildExecRunProjection } from "../../../../policy/index.js";
-import { ToolRegistry } from "../../../../tools/index.js";
+import { type Primitive, ToolRegistry, WIRED_PRIMITIVES } from "../../../../tools/index.js";
 import type { ExecToolBinding } from "./exec-closed-loop.js";
 
 /** A valid `exec.echo` ToolManifest (read-only, no host damage). */
@@ -445,9 +445,19 @@ export const gitCommitBinding: ExecToolBinding = {
  * SLICE-HDI2a grew this from the two EXEC3a tools to the read-only-safe set; SLICE-HDI2b adds the ONE
  * bounded general exec tool `exec.run`; SLICE-CAP1 adds the FIRST capability-breadth tool `exec.write_file`;
  * SLICE-CAP2 adds the in-sandbox GIT FAMILY (git.status/diff/log/add/commit). `git.push` is DEFERRED.
+ *
+ * SLICE-CAP4b — OPTIONAL params so the BIN (the autonomous path) can (a) build the registry with a `wired`
+ * set INCLUDING "approval" (because it injects an `approve` seam — coupled: an approve seam ⟺ "approval"
+ * wired for THIS registry), and (b) add EXTRA seed tools (e.g. a destructive approval-requiring tool that
+ * could not register without "approval" wired). BOTH default to today's values (`WIRED_PRIMITIVES` empty +
+ * no extras), so every existing `seedRegistry()` call is byte-identical (the 14 in-sandbox seed tools
+ * require NO primitive, so they register under any wired set).
  */
-export function seedRegistry(): ToolRegistry {
-  const r = new ToolRegistry();
+export function seedRegistry(
+  wired: ReadonlySet<Primitive> = WIRED_PRIMITIVES,
+  extra: readonly unknown[] = [],
+): ToolRegistry {
+  const r = new ToolRegistry(undefined, wired);
   r.register(echoManifest);
   r.register(lsManifest);
   r.register(catManifest);
@@ -462,11 +472,18 @@ export function seedRegistry(): ToolRegistry {
   r.register(gitLogManifest);
   r.register(gitAddManifest);
   r.register(gitCommitManifest);
+  for (const m of extra) r.register(m);
   return r;
 }
 
-/** The composer-held bindings map for the seed exec tools (parallel to the registry). */
-export function seedBindings(): ReadonlyMap<string, ExecToolBinding> {
+/**
+ * The composer-held bindings map for the seed exec tools (parallel to the registry). SLICE-CAP4b — an
+ * OPTIONAL `extra` map of (name -> binding) so the BIN can add the binding for an extra seed tool
+ * (parallel to `seedRegistry`'s `extra`). Default empty => byte-identical to today (the 14 seed tools).
+ */
+export function seedBindings(
+  extra: ReadonlyMap<string, ExecToolBinding> = new Map(),
+): ReadonlyMap<string, ExecToolBinding> {
   return new Map<string, ExecToolBinding>([
     ["exec.echo", echoBinding],
     ["exec.ls", lsBinding],
@@ -482,5 +499,6 @@ export function seedBindings(): ReadonlyMap<string, ExecToolBinding> {
     ["git.log", gitLogBinding],
     ["git.add", gitAddBinding],
     ["git.commit", gitCommitBinding],
+    ...extra,
   ]);
 }

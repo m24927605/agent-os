@@ -3,6 +3,7 @@
  * vendor-neutral ports. Low-coupling by dependency injection; names no vendor.
  */
 export * from "./pipeline.js";
+export * from "./approvers.js";
 export * from "./replay.js";
 export * from "./restore.js";
 export * from "./snapshot.js";

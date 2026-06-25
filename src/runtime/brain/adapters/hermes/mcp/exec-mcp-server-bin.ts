@@ -47,6 +47,11 @@ import { type AppendTransport, redactSecrets } from "../../../../../audit/index.
 import type { CommitAppender } from "../../../../../commitgate/index.js";
 import { type CostGate, InMemoryCostGate, failClosedCostGate } from "../../../../../cost/index.js";
 import {
+  type ApprovalOutcome,
+  type MaybePromise,
+  createBudgetApprover,
+} from "../../../../../orchestration/index.js";
+import {
   type PolicyDecision,
   type PolicyRequest,
   type SecondaryPolicyAdapter,
@@ -54,12 +59,13 @@ import {
   evaluateSecondaries,
 } from "../../../../../policy/index.js";
 import type { TenantBinding } from "../../../../../tenant/index.js";
-import { authorizeToolInvoke } from "../../../../../tools/index.js";
+import { type Primitive, authorizeToolInvoke } from "../../../../../tools/index.js";
 import { createPartitionedIngestSink, createRpcAppendTransport } from "../../../../ingest/index.js";
 import { integrationsFromEnv } from "../../../../spendguard/index.js";
 import type { ExecCapableSandboxAdapter } from "../../../../substrate/index.js";
 import { FakeSandboxAdapter } from "../../../../substrate/index.js";
 import { makeArgsCredentialScreen } from "../args-credential-screen.js";
+import type { ExecToolBinding } from "../exec-closed-loop.js";
 import { seedBindings, seedRegistry } from "../exec-seed-tools.js";
 import { type AgtScope, buildProjectionForCall } from "../governance-projection-for-call.js";
 import type { ExecMcpServerDeps } from "./exec-mcp-server.js";
@@ -132,6 +138,59 @@ export interface BuildBinOpts {
    * follow-up; this is the plumbing that lets it land without a bin rewrite.
    */
   readonly secondaries?: readonly SecondaryPolicyAdapter[];
+  /**
+   * SLICE-CAP4b — inject the approve seam (a TEST seam: a Fake approver proves the bin GATES a destructive
+   * tool through the CAP4a approval stage WITHOUT needing a real pre-auth config). The LIVE bin omits this
+   * and builds `createBudgetApprover(<env-driven pre-auth predicate>)` — UNCONFIGURED => deny-all (fail-
+   * closed). Forwarded into `ExecMcpServerDeps.approve` and consulted by `runGovernedToolCall` ONLY when the
+   * PDP allow carries `requiresApproval === true` (the 14 seed tools are all false => byte-identical).
+   */
+  readonly approve?: (toolCall: unknown) => MaybePromise<ApprovalOutcome>;
+  /**
+   * SLICE-CAP4b — EXTRA seed tools (a TEST seam) added to the bin's registry + bindings so a SYNTHETIC
+   * destructive tool (the real destructive tool git.push is Slice 6) proves the END-TO-END approval gate.
+   * The bin's registry is built with `wired ⊇ {"approval"}`, so a destructive (approval-requiring) manifest
+   * here REGISTERS. Default empty => byte-identical (only the 14 seed tools). The LIVE bin omits this.
+   */
+  readonly extraSeedTools?: readonly { manifest: unknown; binding: ExecToolBinding }[];
+  /**
+   * SLICE-CAP4b — EXTRA PDP allow rules (a TEST seam) so an injected `extraSeedTools` name is PDP-
+   * authorizable alongside `exec.**` / `git.**`. Advisory secondaries / PDP sovereignty are unchanged.
+   * Default empty => byte-identical. The LIVE bin omits this (no extra tools to authorize).
+   */
+  readonly extraAllowRules?: readonly {
+    id: string;
+    action: string;
+    resource: string;
+    tenantId: string;
+  }[];
+}
+
+/**
+ * SLICE-CAP4b — the env var carrying the PERSONAL pre-authorized allowlist (comma-separated tool names).
+ * NON-secret config (a budget/allowlist, not a credential). UNCONFIGURED (unset / empty) => an EMPTY set
+ * => a deny-all pre-auth predicate => every approval-requiring tool is denied@approval (fail-closed). The
+ * rich per-call budget can be a follow-up; the point of CAP4b is the end-to-end mechanism + deny-by-default.
+ */
+const APPROVE_PREAUTH_ENV = "AGENTOS_APPROVE_PREAUTH";
+
+/**
+ * Build the bin's PERSONAL pre-authorization predicate from env. Reads `AGENTOS_APPROVE_PREAUTH` as a
+ * comma-separated allowlist of tool NAMES; a proposed call is pre-authorized iff its `tool` is in the set.
+ * UNCONFIGURED (unset / blank / only-whitespace) => an EMPTY set => deny-all (fail-closed). Pure over env.
+ */
+function preAuthFromEnv(env: NodeJS.ProcessEnv): (toolCall: unknown) => boolean {
+  const raw = env[APPROVE_PREAUTH_ENV] ?? "";
+  const allow = new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+  return (toolCall: unknown): boolean => {
+    const name = (toolCall as { tool?: unknown } | null)?.tool;
+    return typeof name === "string" && allow.has(name);
+  };
 }
 
 /**
@@ -236,7 +295,17 @@ function buildDeps(
   appender: CommitAppender<unknown, unknown>,
   opts: BuildBinOpts,
 ): ExecMcpServerDeps {
-  const registry = seedRegistry();
+  // SLICE-CAP4b — the bin WIRES the "approval" governance primitive into ITS registry, because it injects
+  // an `approve` seam (below). COUPLED INVARIANT: an `approve` seam ⟺ "approval" wired for THIS registry —
+  // so a destructive (approval-requiring) tool can register here AND is gated by the approval stage. The 14
+  // seed tools are all in-sandbox (require NO primitive), so wiring "approval" leaves them byte-identical
+  // (it only unlocks registration of a tool that DECLARES it needs approval).
+  const binWired: ReadonlySet<Primitive> = new Set<Primitive>(["approval"]);
+  const extraSeedTools = opts.extraSeedTools ?? [];
+  const registry = seedRegistry(
+    binWired,
+    extraSeedTools.map((t) => t.manifest),
+  );
   const allowRules = [
     {
       id: "allow-exec",
@@ -254,6 +323,9 @@ function buildDeps(
       resource: "git.**",
       tenantId: BIN_CONTEXT.tenantId,
     },
+    // SLICE-CAP4b — EXTRA allow rules (TEST seam: makes an injected synthetic tool PDP-authorizable). Empty
+    // by default => byte-identical (the live bin injects none — no extra tools, no extra rules).
+    ...(opts.extraAllowRules ?? []),
   ];
   // SLICE-SETUP1a — derive integrations FROM ENV (descriptor `mcp_servers.env`) in REAL mode ONLY. Throws
   // fail-closed on a PARTIAL SpendGuard config (IT1b). FAKE mode skips the env read entirely so the
@@ -277,8 +349,20 @@ function buildDeps(
   // is unconfigured, integ.agtScope is absent — but the projection only MATTERS to a configured AGT
   // secondary (an absent secondary never reads it), so building it is harmless and the no-AGT path stays
   // byte-identical (no projection consumer => no behavioural change).
-  const bindings = seedBindings();
+  const bindings = seedBindings(
+    new Map<string, ExecToolBinding>(
+      extraSeedTools.map((t) => [(t.manifest as { name: string }).name, t.binding]),
+    ),
+  );
   const agtScope: AgtScope = integ.agtScope ?? "effectful";
+  // SLICE-CAP4b — the bin's PERSONAL approve seam. A TEST seam (opts.approve) takes precedence; the LIVE
+  // bin builds `createBudgetApprover(<env-driven pre-auth predicate>)` — UNCONFIGURED => deny-all (fail-
+  // closed). This is the COUPLED counterpart of wiring "approval" into the registry above: the bin both
+  // (a) lets a destructive tool register AND (b) gates it through the approval stage. `runGovernedToolCall`
+  // consults `approve` ONLY when the PDP allow carries `requiresApproval === true` (the 14 seed tools are
+  // all false => the stage is skipped => byte-identical; the approver is never even called for them).
+  const approve: (toolCall: unknown) => MaybePromise<ApprovalOutcome> =
+    opts.approve ?? createBudgetApprover(preAuthFromEnv(process.env));
   return {
     substrate,
     sandboxId,
@@ -338,8 +422,21 @@ function buildDeps(
       // secondary's reason can carry a secret; without this scrub it would flow into the commit-before-
       // effect AuditEvent (`decisionReason: decision.reason`, pipeline.ts) -> the bin's WORM. `redactSecrets`
       // on a clean reason is the identity, so the no-secondary default path stays byte-identical.
-      return { effect: combined.effect, reason: redactSecrets(combined.reason) };
+      //
+      // SLICE-CAP4b: set `requiresApproval` FROM THE MANIFEST (`registry.lookup(tc.tool)?.requiresApproval`)
+      // so CAP4a's approval stage fires for a destructive (approval-requiring) tool — a SECOND, pre-effect
+      // authorization on top of the PDP allow. PDP-SUBORDINATE: this rides ONLY the combined `effect`; a PDP/
+      // secondary DENY short-circuits at the policy stage first (the approval stage is never reached). The 14
+      // seed tools are all requiresApproval:false (and an unregistered name => `undefined` => `?? false`), so
+      // the stage is SKIPPED for them => byte-identical. NON-VACUITY: drop this and the destructive tool's
+      // approval gate is bypassed (it executes unapproved) — the bin's deny@approval e2e test flips RED.
+      return {
+        effect: combined.effect,
+        reason: redactSecrets(combined.reason),
+        requiresApproval: registry.lookup(tc.tool)?.requiresApproval ?? false,
+      };
     },
+    approve,
     cost,
     estimateTokens: () => 10,
     appender,

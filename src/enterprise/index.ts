@@ -22,3 +22,8 @@ export type {
 // TenantBinding into a sink that appends to that tenant's INDEPENDENT kernel partition chain. Re-exported
 // through THIS barrel (from the runtime/ingest barrel) so Enterprise stays the single import surface.
 export { createPartitionedIngestSink } from "../runtime/ingest/index.js";
+// SLICE-CAP4b: the Enterprise approve-seam factory — wraps the existing maker-checker primitive into the
+// CAP4a `approve` seam (allow => approved, deny => denied; the wrapped reason is NOT forwarded). Provided
+// READY for the Enterprise surface to wire (CAP4b proves the end-to-end mechanism on the bin path).
+export { createMakerCheckerApprover } from "./maker-checker-approver.js";
+export type { MakerCheckerInputs } from "./maker-checker-approver.js";
