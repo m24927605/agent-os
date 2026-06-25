@@ -43,7 +43,7 @@
  * neutral (no vendor token), and this zone is under an adapter sub-tree, so dependency-cruiser holds.
  */
 import { pathToFileURL } from "node:url";
-import type { AppendTransport } from "../../../../../audit/index.js";
+import { type AppendTransport, redactSecrets } from "../../../../../audit/index.js";
 import type { CommitAppender } from "../../../../../commitgate/index.js";
 import { type CostGate, InMemoryCostGate, failClosedCostGate } from "../../../../../cost/index.js";
 import {
@@ -291,7 +291,12 @@ function buildDeps(
         pdp,
         evaluateSecondaries(secondaries, req as unknown as PolicyRequest),
       );
-      return { effect: combined.effect, reason: combined.reason };
+      // SLICE-AGT1-A: redact the combined reason before it leaves the authorize boundary (mirrors the
+      // three surfaces' `redactSecrets(combined.reason)` after their fold). An UNTRUSTED advisory
+      // secondary's reason can carry a secret; without this scrub it would flow into the commit-before-
+      // effect AuditEvent (`decisionReason: decision.reason`, pipeline.ts) -> the bin's WORM. `redactSecrets`
+      // on a clean reason is the identity, so the no-secondary default path stays byte-identical.
+      return { effect: combined.effect, reason: redactSecrets(combined.reason) };
     },
     cost,
     estimateTokens: () => 10,

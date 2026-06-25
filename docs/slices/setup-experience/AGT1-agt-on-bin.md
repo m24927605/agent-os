@@ -3,7 +3,11 @@
 - **Phase**: integrations（讓 AGT advisory 也 gate autonomous 路徑,如 SpendGuard 已做)
 - **Branch**: slice/agt1-on-bin（待核准)
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
-- **狀態**: **DRAFT — ⚠️ 含一個需你拍板的設計 blocker(grounding 揭露)**
+- **狀態**: ✅ **scope A DONE（merged)** — 你選 A(只做 bin reason redact);B/C 未做(真 Python AGT 待 R9 phase)
+
+## ✅ scope A 完成紀錄（merged)
+bin `buildDeps` authorize 一行:`return { effect: combined.effect, reason: redactSecrets(combined.reason) };`(+ import `redactSecrets`)。鏡像 IT1a 三面的 reason scrub。RED → verify **exit 0**(1171 passed + 26 skipped;3 測;remove-wrap mutation 翻 NON-LEAK-AUTHORIZE〔canary verbatim〕;clean-reason identity;EXEC4c-a/b + SETUP1a byte-identical 綠;depcruise/secret-scan clean;core 10/10 byte-unchanged)。獨立 Opus4.8 review PASS。
+**誠實發現(reviewer 核實 TRUE)**:bin 的 REAL appender(`createPartitionedIngestSink`→`canonicalizeAuditEvent`,canonical.ts:66 在 canonicalJson 前已 `redactSecrets`)**本就保護 committed WORM bytes** → 此 authorize-redact 是 **defense-in-depth + 與三面一致**(非 bin WORM 唯一防線;真 non-vacuity 在 authorize 邊界直接測,canonicalEvent capture 會 vacuous)。**未接真 AGT**——真 Python AGT 跨語言 async,塞不進 sync evaluate/authorize,待 R9 async bridge + async-authorize 決定(B/C 未做)。
 
 ## (0) ⚠️ 誠實的 blocker(grounding 揭露,務必先讀)
 SETUP1a 已讓 bin 折 advisory secondaries,但 **secondaries 無法從 env/config 接**(env 帶不了 code)。要把 AGT 接進 bin,grounding 揭露三個 sync/async + 跨語言事實:
