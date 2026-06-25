@@ -68,6 +68,16 @@ export interface ExecToolBinding {
    */
   readonly toEnv?: (validatedArgs: unknown) => Readonly<Record<string, string>>;
   /**
+   * SLICE-CAP1 — OPTIONAL composer-built STDIN payload (raw bytes). Mirrors `toEnv?` (pure). This is the
+   * channel for CONTENT that must NEVER pass through argv/shell — e.g. `exec.write_file`'s file content,
+   * delivered to `tee -- <path>` as bytes. The brain's declared content becomes stdin BYTES here (built
+   * in ONE place from the validated args), so `"; rm -rf /"` is written as DATA, never interpreted (there
+   * is no shell). `makeExecEffect`'s credential-blind INPUT guard screens the stdin too (defense-in-depth)
+   * and DENIES fail-closed if it is secret-shaped. Returns `undefined` to send no stdin (the default for
+   * every tool that declares no `toStdin`). PURE: never reads argv/shell, never throws on normal input.
+   */
+  readonly toStdin?: (validatedArgs: unknown) => Uint8Array | undefined;
+  /**
    * SLICE-R9b-2b — OPTIONAL tool-declared governance projector. An EFFECTFUL tool (e.g. `exec.run`) that
    * wants the AGT advisory to opine on it declares a thin wrapper around its R9b-1 projection builder
    * (over the VALIDATED args — the screen already ran, then the projection best-effort redacts). A
@@ -131,21 +141,30 @@ export function bindingWrappedExecEffect(
     const validated = parsed.data;
 
     // (c) build argv as a PURE STRING VECTOR from the composer's prefix + the validated params. The
-    // brain's args are DECLARED PARAMS, NOT argv — this is the ONLY place argv is constructed.
+    // brain's args are DECLARED PARAMS, NOT argv — this is the ONLY place argv is constructed. The
+    // OPTIONAL stdin (CAP1) is built here too: CONTENT that must never enter argv/shell travels as bytes.
     let argv: readonly string[];
     let env: Readonly<Record<string, string>> | undefined;
+    let stdin: Uint8Array | undefined;
     try {
       argv = [...binding.argvPrefix, ...binding.toArgv(validated)];
       env = binding.toEnv?.(validated);
+      stdin = binding.toStdin?.(validated);
     } catch {
-      // A binding builder that throws is fail-closed (deny) — never an unbounded crash to the loop.
+      // A binding builder that throws (toArgv/toEnv/toStdin) is fail-closed (deny) — never an unbounded
+      // crash to the loop. A throwing toStdin denies exactly like a throwing toArgv/toEnv.
       return { ok: false, detail: "exec binding build error (deny)" };
     }
 
-    // (d) delegate to the REAL credential-blind, fail-closed, capped exec effect.
+    // (d) delegate to the REAL credential-blind, fail-closed, capped exec effect. stdin (when present) is
+    // screened by makeExecEffect's INPUT guard before any exec — a secret-shaped stdin denies fail-closed.
     return execEffect({
       context: toolCall.context,
-      args: { argv, ...(env !== undefined ? { env } : {}) },
+      args: {
+        argv,
+        ...(env !== undefined ? { env } : {}),
+        ...(stdin !== undefined ? { stdin } : {}),
+      },
     });
   };
 }

@@ -40,7 +40,11 @@ function secretCanary(): string {
 }
 
 /** A governed tool call carrying the exec spec the effect derives argv/env from. */
-function execCall(args: { argv: readonly string[]; env?: Record<string, string> }) {
+function execCall(args: {
+  argv: readonly string[];
+  env?: Record<string, string>;
+  stdin?: Uint8Array;
+}) {
   return { tool: "exec", context: ctx, args };
 }
 
@@ -251,6 +255,71 @@ describe("DEFAULT detector (PRODUCTION) — makeExecEffect with NO detectSecret 
     const res = await effect(execCall({ argv: ["printenv"], env: { TOKEN: "bundleRef:cred-1" } }));
     expect(res.ok).toBe(true);
     expect(execCalls).toBe(1); // a non-secret reference is NOT flagged -> the default is not always-true
+  });
+});
+
+// ==================================================================================================
+// SLICE-CAP1 — `stdin` is threaded to the substrate AND screened by the SAME credential-blind INPUT
+// guard. `exec.write_file` delivers file content as stdin BYTES (never argv/shell). makeExecEffect must
+// (1) pass stdin through to substrate.execSandbox, and (2) screen the decoded stdin for secret shapes
+// (defense-in-depth) so a secret-shaped stdin DENIES fail-closed and never reaches the substrate.
+// ==================================================================================================
+describe("CAP1 stdin threading — clean stdin bytes reach the substrate spec verbatim", () => {
+  it("passes stdin through to substrate.execSandbox and runs (no-stdin path stays unchanged)", async () => {
+    let seenStdin: Uint8Array | undefined;
+    const fake = new FakeSandboxAdapter({
+      exec: (spec) => {
+        seenStdin = spec.stdin;
+        return { ok: true, exitCode: 0, stdout: "wrote", stderr: "", truncated: false };
+      },
+    });
+    const sandboxId = await liveFakeSandbox(fake);
+    const effect = makeExecEffect(fake, sandboxId, { detectSecret });
+
+    const stdin = new TextEncoder().encode("hello file content\nline 2\n");
+    const res = await effect(execCall({ argv: ["tee", "--", "/tmp/f"], stdin }));
+    expect(res.ok).toBe(true);
+    // The stdin bytes reached the substrate spec VERBATIM (the write_file content path).
+    expect(seenStdin).toEqual(stdin);
+  });
+});
+
+describe("CAP1 credential-blind INPUT — secret-shaped STDIN -> deny, execSandbox NEVER called", () => {
+  it("denies (ok:false) and does not call execSandbox when the decoded stdin is secret-shaped", async () => {
+    let execCalls = 0;
+    const fake = new FakeSandboxAdapter({
+      exec: () => {
+        execCalls += 1;
+        return { ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false };
+      },
+    });
+    const sandboxId = await liveFakeSandbox(fake);
+    // The args screen is BYPASSED here (we call the effect directly with no upstream screen) so this
+    // pins the stdin INPUT guard ALONE — non-vacuity for CAP1-(d)'s stdin-guard defense-in-depth layer.
+    const effect = makeExecEffect(fake, sandboxId, { detectSecret });
+
+    const stdin = new TextEncoder().encode(`leaked: ${secretCanary()}`);
+    const res = await effect(execCall({ argv: ["tee", "--", "/tmp/f"], stdin }));
+    expect(res.ok).toBe(false);
+    expect(res.detail).toContain("credential-blind");
+    expect(execCalls).toBe(0); // the secret-shaped stdin NEVER reached the substrate/process
+  });
+
+  it("ALLOWS a non-secret stdin (the guard is NOT vacuous — a plain payload runs)", async () => {
+    let execCalls = 0;
+    const fake = new FakeSandboxAdapter({
+      exec: () => {
+        execCalls += 1;
+        return { ok: true, exitCode: 0, stdout: "ok", stderr: "", truncated: false };
+      },
+    });
+    const sandboxId = await liveFakeSandbox(fake);
+    const effect = makeExecEffect(fake, sandboxId, { detectSecret });
+
+    const stdin = new TextEncoder().encode("just some plain file text, nothing secret here");
+    const res = await effect(execCall({ argv: ["tee", "--", "/tmp/f"], stdin }));
+    expect(res.ok).toBe(true);
+    expect(execCalls).toBe(1); // a non-secret stdin is NOT flagged -> the guard is not always-true
   });
 });
 

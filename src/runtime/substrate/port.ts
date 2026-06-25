@@ -57,6 +57,15 @@ export interface ExecCommandSpec {
   readonly argv: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
+  /**
+   * OPTIONAL stdin payload (raw bytes). The substrate streams this to the command's stdin. Content that
+   * must NOT pass through argv/shell (e.g. `exec.write_file`'s file content via `tee -- <path>`) travels
+   * here as BYTES — never an argv element, never a shell string. Like `env` values, stdin bytes are
+   * credential-blind: `makeExecEffect` screens the decoded stdin and DENIES fail-closed BEFORE any exec
+   * if it is secret-shaped (the substrate/process never sees a raw secret). An oversized payload is a
+   * resource bound enforced by the substrate adapter (deny-by-default), not by this buffered port.
+   */
+  readonly stdin?: Uint8Array;
 }
 
 /** Boundary validator for `ExecCommandSpec`. argv must be non-empty (a command with no program is denied). */
@@ -64,6 +73,9 @@ export const ExecCommandSpecSchema = z.object({
   argv: z.array(z.string()).nonempty(),
   env: z.record(z.string(), z.string()).optional(),
   timeoutMs: z.number().int().nonnegative().optional(),
+  // stdin is raw bytes (a Uint8Array); validated as an instance so a malformed (non-bytes) stdin is
+  // fail-closed at the port boundary, never coerced.
+  stdin: z.instanceof(Uint8Array).optional(),
 });
 
 /**

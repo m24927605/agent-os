@@ -183,6 +183,7 @@ describe("EXEC4b (in-repo) — RED-L1 loopback tools/list advertises exactly the
         "exec.pwd",
         "exec.run",
         "exec.wc",
+        "exec.write_file",
       ]);
     } finally {
       await server.close();
