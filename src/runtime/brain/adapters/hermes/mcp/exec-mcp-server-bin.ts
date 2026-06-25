@@ -244,6 +244,16 @@ function buildDeps(
       resource: "exec.**",
       tenantId: BIN_CONTEXT.tenantId,
     },
+    // SLICE-CAP2 — the in-sandbox GIT FAMILY (git.status/diff/log/add/commit) is registered + advertised;
+    // it must also be AUTHORIZABLE. PURE ADDITION: a second allow rule alongside `exec.**` (OR-combined),
+    // so `exec.**` stays byte-identical. `git.push` is NOT registered (deny-by-default still blocks it —
+    // an allow rule never admits an unregistered name), and remains DEFERRED to Slice 5/6.
+    {
+      id: "allow-git",
+      action: "tool:invoke",
+      resource: "git.**",
+      tenantId: BIN_CONTEXT.tenantId,
+    },
   ];
   // SLICE-SETUP1a — derive integrations FROM ENV (descriptor `mcp_servers.env`) in REAL mode ONLY. Throws
   // fail-closed on a PARTIAL SpendGuard config (IT1b). FAKE mode skips the env read entirely so the
