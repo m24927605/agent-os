@@ -15,6 +15,15 @@
  */
 import { type CommitAppender, commitBeforeEffect } from "../commitgate/index.js";
 import type { CostGate } from "../cost/index.js";
+import type { MaybePromise } from "../policy/index.js";
+
+/**
+ * Re-export the policy-barrel `MaybePromise<T>` on the orchestration surface so a consumer that already
+ * imports the orchestration ports (e.g. the exec MCP server's `ExecMcpServerDeps`) can type its async-
+ * capable `authorize` seam WITHOUT a new cross-zone import. The canonical definition lives in the policy
+ * barrel (SLICE-R9a).
+ */
+export type { MaybePromise } from "../policy/index.js";
 
 /**
  * The minimal shape the pipeline needs from a brain-proposed tool call. Kept structural (NOT an import
@@ -33,8 +42,13 @@ export type EffectResult = { ok: boolean; detail?: string; tokensUsed?: number }
 export interface GovernedToolCallDeps<TC extends GovernedCall, R> {
   /** Credential-blind / structural screen of the brain's proposed call. */
   readonly screen: (toolCall: TC) => ScreenOutcome;
-  /** The SOLE authorization decision (PDP + any secondary dedup folded in by the composition root). */
-  readonly authorize: (toolCall: TC) => AuthorizeDecision;
+  /**
+   * The SOLE authorization decision (PDP + any secondary dedup folded in by the composition root).
+   * `MaybePromise` (SLICE-R9a): the seam accepts a sync closure OR an async one (e.g. a composition root
+   * that awaits a cross-language advisory). The pipeline `await`s it; a sync value resolves to itself, so
+   * the absent/sync path is behaviorally byte-identical. A THROW or a promise REJECTION is fail-closed.
+   */
+  readonly authorize: (toolCall: TC) => MaybePromise<AuthorizeDecision>;
   readonly cost: CostGate;
   readonly estimateTokens: (toolCall: TC) => number;
   /** Append-before-effect appender (commitgate). */
@@ -78,8 +92,17 @@ export async function runGovernedToolCall<TC extends GovernedCall, R>(
     return { status: "denied", stage: "screen", reason: screened.reason };
   }
 
-  // 2) policy (PDP sole deny authority)
-  const decision = deps.authorize(toolCall);
+  // 2) policy (PDP sole deny authority). `authorize` is `MaybePromise` (SLICE-R9a): `await` works for a
+  // sync value (resolves to itself) AND an async advisory. FAIL-CLOSED: a THROW or a promise REJECTION
+  // from authorize is mapped to a STATIC `denied@policy` reason — the error message NEVER leaks (no
+  // secret/internal egress), the rejection NEVER escapes, and (like an ordinary deny) the cost reserve,
+  // commit-before-effect append, and the effect do NOT run.
+  let decision: AuthorizeDecision;
+  try {
+    decision = await deps.authorize(toolCall);
+  } catch {
+    decision = { effect: "deny", reason: "authorize failed closed (deny-by-default)" };
+  }
   if (decision.effect === "deny") {
     return { status: "denied", stage: "policy", reason: decision.reason };
   }

@@ -81,37 +81,37 @@ describe("evaluateSecondaries — fail-closed (a secondary that throws is treate
     },
   };
 
-  it("a throwing secondary yields a synthetic deny (deny-by-default)", () => {
-    const decisions = evaluateSecondaries([throwing], req);
+  it("a throwing secondary yields a synthetic deny (deny-by-default)", async () => {
+    const decisions = await evaluateSecondaries([throwing], req);
     expect(decisions).toHaveLength(1);
     expect(decisions[0]?.effect).toBe("deny");
   });
 
-  it("a throwing secondary makes the combined decision deny even when PDP allowed", () => {
-    const out = combineDecisions(allow, evaluateSecondaries([throwing], req));
+  it("a throwing secondary makes the combined decision deny even when PDP allowed", async () => {
+    const out = combineDecisions(allow, await evaluateSecondaries([throwing], req));
     expect(out.effect).toBe("deny");
   });
 });
 
 describe("REAL AGT advisory adapter through the dedup harness (R11-S4)", () => {
-  it("AGT-allow + PDP-deny => deny — the real AGT adapter is advisory, PDP is the sole deny authority", () => {
+  it("AGT-allow + PDP-deny => deny — the real AGT adapter is advisory, PDP is the sole deny authority", async () => {
     const agt = new AgtSecondaryPolicy(() => ({ allowed: true, action: "allow" }));
-    const out = combineDecisions(deny, evaluateSecondaries([agt], req));
+    const out = combineDecisions(deny, await evaluateSecondaries([agt], req));
     expect(out.effect).toBe("deny");
     expect(out.reason.toLowerCase()).toContain("allow"); // AGT allow recorded for audit only
   });
 
-  it("AGT throw => synthetic deny — even when PDP allowed (deny-by-default)", () => {
+  it("AGT throw => synthetic deny — even when PDP allowed (deny-by-default)", async () => {
     const throwing = new AgtSecondaryPolicy(() => {
       throw new Error("agt python engine blew up");
     });
-    const out = combineDecisions(allow, evaluateSecondaries([throwing], req));
+    const out = combineDecisions(allow, await evaluateSecondaries([throwing], req));
     expect(out.effect).toBe("deny");
   });
 
-  it("AGT require_approval (no approval channel here) => advisory deny, never allow", () => {
+  it("AGT require_approval (no approval channel here) => advisory deny, never allow", async () => {
     const agt = new AgtSecondaryPolicy(() => ({ allowed: true, action: "require_approval" }));
-    expect(combineDecisions(allow, evaluateSecondaries([agt], req)).effect).toBe("deny");
+    expect(combineDecisions(allow, await evaluateSecondaries([agt], req)).effect).toBe("deny");
   });
 });
 

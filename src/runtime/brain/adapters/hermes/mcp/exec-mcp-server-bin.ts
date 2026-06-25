@@ -265,7 +265,7 @@ function buildDeps(
     bindings: seedBindings(),
     registry,
     screen: makeArgsCredentialScreen(),
-    authorize: (tc) => {
+    authorize: async (tc) => {
       const c = tc.context as typeof BIN_CONTEXT;
       // The SAME request object fed to BOTH the PDP and the advisory secondaries (a faithful fold — the
       // advisors see EXACTLY what the PDP saw). For `tool:invoke`, `resource` IS the tool name. Built as a
@@ -284,12 +284,13 @@ function buildDeps(
       // PDP = the SOLE deny authority (deny-by-default for an unregistered tool). It is a `PolicyDecision`.
       const pdp: PolicyDecision = authorizeToolInvoke(req, registry, allowRules);
       // Fold the advisory secondaries: any-deny-wins, PDP sovereign (an allow secondary can NEVER relax a
-      // PDP deny). `evaluateSecondaries` is fail-closed (a throwing advisor => a synthetic deny). The
-      // structural `req` satisfies `PolicyRequest` shape; the branded-id cast is the same object the PDP
-      // just validated.
+      // PDP deny). `evaluateSecondaries` is fail-closed (a throwing/rejecting advisor => a synthetic deny).
+      // SLICE-R9a: it is async (it may await a cross-language advisory), so this closure is `async` and
+      // `await`s it; the fold + redact semantics are otherwise unchanged. The structural `req` satisfies
+      // `PolicyRequest` shape; the branded-id cast is the same object the PDP just validated.
       const combined = combineDecisions(
         pdp,
-        evaluateSecondaries(secondaries, req as unknown as PolicyRequest),
+        await evaluateSecondaries(secondaries, req as unknown as PolicyRequest),
       );
       // SLICE-AGT1-A: redact the combined reason before it leaves the authorize boundary (mirrors the
       // three surfaces' `redactSecrets(combined.reason)` after their fold). An UNTRUSTED advisory
