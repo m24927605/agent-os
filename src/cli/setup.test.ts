@@ -76,6 +76,12 @@ function validConfigNoSpendguard(): string {
   return JSON.stringify(c);
 }
 
+/**
+ * A runtime-built AGT UDS path canary. doctor/setup must report only the env KEY NAME / a path-class —
+ * never this VALUE. Built at runtime so no literal lives in the file (parallels the secret canaries).
+ */
+const AGT_UDS_CANARY = ["/run", "agentos", `${"x9z8".repeat(4)}`, "agt.sock"].join("/");
+
 // --- stdout/stderr capture (same idiom as doctor.test.ts) ---------------------------------------
 let outChunks: string[];
 let errChunks: string[];
@@ -174,7 +180,9 @@ describe("loadAgentOsConfig — fail-closed validation", () => {
     expect(() => loadAgentOsConfig(raw)).toThrow();
   });
 
-  it("THROWS on a present-but-unknown `agt` section (honest: rejected via .strict, not silently ignored)", () => {
+  it("THROWS on a present-but-unknown `agt` key (honest: rejected via .strict, not silently ignored)", () => {
+    // `endpoint` is NOT a field of the AGT advisory section (udsPath/scope/timeoutMs only) — `.strict()`
+    // rejects the unknown nested key, even though `agt` is now a supported section.
     const raw = JSON.stringify({ ...validConfigObject(), agt: { endpoint: "127.0.0.1:9000" } });
     expect(() => loadAgentOsConfig(raw)).toThrow();
   });
@@ -215,6 +223,53 @@ describe("loadAgentOsConfig — fail-closed validation", () => {
   it("THROWS on a PARTIAL spendguard (only budgetId set)", () => {
     const c = validConfigObject();
     const raw = JSON.stringify({ ...c, spendguard: { budgetId: "budget-1" } });
+    expect(() => loadAgentOsConfig(raw)).toThrow();
+  });
+
+  // --- SLICE-R9c: the `agt` advisory section (udsPath REQUIRED, scope/timeoutMs OPTIONAL) ---------
+  it("parses a config with a minimal `agt` section (just udsPath)", () => {
+    const c = validConfigObject();
+    const raw = JSON.stringify({ ...c, agt: { udsPath: "/p/agt.sock" } });
+    const cfg = loadAgentOsConfig(raw);
+    expect(cfg.agt?.udsPath).toBe("/p/agt.sock");
+    expect(cfg.agt?.scope).toBeUndefined();
+    expect(cfg.agt?.timeoutMs).toBeUndefined();
+  });
+
+  it("parses a config with a full `agt` section (udsPath + scope + timeoutMs)", () => {
+    const c = validConfigObject();
+    const raw = JSON.stringify({
+      ...c,
+      agt: { udsPath: "/p/agt.sock", scope: "all", timeoutMs: 1000 },
+    });
+    const cfg = loadAgentOsConfig(raw);
+    expect(cfg.agt?.udsPath).toBe("/p/agt.sock");
+    expect(cfg.agt?.scope).toBe("all");
+    expect(cfg.agt?.timeoutMs).toBe(1000);
+  });
+
+  it("parses a config WITHOUT the optional `agt` section (agt is optional)", () => {
+    const cfg = loadAgentOsConfig(validConfigNoSpendguard());
+    expect(cfg.agt).toBeUndefined();
+  });
+
+  it("THROWS on a PARTIAL agt (present but NO udsPath) — fail-closed all-or-nothing", () => {
+    // NON-VACUITY: a mutation making `udsPath` optional (agt fields independently optional) would
+    // PASS-parse this empty agt object, flipping this test RED. udsPath is REQUIRED when agt is present.
+    const c = validConfigObject();
+    const raw = JSON.stringify({ ...c, agt: {} });
+    expect(() => loadAgentOsConfig(raw)).toThrow();
+  });
+
+  it("THROWS on an invalid agt.scope (not effectful|all)", () => {
+    const c = validConfigObject();
+    const raw = JSON.stringify({ ...c, agt: { udsPath: "/p/agt.sock", scope: "bogus" } });
+    expect(() => loadAgentOsConfig(raw)).toThrow();
+  });
+
+  it("THROWS on a non-integer agt.timeoutMs (wrong type)", () => {
+    const c = validConfigObject();
+    const raw = JSON.stringify({ ...c, agt: { udsPath: "/p/agt.sock", timeoutMs: "x" } });
     expect(() => loadAgentOsConfig(raw)).toThrow();
   });
 });
@@ -410,5 +465,79 @@ describe("setupCommand — credential-blind", () => {
     await setupCommand(["--print"], {}, deps);
     expect(allOutput()).not.toContain(SECRET_CANARY);
     expect(printed.join("\n")).not.toContain(SECRET_CANARY);
+  });
+});
+
+// ================================================================================================
+// (8) SLICE-R9c — setup writes AGT_* env when the config declares `agt`, omits it otherwise
+// ================================================================================================
+describe("setupCommand — AGT_* env build (R9b-2b integrationsFromEnv picks it up)", () => {
+  /** A config object carrying a full `agt` advisory section (udsPath + scope + timeoutMs). */
+  function configWithAgt(scope = "effectful", timeoutMs = 750): string {
+    return JSON.stringify({
+      ...validConfigObject(),
+      agt: { udsPath: AGT_UDS_CANARY, scope, timeoutMs },
+    });
+  }
+
+  it("emits AGT_UDS_PATH (+ AGT_SCOPE + AGT_TIMEOUT_MS) into the rendered block when agt is set", async () => {
+    const { deps, printed } = makeDeps({ configRaw: configWithAgt("all", 1500) });
+    const code = await setupCommand(["--print"], {}, deps);
+    expect(code).toBe(0);
+    const blob = printed.join("\n");
+    // NON-VACUITY: dropping the AGT_UDS_PATH write flips this RED (the env-build no longer carries it).
+    expect(blob).toContain("AGT_UDS_PATH");
+    expect(blob).toContain("AGT_SCOPE");
+    expect(blob).toContain("AGT_TIMEOUT_MS");
+    // The scope/timeout VALUES are non-secret and flow through verbatim.
+    expect(blob).toContain("all");
+    expect(blob).toContain("1500");
+  });
+
+  it("emits ONLY AGT_UDS_PATH (no AGT_SCOPE / AGT_TIMEOUT_MS) when scope/timeoutMs are omitted", async () => {
+    const raw = JSON.stringify({ ...validConfigObject(), agt: { udsPath: AGT_UDS_CANARY } });
+    const { deps, printed } = makeDeps({ configRaw: raw });
+    const code = await setupCommand(["--print"], {}, deps);
+    expect(code).toBe(0);
+    const blob = printed.join("\n");
+    expect(blob).toContain("AGT_UDS_PATH");
+    expect(blob).not.toContain("AGT_SCOPE");
+    expect(blob).not.toContain("AGT_TIMEOUT_MS");
+  });
+
+  it("omits ALL AGT_* env when the config has NO agt section (byte-identical to today)", async () => {
+    const { deps, printed } = makeDeps({ configRaw: validConfigNoSpendguard() });
+    const code = await setupCommand(["--print"], {}, deps);
+    expect(code).toBe(0);
+    const blob = printed.join("\n");
+    expect(blob).not.toContain("AGT_UDS_PATH");
+    expect(blob).not.toContain("AGT_SCOPE");
+    expect(blob).not.toContain("AGT_TIMEOUT_MS");
+  });
+
+  it("passes the BUILT AGT_* env to doctor (so doctor's conditional AGT check sees the configured socket)", async () => {
+    let seenEnv: NodeJS.ProcessEnv | undefined;
+    const { deps } = makeDeps({
+      configRaw: configWithAgt("effectful", 750),
+      doctor: async (env) => {
+        seenEnv = env;
+        return 0;
+      },
+    });
+    const code = await setupCommand(["--print"], {}, deps);
+    expect(code).toBe(0);
+    expect(seenEnv?.AGT_UDS_PATH).toBe(AGT_UDS_CANARY);
+    expect(seenEnv?.AGT_SCOPE).toBe("effectful");
+    expect(seenEnv?.AGT_TIMEOUT_MS).toBe("750");
+  });
+
+  it("emits the AGT argv env-pair on the interactive `hermes mcp add` path too", async () => {
+    const { deps, hermesCalls } = makeDeps({ configRaw: configWithAgt() });
+    const code = await setupCommand([], {}, deps);
+    expect(code).toBe(0);
+    expect(hermesCalls).toHaveLength(1);
+    const argv = hermesCalls[0];
+    if (argv === undefined) throw new Error("expected runHermesMcpAdd to have been called");
+    expect(argv.some((a) => a.startsWith("AGT_UDS_PATH="))).toBe(true);
   });
 });

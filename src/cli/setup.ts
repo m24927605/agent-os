@@ -39,9 +39,12 @@ import { dirname, resolve } from "node:path";
  * the user to merge, or delegates the merge to Hermes's own CLI.
  *
  * Honest scope: SETUP2 = generate + apply + verify onboarding. SpendGuard is turnkey via the env this
- * wizard writes (SETUP1a wired the bin to honor it). AGT is deferred to the endpoint-adapter slice (env
- * cannot carry code). `setup` starts NO services (Hermes/OpenShell/kernel) — that is deployment; doctor
- * checks they are up. The apply delegates to `hermes mcp add` or prints — never a fragile auto-merge.
+ * wizard writes (SETUP1a wired the bin to honor it). AGT advisory is turnkey the same way (SLICE-R9c):
+ * a config `agt` section -> the AGT_* env -> R9b-2b's `integrationsFromEnv` registers the AGT secondary.
+ * The honest boundary remains: REAL AGT live still needs the operator's Python sidecar — `e2e:live-agt`
+ * is that gated path. `setup` starts NO services (Hermes/OpenShell/kernel/sidecars) — that is deployment;
+ * doctor checks they are up. The apply delegates to `hermes mcp add` or prints — never a fragile
+ * auto-merge.
  *
  * Testability: the I/O (config read, readline prompt, `hermes mcp add` spawn, doctor, stdout) is
  * INJECTABLE via the optional `deps` seam, defaulting to the real node-built-in implementations. Tests
@@ -89,9 +92,14 @@ const BIN_REL_PATH = "dist/runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin
  *   is a zod error — the fail-closed "thought SpendGuard was on but mis-set it" guard (mirrors IT1b).
  *   Because the object's fields are all required, an under-specified spendguard fails to parse rather
  *   than silently becoming a half-configured gate.
- * • `.strict()` everywhere: an unknown top-level OR nested key (e.g. a present-but-unsupported `agt`
- *   section this slice) is REJECTED — honest over silently-ignored. The AGT-on-bin endpoint adapter is
- *   a follow-up; until then `agt` has no meaning here and must not be accepted.
+ * • `agt` is OPTIONAL but ALL-OR-NOTHING (SLICE-R9c): the AGT advisory section carries `udsPath`
+ *   (REQUIRED when `agt` is present), plus optional `scope` ("effectful" | "all") and `timeoutMs`
+ *   (positive int). A PARTIAL agt (present but no `udsPath` / a bad scope / a non-int timeoutMs) is a
+ *   zod error — fail-closed, never a half-configured advisory. When present, setup writes the matching
+ *   `AGT_*` env into the bin's `mcp_servers.env`, which R9b-2b's `integrationsFromEnv` reads to register
+ *   the AGT secondary; absent `agt` -> no `AGT_*` -> byte-identical to today.
+ * • `.strict()` everywhere: an unknown top-level OR nested key is still REJECTED — honest over
+ *   silently-ignored (e.g. an `agt.endpoint` key, which the AGT section does not define, fails-closed).
  */
 const OpenShellSchema = z
   .object({
@@ -116,11 +124,26 @@ const SpendGuardSchema = z
   })
   .strict();
 
+/**
+ * The AGT advisory section (SLICE-R9c). `udsPath` is REQUIRED when `agt` is present (all-or-nothing via
+ * the object: an empty `{}` fails to parse). `scope` defaults to "effectful" downstream (R9b-2b) when
+ * omitted; an explicit value must be "effectful" | "all". `timeoutMs`, when set, must be a positive
+ * integer. All NON-secret (a path / an enum / a number). `.strict()` rejects any unknown key.
+ */
+const AgtSchema = z
+  .object({
+    udsPath: z.string(),
+    scope: z.enum(["effectful", "all"]).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const AgentOsConfigSchema = z
   .object({
     openshell: OpenShellSchema,
     kernel: KernelSchema,
     spendguard: SpendGuardSchema.optional(),
+    agt: AgtSchema.optional(),
   })
   .strict();
 
@@ -359,8 +382,10 @@ export async function setupCommand(
 
 /**
  * Build the `agentos-exec` registration env — the bin's NON-secret runtime endpoints, plus (when the
- * config declares spendguard) the SPENDGUARD_* topology that SETUP1a's bin honors to gate the
- * autonomous path. All values come straight from the validated config; no value is a secret.
+ * config declares spendguard) the SPENDGUARD_* topology that SETUP1a's bin honors, plus (when the config
+ * declares agt) the AGT_* topology that R9b-2b's `integrationsFromEnv` reads to register the AGT advisory
+ * secondary. All values come straight from the validated config; no value is a secret (paths / ids /
+ * enums / a number). Absent `agt` -> NO `AGT_*` keys -> byte-identical to today (no AGT secondary).
  */
 function buildRegistrationEnv(config: AgentOsConfig): Record<string, string> {
   const env: Record<string, string> = {
@@ -374,6 +399,14 @@ function buildRegistrationEnv(config: AgentOsConfig): Record<string, string> {
     env.SPENDGUARD_BUDGET_ID = config.spendguard.budgetId;
     env.SPENDGUARD_UNIT_ID = config.spendguard.unitId;
     env.SPENDGUARD_WINDOW_INSTANCE_ID = config.spendguard.windowInstanceId;
+  }
+  if (config.agt !== undefined) {
+    // udsPath is REQUIRED by the schema when `agt` is present; scope/timeoutMs are optional. R9b-2b's
+    // `parseAgtConfig` defaults scope to "effectful" when AGT_SCOPE is unset, so we only write the
+    // optional keys when the operator declared them.
+    env.AGT_UDS_PATH = config.agt.udsPath;
+    if (config.agt.scope !== undefined) env.AGT_SCOPE = config.agt.scope;
+    if (config.agt.timeoutMs !== undefined) env.AGT_TIMEOUT_MS = String(config.agt.timeoutMs);
   }
   return env;
 }

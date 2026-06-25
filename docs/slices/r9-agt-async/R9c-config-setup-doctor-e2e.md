@@ -27,8 +27,9 @@ R9b-2b 讓 AGT 在 autonomous 路徑參與,且 `integrationsFromEnv` 從 `AGT_UD
 - doctor:AGT_UDS_PATH 設 + 可達 → PASS;設 + 不可達 → FAIL(非零);未設 → SKIP(不致敗)。mutation:AGT 設了不可達卻回 0 → 翻紅;不印值(spy)。
 - e2e:live-agt:無 `AGENTOS_LIVE_AGT` → script skip(exit 0 + 明示 skipped);**不在 verify 內**(gated)。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(config agt 區塊 + setup AGT_* env + doctor AGT conditional;fail-closed〔partial agt / 不可達〕;**未配置 byte-identical**;credential-blind;gated e2e skip-by-default;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測)
+- [x] **DONE（merged)**:SETUP2 `agt` 區塊(`AgtSchema={udsPath, scope?, timeoutMs?}.strict()`,all-or-nothing,unknown key〔含 agt.endpoint〕拒)+ setup 寫 `AGT_UDS_PATH`/`AGT_SCOPE`/`AGT_TIMEOUT_MS`(config.agt 存在時)+ doctor conditional AGT 檢查(unset SKIP/可達 PASS/不可達 FAIL,credential-blind)+ gated `scripts/e2e-live-agt.sh` + `e2e:live-agt`(skip-by-default、不在 verify、driver 缺 → BLOCKED exit 1 不假綠)。RED → verify **exit 0**(1275 passed + 26 skipped;54 測;fields-optional 翻 no-udsPath、drop-write 翻 env、required-when-unset 翻 SKIP;depcruise/secret-scan clean;無新依賴)。獨立 Opus4.8 review PASS,**零 finding**:**⚠️ KEY-NAME 端到端 byte-identical**(setup 寫 ⇄ R9b-2b integrationsFromEnv 讀:AGT_UDS_PATH/AGT_SCOPE/AGT_TIMEOUT_MS 完全一致、scope effectful/all 一致 → turnkey 無斷鏈)、fail-closed、未配置 byte-identical、doctor SKIP/PASS/FAIL + credential-blind、gated e2e 無法假綠。
+- **R9 完成(plumbing)**:R9a(async seam)+ R9b-1(projection)+ R9b-2a(transport/adapter)+ R9b-2b(wiring/scope)+ R9c(config/setup/doctor/e2e)。**真 AGT live 仍 BLOCKED on operator 的 Python sidecar**(`e2e:live-agt` 是那條 gated 路徑)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(schema agt 區塊 + setup env + doctor 檢查 + e2e script 純加法;未配置 byte-identical)。

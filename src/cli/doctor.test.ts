@@ -30,6 +30,12 @@ import { runCli } from "./main.js";
 /** A canary secret, built at runtime so the literal never lives in the file (secret-scan stays clean). */
 const SECRET_CANARY = ["sk", "live", `${"A1b2C3d4E5f6G7h8".repeat(2)}`].join("-");
 
+/**
+ * A runtime-built AGT UDS socket path canary. doctor's AGT check must report only the ENV KEY NAME /
+ * a path-class / a static hint — NEVER this VALUE. Built at runtime (no literal in the file).
+ */
+const AGT_UDS_CANARY = ["/run", "agentos", `${"x9z8".repeat(4)}`, "agt.sock"].join("/");
+
 /** All-green probes: every external dependency present and reachable. */
 function okProbes(): DoctorProbes {
   return {
@@ -159,6 +165,52 @@ describe("agentos doctor — SpendGuard CONDITIONAL", () => {
     const code = await doctorCommand([], {}, okProbes());
     expect(code).toBe(0);
     expect(allOutput()).toMatch(/SKIP\s+SpendGuard sidecar/);
+  });
+});
+
+// ================================================================================================
+// SLICE-R9c — AGT advisory CONDITIONAL check (mirrors SpendGuard: SKIP unset / PASS set+reachable /
+// FAIL set+unreachable). The operator opts in by setting AGT_UDS_PATH; a missing socket is a real
+// problem (fail-closed, non-zero). Unset -> AGT off -> advisory abstains (SKIP, never fails the run).
+// ================================================================================================
+describe("agentos doctor — AGT advisory CONDITIONAL", () => {
+  it("PASS when AGT_UDS_PATH is set and the socket is reachable", async () => {
+    const env = { AGT_UDS_PATH: AGT_UDS_CANARY };
+    const code = await doctorCommand([], env, okProbes());
+    expect(code).toBe(0);
+    expect(allOutput()).toMatch(/PASS\s+AGT advisory/);
+    expect(allOutput()).not.toMatch(/SKIP\s+AGT advisory/);
+  });
+
+  it("FAIL (non-zero) when AGT_UDS_PATH is set but the socket is unreachable", async () => {
+    // NON-VACUITY: making set-but-unreachable return 0 (or making the AGT check non-required) flips
+    // this RED. The operator opted in, so a missing AGT sidecar must fail-close the preflight.
+    const env = { AGT_UDS_PATH: AGT_UDS_CANARY };
+    const probes: DoctorProbes = {
+      ...okProbes(),
+      fileExists: (p: string) => p !== AGT_UDS_CANARY, // AGT socket absent
+    };
+    const code = await doctorCommand([], env, probes);
+    expect(code).not.toBe(0);
+    expect(allOutput()).toMatch(/FAIL\s+AGT advisory/);
+  });
+
+  it("SKIP (does NOT fail the run) when AGT_UDS_PATH is unset — AGT off, advisory abstains", async () => {
+    // NON-VACUITY: making the AGT check required-always (FAIL when unset) flips this RED. Unconfigured
+    // AGT is the legitimate "off" state and must never fail the preflight.
+    const code = await doctorCommand([], {}, okProbes());
+    expect(code).toBe(0);
+    expect(allOutput()).toMatch(/SKIP\s+AGT advisory/);
+    expect(allOutput()).not.toMatch(/FAIL\s+AGT advisory/);
+  });
+
+  it("CREDENTIAL-BLIND: never echoes the AGT_UDS_PATH VALUE (only the key name / path-class / hint)", async () => {
+    // The AGT socket path is operator-controlled and may be sensitive; the doctor reports the ENV KEY
+    // NAME + reachability, never the VALUE. NON-VACUITY: interpolating the path into output flips RED.
+    const env = { AGT_UDS_PATH: AGT_UDS_CANARY };
+    const code = await doctorCommand([], env, okProbes());
+    expect(code).toBe(0);
+    expect(allOutput()).not.toContain(AGT_UDS_CANARY);
   });
 });
 
