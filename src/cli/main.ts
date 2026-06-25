@@ -25,6 +25,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parseToolManifest } from "../sdk/index.js";
 import { doctorCommand } from "./doctor.js";
+import { setupCommand } from "./setup.js";
 
 /** Exit-code contract, fail-closed by construction. */
 const EXIT_OK = 0;
@@ -48,10 +49,12 @@ export async function runCli(argv: string[], env: Env = process.env): Promise<nu
       return verifyCommand(rest, env);
     case "doctor":
       return doctorCommand(rest, env);
+    case "setup":
+      return setupCommand(rest, env);
     default:
       // Unknown / missing subcommand — fail-closed, never a silent 0.
       process.stderr.write(
-        "usage: agentos <manifest lint <file> | verify --chain <f> --pubkey <f> | doctor>\n",
+        "usage: agentos <manifest lint <file> | verify --chain <f> --pubkey <f> | doctor | setup [--config <path>] [--print] [--non-interactive]>\n",
       );
       return EXIT_USAGE;
   }
