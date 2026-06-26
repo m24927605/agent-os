@@ -30,8 +30,9 @@ ACT1 確立 ActionBinding port + gmail.send/drive.read。ACT2 以**純加**(ACT1
 - byte-identical:ACT1 + exec/CAP 全測不變綠。
 - (選)若 ACT1 有 action-conformance 風格的參數化斷言,新 4 action 自動納入。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(4 新 action manifest+binding+projector+條件註冊;drive.files.delete destructive→approval 端到端;read/write egress-gated + credential-blind;projector 無 params;registration-gated;**byte-identical**〔ACT1+exec 不變〕;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:4 新 action 加進 `action-seed-tools.ts`(+barrel)——calendar.events.create(write)/calendar.events.list(read,`{}` 有效)/drive.files.delete(destructive)/gmail.search(read),各 manifest+binding+projector(networkHosts host-only、無 params)+ 條件註冊。RED → verify **exit 0**(1597 passed + 29 skipped;ACT2 38 測〔25+13〕)。獨立 Opus4.8 review **PASS**:**PURE-ADDITION diff EMPTY**(action-closed-loop/action-projection-for-call/pipeline/exec/manifest/capability-containment 7 檔 byte-unchanged)、drive.files.delete destructive→approval 端到端非 vacuous(mutation 翻 3 含 2 join;superRefine 拒 false)、projector-no-params 非 vacuous(洩 param 真到 WORM sink → mutation 翻)、registration-gated、read/write egress-gated、credential-blind(control 證 guard 負責)、strict、無新依賴。2 non-blocking nits(join-level cred-blind detail 檢查 guarded by if-executed〔hard fake-never-called 斷言無條件,unit 測無條件,覆蓋完整〕;calendar.list `{}` by design)。
+- **ActionBinding NOW-buildable 完成(ACT1+ACT2)**:6 action 工具(gmail.send/search、drive.read/delete、calendar.create/list)。ACT3+ deploy-gated。誠實:真 MCP/OAuth/network = deploy-gated;provider host composer-fixed → substrate PRIMARY,ACT3 connector 須拒未宣告 host。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 4 action)。

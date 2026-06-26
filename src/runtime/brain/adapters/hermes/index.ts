@@ -59,11 +59,21 @@ export {
 } from "./action-closed-loop.js";
 export { buildActionProjectionForCall } from "./action-projection-for-call.js";
 export {
+  CALENDAR_HOST,
   DRIVE_HOST,
+  GCAL_OAUTH_KEY_ENV,
   GMAIL_HOST,
   GMAIL_OAUTH_KEY_ENV,
+  calendarEventsCreateBinding,
+  calendarEventsCreateManifest,
+  calendarEventsListBinding,
+  calendarEventsListManifest,
+  driveFilesDeleteBinding,
+  driveFilesDeleteManifest,
   driveReadBinding,
   driveReadManifest,
+  gmailSearchBinding,
+  gmailSearchManifest,
   gmailSendBinding,
   gmailSendManifest,
   seedActionBindings,
