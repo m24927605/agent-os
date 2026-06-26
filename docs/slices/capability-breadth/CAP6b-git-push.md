@@ -39,8 +39,10 @@ CAP2 把 git.push DEFER(egress 非 argv-visible + 需 approval/egress primitive)
 - **credential placeholder**:toEnv 發 placeholder;literal secret env → makeExecEffect 拒。
 - byte-identical:既有 15 工具 + CAP1-8 測不變;advertised 15→16(bin)。
 
-## (5) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(git.push manifest/binding/條件註冊 + url〔isAllowedFetchUrl〕+ branch 嚴格驗 + toEnv placeholder + hostname projector;**approval 真 gate**〔pre-auth→approved→effect+boundary;非→denied@approval→effect 0〕;**egress 真 gate**〔非-allowlist→denied〕;boundary〔executed→event 無 argvRedacted;denied→0〕;destructive⇒requiresApproval superRefine 強制;strict/no-shell〔branch 無 flag 注入〕;**byte-identical**〔15→16〕;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (5) Definition of Done（實測）
+- [x] **DONE（merged)**:`gitPushManifest`(network-egress、destructive⇒requiresApproval true 強制、idempotent false)+ `gitPushBinding`(`["git","push","--"]` ——`git push --` 經真 local push 驗證為有效 + 擋 `--upload-pack=evil`;`url` 複用 `isAllowedFetchUrl`、`branch` 嚴格 `^[A-Za-z0-9._/][A-Za-z0-9._/-]*$`、toEnv git credential placeholder、networkHosts=`[new URL(url).hostname]` 複用 net.fetch hostname projector)+ 條件註冊(需 `{egress-allowlist, approval}` 雙 wired,bin 有 → 註冊;缺任一 → CAP3 refuse)。**bin closure 無需改**(requiresApproval/external/egress-fold/git.** allow-rule 全既有)。RED → verify **exit 0**(1478 passed + 29 skipped;+29 新測)。獨立 Opus4.8 review **PASS**:**approval gate 在第一個註冊真 destructive 工具上 load-bearing**(非-pre-auth→denied@approval→effect 0;requiresApproval mutation 翻;superRefine 拒 false)、egress 真 gate(非-allowlist→denied@policy,在 approval 前)、boundary executed 無 argvRedacted(url path+query canary 零進 WORM)、branch+`--` 擋全部 flag/shell/traversal 注入、URL→host 無 egress bypass、byte-identical(default 14、bin 16)、depcruise bite/secret-scan clean/無新依賴。2 MINOR informational(branch 無長度上限、`../..` 配 regex——reviewer 判定不可利用〔單一 argv token、無 shell、refspec 位置〕;可加 `.max()` 為廉價 hardening)。**SLICE-P0-003〔depcruise-in-verify〕確認已解**。
+- **能力面 15 → 16**(第一個 destructive 真工具;approval+egress+boundary+credential-placeholder 在註冊真工具上端到端接通)。
+- **⚠️ 誠實**:真 push + credential 解析 = deploy/EXEC2-gated(unauthenticated-to-allowlisted-until-EXEC2;git/網路是 deploy fact);in-repo 真接通的是 approval/egress/boundary/credential-placeholder 鏈(fake-proven)。remote-name/SSH/真 auth 不在本刀。
 
 ## (6) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 git.push + 條件註冊)。

@@ -127,14 +127,15 @@ async function driveOneCall(
 }
 
 // ==================================================================================================
-// CAP6-ADVERTISE — the BIN advertises EXACTLY 15 tools: the 14 in-sandbox seed tools + net.fetch. This is
-//   the 14 -> 15 capability-surface bump — and it appears ONLY on the bin, because the bin is the
+// CAP6-ADVERTISE — the BIN advertises net.fetch (the FIRST network-egress tool), because the bin is the
 //   composition that WIRES "egress-allowlist" + ENFORCES the egress fold. A composition that has NOT wired
-//   egress (the default loopback/stdio/server kits) advertises only 14 (net.fetch absent) — "a WIRED
-//   primitive ⟺ enforcement present" stays honest.
+//   egress (the default loopback/stdio/server kits) does not advertise net.fetch — "a WIRED primitive ⟺
+//   enforcement present" stays honest. SLICE-CAP6b: the bin now ALSO advertises git.push (the FIRST
+//   destructive tool — egress + approval BOTH wired), so the bin set is 16 (the exact set is asserted in
+//   the sibling exec-mcp-server-bin.cap6b.test.ts).
 // ==================================================================================================
-describe("CAP6 — the bin advertises 15 tools (the 14 seed tools + net.fetch)", () => {
-  it("tools/list on the bin includes net.fetch (the 15th tool); git.push is still absent", async () => {
+describe("CAP6 — the bin advertises net.fetch (the FIRST network-egress tool)", () => {
+  it("tools/list on the bin includes net.fetch (and git.push, the CAP6b destructive tool)", async () => {
     const spy = new SpyFakeSandboxAdapter();
     const { deps } = await buildBinDeps(false, {
       ingestTransport: fakeKernelTransport(),
@@ -168,11 +169,13 @@ describe("CAP6 — the bin advertises 15 tools (the 14 seed tools + net.fetch)",
       "git.commit",
       "git.diff",
       "git.log",
+      "git.push",
       "git.status",
       "net.fetch",
     ]);
-    // git.push (egress-not-argv-visible + destructive) is CAP6b — still NOT advertised.
-    expect(tools.map((t) => t.name)).not.toContain("git.push");
+    // CAP6: net.fetch is advertised; CAP6b: git.push (the first destructive tool) is advertised too.
+    expect(tools.map((t) => t.name)).toContain("net.fetch");
+    expect(tools.map((t) => t.name)).toContain("git.push");
   });
 });
 
