@@ -35,8 +35,9 @@ CAP5 把「網路 egress」變顯式 per-tool deny-all primitive。CAP9 對「ho
 - boundarySummary:含 writeTargets(安全路徑),無 argvRedacted;canary 路徑經 redact/bound。
 - byte-identical:既有 16 工具 + CAP1-8/6b 測不變綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(`matchHostWriteTarget`〔lexical canon,traversal-resistant〕+ `hostWriteDecisionForProjection` + `GovernanceProjection.writeTargets` + `SandboxSpec.hostWriteAllow?` + bin closure 折 + fail-closed + wire host-write-target 進 binWired + boundarySummary writeTargets;deny-all default;traversal/sibling/相對/空 全 deny;合成 writeTargets 端到端;**無 writeTargets byte-identical**;mutation 證〔raw-startsWith 翻、closure-不折 翻〕;depcruise no-vendor-in-core 綠;secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`src/policy/host-write-target.ts`——`canonicalizeAbsolute`(hand-rolled segment-stack,無 fs/realpath,relative/empty/escape→undefined)+ `matchHostWriteTarget`(under-root `/` boundary,`/allowedX` 不算)+ `hostWriteDecisionForProjection`(count-only reason)。`GovernanceProjection.writeTargets`(default [])+ `SandboxSpec.hostWriteAllow?`(deploy-intent,proto 無欄位)+ bin fold(`AGENTOS_HOST_WRITE_ALLOW`,default deny-all)+ host-fs-write 無 projectable writeTarget fail-closed + `binWired += "host-write-target"` + boundarySummary writeTargets(strict allow-list)。RED → verify **exit 0**(1511 passed + 29 skipped;**raw-startsWith mutation 翻 6/9、drop-fold 翻 3**)。獨立 Opus4.8 review **PASS,零 findings**:path fuzz 23 例無 traversal/sibling bypass(URL-encoded/NUL 當字面 child、case-sensitive、`/allowed/..`→`/` deny)、writeTargets-in-WORM credential-blind(非-string 剝除、count-only、無 argvRedacted)、fail-closed、deny-all、PDP-sovereign、symlink=deploy 誠實、byte-identical(16 工具 writeTargets=[])、**AGT wire 完全未碰**(toAgtRequest 不含 writeTargets)。
+- **punches-seal primitive set 完成**:network egress(CAP5)+ host-write(CAP9)皆顯式 deny-all。**誠實**:真 host-write 強制 = deploy(host-mount + kernel realpath symlink-resistant);PDP lexical check = best-effort defense-in-depth;hostWriteAllow = documented deploy-intent。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(新 policy 模組 + optional 欄位 + bin 折入 純加;缺省 byte-identical)。

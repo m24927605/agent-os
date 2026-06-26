@@ -121,6 +121,9 @@ function syntheticNetworkBinding(networkHosts: readonly string[]): ExecToolBindi
       usesShellInterpreter: false,
       networkHosts: [...networkHosts],
       destructiveFlags: [],
+      // SLICE-CAP9 — the projection now carries writeTargets (parallel to networkHosts). This synthetic
+      // network tool has NO host-write target, so []; the egress fold is unaffected (byte-identical here).
+      writeTargets: [],
     }),
   };
 }

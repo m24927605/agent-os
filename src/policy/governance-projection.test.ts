@@ -164,5 +164,25 @@ describe("buildExecRunProjection — defensive (purity, never throws on edge inp
     expect(p.operationClass).toBe("unknown");
     expect(p.networkHosts).toEqual([]);
     expect(p.destructiveFlags).toEqual([]);
+    expect(p.writeTargets).toEqual([]);
+  });
+});
+
+describe("buildExecRunProjection — writeTargets (SLICE-CAP9, parallel to networkHosts)", () => {
+  // CAP9 adds `writeTargets` to the projection (the host-write target paths a host-fs-write tool's
+  // custom projector sets, parallel to net.fetch's networkHosts override). The general `exec.run`
+  // projector has NO host-write target classifier (no real host-write tool exists), so it defaults to
+  // `[]` for EVERY existing tool — they stay BYTE-IDENTICAL. Only a future host-fs-write tool's custom
+  // projector sets it (proven by the synthetic bin test).
+  it("defaults writeTargets to [] for a plain command (existing tools unchanged)", () => {
+    expect(buildExecRunProjection({ argv: ["npm", "test"] }).writeTargets).toEqual([]);
+    expect(buildExecRunProjection({ argv: ["rm", "-rf", "/tmp/x"] }).writeTargets).toEqual([]);
+    expect(
+      buildExecRunProjection({ argv: ["curl", "https://a.example.com/x"] }).writeTargets,
+    ).toEqual([]);
+  });
+
+  it("the empty-argv defensive projection also carries writeTargets: []", () => {
+    expect(buildExecRunProjection({ argv: [] }).writeTargets).toEqual([]);
   });
 });

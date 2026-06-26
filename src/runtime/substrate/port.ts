@@ -52,6 +52,22 @@ export interface SandboxSpec {
    * decision (`egressDecisionForProjection`) is the in-repo, testable defense-in-depth layer.
    */
   readonly egressAllow?: readonly string[];
+  /**
+   * SLICE-CAP9 — the per-sandbox HOST WRITE-TARGET ALLOWLIST (deny-all by default). The exact, vendor-
+   * neutral set of allowed write ROOTS a sandbox is permitted to persist to on the host. OPTIONAL: absent
+   * OR empty => DENY-ALL (the `matchHostWriteTarget` primitive fail-closes on an empty allowlist), so
+   * every existing `SandboxSpec` literal (none carry `hostWriteAllow`) is BYTE-IDENTICAL — absent maps to
+   * today's behavior (no host-write tool exists yet, so deny-all is the status quo).
+   *
+   * HONEST BOUNDARY: the REAL host-write enforcement is a DEPLOY FACT (the sandbox host-mount + kernel
+   * realpath, symlink-resistant). A substrate adapter carries this allowlist toward its host-mount policy
+   * BEST-EFFORT; where the substrate's create request has NO field to carry it (the pinned OpenShell
+   * `CreateSandboxRequest` proto subset does NOT), the adapter treats it as DOCUMENTED DEPLOY-INTENT (see
+   * the OpenShell adapter `createSandbox`), never fabricating a wire field. The substrate seal is PRIMARY;
+   * the PDP host-write decision (`hostWriteDecisionForProjection`) is the in-repo, testable, LEXICAL
+   * defense-in-depth layer (a symlink inside an allowed root needs the substrate's realpath).
+   */
+  readonly hostWriteAllow?: readonly string[];
 }
 
 export type AdapterResult =

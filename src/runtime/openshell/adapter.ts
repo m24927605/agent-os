@@ -239,6 +239,15 @@ export class OpenShellSandboxAdapter implements SandboxAdapter {
     // HERE from `spec.egressAllow`. Until then the in-repo, testable enforcement is the PDP egress
     // defense-in-depth (`egressDecisionForProjection`), folded into the bin's authorize closure. The
     // request below is therefore BYTE-IDENTICAL whether or not `spec.egressAllow` is present.
+    //
+    // SLICE-CAP9 — DOCUMENTED DEPLOY-INTENT for `spec.hostWriteAllow` (precise PARALLEL to egressAllow).
+    // The per-sandbox host write-target allowlist (deny-all by default) is the OS-side intent for this
+    // sandbox's host-mount policy. The pinned proto subset carries NO host-mount/write field either, so we
+    // DO NOT fabricate one: `spec.hostWriteAllow` is honest DEPLOY-INTENT (the REAL host-write enforcement
+    // is the sandbox host-mount + kernel realpath, symlink-resistant — a deploy fact). When the proto
+    // subset gains a host-mount field, set it HERE from `spec.hostWriteAllow`. Until then the in-repo,
+    // testable enforcement is the PDP host-write defense-in-depth (`hostWriteDecisionForProjection`),
+    // folded into the bin's authorize closure. The request below is BYTE-IDENTICAL with or without it.
     const req: CreateSandboxRequest = {
       spec: { template: { image } },
       ...(spec.labels !== undefined ? { labels: spec.labels } : {}),

@@ -58,6 +58,7 @@ import {
   combineDecisions,
   egressDecisionForProjection,
   evaluateSecondaries,
+  hostWriteDecisionForProjection,
 } from "../../../../../policy/index.js";
 import type { TenantBinding } from "../../../../../tenant/index.js";
 import { type Primitive, authorizeToolInvoke } from "../../../../../tools/index.js";
@@ -108,6 +109,13 @@ interface BinSandboxSpec {
    * the substrate policy and the in-repo defense-in-depth never skew.
    */
   readonly egressAllow?: readonly string[];
+  /**
+   * SLICE-CAP9 — the per-sandbox HOST WRITE-TARGET ALLOWLIST carried INTO sandbox creation (deny-all
+   * default). The REAL OpenShell adapter carries this toward its host-mount policy (the PRIMARY host-write
+   * enforcement, a deploy fact); the Fake substrate records it. This is the SAME allowlist the PDP
+   * host-write fold uses, so the substrate policy and the in-repo defense-in-depth never skew.
+   */
+  readonly hostWriteAllow?: readonly string[];
 }
 
 /** What `buildSubstrate` returns: the substrate + the spec to create an ephemeral sandbox against. */
@@ -180,6 +188,14 @@ export interface BuildBinOpts {
    * EMPTY => deny-all. A tool with NO networkHosts is never gated by it (byte-identical).
    */
   readonly egressAllow?: readonly string[];
+  /**
+   * SLICE-CAP9 — inject the bin's PER-SANDBOX HOST WRITE-TARGET ALLOWLIST (a TEST seam: a Fake allowlist
+   * proves the bin FOLDS the host-write defense-in-depth decision into authorize for a tool whose
+   * projection carries writeTargets). The LIVE bin omits this and reads `hostWriteAllowFromEnv(process.env)`
+   * (the `AGENTOS_HOST_WRITE_ALLOW` allowlist; UNCONFIGURED => EMPTY => deny-all host-write, fail-closed).
+   * Default EMPTY => deny-all. A tool with NO writeTargets is never gated by it (byte-identical).
+   */
+  readonly hostWriteAllow?: readonly string[];
 }
 
 /**
@@ -239,6 +255,40 @@ function egressAllowFromEnv(env: NodeJS.ProcessEnv): readonly string[] {
  */
 function resolveBinEgressAllow(opts: BuildBinOpts): readonly string[] {
   return opts.egressAllow ?? egressAllowFromEnv(process.env);
+}
+
+/**
+ * SLICE-CAP9 — the env var carrying the bin's PER-SANDBOX HOST WRITE-TARGET ALLOWLIST (comma-separated
+ * absolute roots). NON-secret config (a path-root allowlist, not a credential). UNCONFIGURED (unset /
+ * blank / only-whitespace) => an EMPTY list => DENY-ALL host-write (the `matchHostWriteTarget` primitive
+ * fail-closes on an empty allowlist). Per-surface allowlist CONTENT is a deploy/config decision; the
+ * default is deny-all.
+ */
+const HOST_WRITE_ALLOW_ENV = "AGENTOS_HOST_WRITE_ALLOW";
+
+/**
+ * Build the bin's host-write allowlist from env. Reads `AGENTOS_HOST_WRITE_ALLOW` as a comma-separated
+ * root list. UNCONFIGURED (unset / blank / only-whitespace) => an EMPTY list => deny-all host-write
+ * (fail-closed). Pure over env. Mirrors `egressAllowFromEnv`'s parse shape.
+ */
+function hostWriteAllowFromEnv(env: NodeJS.ProcessEnv): readonly string[] {
+  const raw = env[HOST_WRITE_ALLOW_ENV] ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * SLICE-CAP9 — the SINGLE source of the bin's per-sandbox host-write allowlist: a TEST seam
+ * (`opts.hostWriteAllow`) else `hostWriteAllowFromEnv(process.env)` (AGENTOS_HOST_WRITE_ALLOW;
+ * UNCONFIGURED => EMPTY => deny-all). Hoisted so the SAME allowlist drives BOTH (a) the substrate
+ * `SandboxSpec.hostWriteAllow` (deploy-intent the REAL OpenShell adapter carries toward its host-mount
+ * policy — the PRIMARY host-write enforcement) AND (b) the PDP host-write fold in the authorize closure
+ * (the in-repo defense-in-depth). One source => no skew between them. (Parallel to resolveBinEgressAllow.)
+ */
+function resolveBinHostWriteAllow(opts: BuildBinOpts): readonly string[] {
+  return opts.hostWriteAllow ?? hostWriteAllowFromEnv(process.env);
 }
 
 /**
@@ -355,7 +405,18 @@ function buildDeps(
   // registry — so a future `containment:"network-egress"` tool (CAP6 git.push / net.fetch) can REGISTER
   // here. The 14 seed tools are all in-sandbox + carry no networkHosts, so wiring it is byte-identical for
   // them (it only unlocks registration of a network-egress tool + gates a tool that PROJECTS hosts).
-  const binWired: ReadonlySet<Primitive> = new Set<Primitive>(["approval", "egress-allowlist"]);
+  //
+  // SLICE-CAP9 — the bin ALSO WIRES "host-write-target", because its authorize closure now FOLDS the
+  // host-write defense-in-depth decision (`hostWriteDecisionForProjection`) for any tool whose projection
+  // carries writeTargets (below). COUPLED INVARIANT: the bin enforces host-write ⟺ "host-write-target"
+  // wired for THIS registry — so a future `containment:"host-fs-write"` tool can REGISTER here. The
+  // existing seed tools are all in-sandbox + carry no writeTargets, so wiring it is byte-identical for them
+  // (it only unlocks registration of a host-fs-write tool + gates a tool that PROJECTS write targets).
+  const binWired: ReadonlySet<Primitive> = new Set<Primitive>([
+    "approval",
+    "egress-allowlist",
+    "host-write-target",
+  ]);
   const extraSeedTools = opts.extraSeedTools ?? [];
   const registry = seedRegistry(
     binWired,
@@ -441,6 +502,14 @@ function buildDeps(
   // wiring "egress-allowlist" into the registry above: the bin both (a) lets a network-egress tool register
   // AND (b) folds the egress decision for a tool whose projection carries networkHosts.
   const binEgressAllow: readonly string[] = resolveBinEgressAllow(opts);
+  // SLICE-CAP9 — the bin's PER-SANDBOX HOST WRITE-TARGET ALLOWLIST. A TEST seam (opts.hostWriteAllow) takes
+  // precedence; the LIVE bin reads `hostWriteAllowFromEnv(process.env)` (AGENTOS_HOST_WRITE_ALLOW;
+  // UNCONFIGURED => EMPTY => deny-all host-write, fail-closed). FAKE mode is unaffected (the subprocess test
+  // injects no hostWriteAllow and its seed tools carry no writeTargets, so the fold never fires). This is
+  // the COUPLED counterpart of wiring "host-write-target" into the registry above: the bin both (a) lets a
+  // host-fs-write tool register AND (b) folds the host-write decision for a tool whose projection carries
+  // writeTargets.
+  const binHostWriteAllow: readonly string[] = resolveBinHostWriteAllow(opts);
   return {
     substrate,
     sandboxId,
@@ -513,6 +582,35 @@ function buildDeps(
       } else {
         egressDecisions = [];
       }
+      // SLICE-CAP9 — the HOST-WRITE defense-in-depth fold (precise PARALLEL to the CAP5/CAP6 egress fold).
+      // When the tool's credential-blind projection carries writeTargets, build
+      // `hostWriteDecisionForProjection(writeTargets, binHostWriteAllow)` and fold it in as an extra
+      // decision (any-deny-wins; PDP sovereign). For an IN-SANDBOX tool with NO projection or NO
+      // writeTargets this contributes NOTHING (`[]`), so the existing seed tools are BYTE-IDENTICAL.
+      //
+      // FAIL-CLOSED for a `containment:"host-fs-write"` MANIFEST: such a tool punches the seal to the host
+      // disk, so its write target MUST be decided. If its projection is MISSING or carries NO writeTarget
+      // (a broken/removed projector), the gate cannot see the destination -> DENY (never skip). So a
+      // host-fs-write tool is fail-closed even if its projector were stripped (a hard non-vacuity that does
+      // not rely on the e2e target test). An IN-SANDBOX tool is unaffected (no host-fs-write containment).
+      let hostWriteDecisions: PolicyDecision[];
+      if (projection !== undefined && projection.writeTargets.length > 0) {
+        hostWriteDecisions = [
+          hostWriteDecisionForProjection(projection.writeTargets, binHostWriteAllow),
+        ];
+      } else if (toolContainment === "host-fs-write") {
+        // A host-fs-write tool with no projectable target => fail-closed deny (the destination is unknown).
+        hostWriteDecisions = [
+          {
+            effect: "deny",
+            reason:
+              "host-write: host-fs-write tool with no projectable write target — denied (fail-closed, CAP9)",
+            auditRequired: true,
+          },
+        ];
+      } else {
+        hostWriteDecisions = [];
+      }
       // Fold the advisory secondaries: any-deny-wins, PDP sovereign (an allow secondary can NEVER relax a
       // PDP deny). `evaluateSecondaries` is fail-closed (a throwing/rejecting advisor => a synthetic deny).
       // SLICE-R9a: it is async (it may await a cross-language advisory), so this closure is `async` and
@@ -521,6 +619,7 @@ function buildDeps(
       const combined = combineDecisions(pdp, [
         ...(await evaluateSecondaries(secondaries, req as unknown as PolicyRequest)),
         ...egressDecisions,
+        ...hostWriteDecisions,
       ]);
       // SLICE-AGT1-A: redact the combined reason before it leaves the authorize boundary (mirrors the
       // three surfaces' `redactSecrets(combined.reason)` after their fold). An UNTRUSTED advisory
@@ -578,9 +677,15 @@ export async function buildBinDeps(
   // substrate (the PRIMARY no-egress enforcement) gets the SAME policy the PDP egress fold uses. The REAL
   // OpenShell adapter carries it toward its network policy; the Fake records it. One source, no skew.
   const binEgressAllow = resolveBinEgressAllow(opts);
+  // SLICE-CAP9 — thread the bin's host-write allowlist INTO the sandbox spec (deny-all default), so the
+  // substrate (the PRIMARY host-write enforcement) gets the SAME policy the PDP host-write fold uses. The
+  // REAL OpenShell adapter carries it toward its host-mount policy (documented deploy-intent); the Fake
+  // records it. One source, no skew.
+  const binHostWriteAllow = resolveBinHostWriteAllow(opts);
   const created = await substrate.createSandbox(BIN_CONTEXT, {
     ...sandboxSpec,
     egressAllow: binEgressAllow,
+    hostWriteAllow: binHostWriteAllow,
   });
   if (created.status !== "ok") {
     throw new Error(`buildBinDeps: sandbox create denied — ${created.reason}`);

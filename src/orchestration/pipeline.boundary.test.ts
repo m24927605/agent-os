@@ -404,3 +404,79 @@ describe("CAP7 — audit-only: the boundary append NEVER changes the allow/deny 
     expect((boundary.policyDecision as { effect?: unknown }).effect).toBe("allow");
   });
 });
+
+describe("CAP9 — the boundary summary carries writeTargets (safe path metadata, parallel to networkHosts)", () => {
+  it("a host-fs-write external effect's boundary records writeTargets but NO argvRedacted/argv0 (credential-blind)", async () => {
+    // A FULL GovernanceProjection-shaped object carrying writeTargets (the shape a host-fs-write tool's
+    // projector produces). argvRedacted is included verbatim to prove it is DROPPED from the boundary WORM.
+    const projection = {
+      version: 1 as const,
+      operationClass: "filesystem",
+      argv0: "tee",
+      argc: 4,
+      argvRedacted: ["tee", "--", "/work/out.txt", "ignored"],
+      truncated: false,
+      usesShellInterpreter: false,
+      networkHosts: [],
+      destructiveFlags: [],
+      writeTargets: ["/work/out.txt", "/data/out/log.txt"],
+    };
+    const { appender, events } = recordingAppender();
+    await runGovernedToolCall(
+      depsWith({
+        decision: { effect: "allow", reason: "ok", external: true, projection },
+        appender,
+      }),
+      call(),
+    );
+    const boundary = events.find((e) => actionOf(e) === "effect.boundary-crossed") as Record<
+      string,
+      unknown
+    >;
+    const summary = boundary.boundarySummary as Record<string, unknown>;
+    expect(summary).toBeDefined();
+    // (1) writeTargets is retained as safe path metadata (the very thing the host-write gate decides on).
+    expect(summary.writeTargets).toEqual(["/work/out.txt", "/data/out/log.txt"]);
+    // (2) The raw argv fields are STILL not recorded (no argvRedacted / argv0 key on the wire).
+    const serialized = JSON.stringify(boundary);
+    expect(serialized).not.toContain("argvRedacted");
+    expect(serialized).not.toContain("argv0");
+    expect(boundary).not.toHaveProperty("boundaryProjection");
+  });
+
+  it("a path canary in argvRedacted does NOT leak via the boundary; only the safe writeTargets array does", async () => {
+    // A runtime-built canary stands in for a non-shape secret an argv token could carry. It must NOT reach
+    // the WORM. writeTargets is host-write path metadata (the gate input), so it IS retained — but it is a
+    // bounded string array filtered the SAME way networkHosts/destructiveFlags are.
+    const canary = ["CANARY", "fs", "secret", Math.random().toString(36).slice(2)].join("_");
+    const projection = {
+      version: 1 as const,
+      operationClass: "filesystem",
+      argv0: "tee",
+      argc: 3,
+      argvRedacted: ["tee", "--", `/work/${canary}`],
+      truncated: false,
+      usesShellInterpreter: false,
+      networkHosts: [],
+      destructiveFlags: [],
+      writeTargets: ["/work/out.txt"],
+    };
+    const { appender, events } = recordingAppender();
+    await runGovernedToolCall(
+      depsWith({
+        decision: { effect: "allow", reason: "ok", external: true, projection },
+        appender,
+      }),
+      call(),
+    );
+    const boundary = events.find((e) => actionOf(e) === "effect.boundary-crossed") as Record<
+      string,
+      unknown
+    >;
+    const serialized = JSON.stringify(boundary);
+    // The argv canary does NOT appear (argvRedacted is dropped). writeTargets (the safe array) is present.
+    expect(serialized).not.toContain(canary);
+    const summary = boundary.boundarySummary as Record<string, unknown>;
+    expect(summary.writeTargets).toEqual(["/work/out.txt"]);
+  });
+});
