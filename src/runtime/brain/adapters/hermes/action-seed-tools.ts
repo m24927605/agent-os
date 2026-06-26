@@ -195,6 +195,190 @@ export const driveReadBinding: ActionBinding = {
   actionProjector: () => actionProjection("drive", "read", DRIVE_HOST, []),
 };
 
+// ================================================================================================
+// SLICE-ACT2 — the action family grows by PURE ADDITION (4 new triads), mirroring the ACT1 pattern
+// EXACTLY: each is a manifest + composer-held binding + actionProjector, conditionally registered on
+// the same wired primitives. NO gate is widened. The 4: calendar.events.create (write),
+// calendar.events.list (read), drive.files.delete (destructive), gmail.search (read).
+// ================================================================================================
+
+/** The composer-fixed Google Calendar provider host the egress fold gates (the shared googleapis host). */
+export const CALENDAR_HOST = "www.googleapis.com";
+
+/** The env var naming the OPTIONAL per-service Calendar OAuth token KEY (NON-secret config: names a KEY). */
+export const GCAL_OAUTH_KEY_ENV = "AGENTOS_GCAL_OAUTH_KEY";
+
+// ------------------------------------------------------------------------------------------------
+// calendar.events.create — a network-egress WRITE (NOT destructive => no approval; still egress-gated).
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `calendar.events.create` ToolManifest — a network-egress WRITE. `containment:"network-egress"`
+ * (requires "egress-allowlist"); `sideEffect:"write"` (NOT destructive => NO approval — gated by EGRESS,
+ * not approval); `idempotent:false` (creating a calendar event is not safely replayable).
+ */
+export const calendarEventsCreateManifest = {
+  name: "calendar.events.create",
+  version: "1.0.0",
+  description: "create a calendar event via the Calendar API (egress gated)",
+  action: "tool:invoke",
+  resourcePattern: "calendar/events.create",
+  sideEffect: "write" as const,
+  idempotent: false,
+  requiresApproval: false,
+  bundleRefOnly: false,
+  containment: "network-egress" as const,
+};
+
+/**
+ * calendar.events.create binding: service "calendar" / method "events.create", STRICT
+ * `{summary, start, end}` (typed strings; structured fields, NO command/shell concern), `toParams` -> the
+ * structured body, `toCredentialEnv` -> the per-service OAuth placeholder, `actionProjector` -> host-only
+ * networkHosts (the Calendar host) + operationClass (NO destructiveFlags — a write, not destructive),
+ * NEVER the params. `.strict()` rejects a smuggled extra key (e.g. an `attendees` second channel).
+ */
+export const calendarEventsCreateBinding: ActionBinding = {
+  service: "calendar",
+  method: "events.create",
+  argSchema: z
+    .object({
+      summary: z.string().min(1),
+      start: z.string().min(1),
+      end: z.string().min(1),
+    })
+    .strict(),
+  toParams: (a) => {
+    const v = a as { summary: string; start: string; end: string };
+    return { summary: v.summary, start: v.start, end: v.end };
+  },
+  toCredentialEnv: () => toCredentialEnv(process.env[GCAL_OAUTH_KEY_ENV]),
+  actionProjector: () => actionProjection("calendar", "events.create", CALENDAR_HOST, []),
+};
+
+// ------------------------------------------------------------------------------------------------
+// calendar.events.list — a network-egress READ (no approval; still egress-gated).
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `calendar.events.list` ToolManifest — a network-egress READ. `containment:"network-egress"`
+ * (requires "egress-allowlist"); `sideEffect:"read"` (no approval — gated by EGRESS); `idempotent:true`
+ * (a list is safely replayable).
+ */
+export const calendarEventsListManifest = {
+  name: "calendar.events.list",
+  version: "1.0.0",
+  description: "list calendar events via the Calendar API (egress gated)",
+  action: "tool:invoke",
+  resourcePattern: "calendar/events.list",
+  sideEffect: "read" as const,
+  idempotent: true,
+  requiresApproval: false,
+  bundleRefOnly: false,
+  containment: "network-egress" as const,
+};
+
+/**
+ * calendar.events.list binding: service "calendar" / method "events.list", STRICT `{timeMin?, timeMax?}`
+ * (both optional — `{}` is valid), `toParams` -> only the supplied keys, `actionProjector` -> host-only
+ * networkHosts (the Calendar host). `.strict()` rejects a smuggled extra key.
+ */
+export const calendarEventsListBinding: ActionBinding = {
+  service: "calendar",
+  method: "events.list",
+  argSchema: z
+    .object({
+      timeMin: z.string().min(1).optional(),
+      timeMax: z.string().min(1).optional(),
+    })
+    .strict(),
+  toParams: (a) => {
+    const v = a as { timeMin?: string; timeMax?: string };
+    return {
+      ...(v.timeMin !== undefined ? { timeMin: v.timeMin } : {}),
+      ...(v.timeMax !== undefined ? { timeMax: v.timeMax } : {}),
+    };
+  },
+  actionProjector: () => actionProjection("calendar", "events.list", CALENDAR_HOST, []),
+};
+
+// ------------------------------------------------------------------------------------------------
+// drive.files.delete — a network-egress DESTRUCTIVE action (superRefine FORCES requiresApproval:true).
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `drive.files.delete` ToolManifest — a network-egress DESTRUCTIVE action.
+ * `containment:"network-egress"` (requires "egress-allowlist"); `sideEffect:"destructive"` (the manifest
+ * superRefine FORCES `requiresApproval:true` => requires "approval"); `idempotent:false` (deleting a file
+ * is not safely replayable).
+ */
+export const driveFilesDeleteManifest = {
+  name: "drive.files.delete",
+  version: "1.0.0",
+  description: "delete a file via the Drive API (egress + approval gated)",
+  action: "tool:invoke",
+  resourcePattern: "drive/files.delete",
+  sideEffect: "destructive" as const,
+  idempotent: false,
+  // FORCED true by the manifest superRefine (destructive => requiresApproval). A destructive action can
+  // NEVER escape the approval gate; set it true to satisfy parseToolManifest.
+  requiresApproval: true,
+  bundleRefOnly: false,
+  containment: "network-egress" as const,
+};
+
+/**
+ * drive.files.delete binding: service "drive" / method "files.delete", STRICT `{fileId}`, `toParams` ->
+ * `{fileId}`, `actionProjector` -> host-only networkHosts (the Drive host) + operationClass +
+ * destructiveFlags (a coarse "delete" HINT, NOT a param value), NEVER the params. `.strict()` rejects a
+ * smuggled extra key.
+ */
+export const driveFilesDeleteBinding: ActionBinding = {
+  service: "drive",
+  method: "files.delete",
+  argSchema: z.object({ fileId: z.string().min(1) }).strict(),
+  toParams: (a) => ({ fileId: (a as { fileId: string }).fileId }),
+  // destructiveFlags carries a coarse HINT (a destructive, irreversible delete) — NOT a param value.
+  // NON-VACUITY: remove the host => no networkHosts => the network-egress fail-closed gate denies.
+  actionProjector: () => actionProjection("drive", "files.delete", DRIVE_HOST, ["delete"]),
+};
+
+// ------------------------------------------------------------------------------------------------
+// gmail.search — a network-egress READ (no approval; still egress-gated).
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `gmail.search` ToolManifest — a network-egress READ. `containment:"network-egress"` (requires
+ * "egress-allowlist"); `sideEffect:"read"` (no approval — gated by EGRESS); `idempotent:true` (a search
+ * is safely replayable).
+ */
+export const gmailSearchManifest = {
+  name: "gmail.search",
+  version: "1.0.0",
+  description: "search messages via the Gmail API (egress gated)",
+  action: "tool:invoke",
+  resourcePattern: "gmail/search",
+  sideEffect: "read" as const,
+  idempotent: true,
+  requiresApproval: false,
+  bundleRefOnly: false,
+  containment: "network-egress" as const,
+};
+
+/**
+ * gmail.search binding: service "gmail" / method "search", STRICT `{query}`, `toParams` -> `{query}`,
+ * `toCredentialEnv` -> the same per-service Gmail OAuth placeholder gmail.send uses, `actionProjector` ->
+ * host-only networkHosts (the Gmail host) + operationClass (NO destructiveFlags — a read), NEVER the
+ * params. `.strict()` rejects a smuggled extra key.
+ */
+export const gmailSearchBinding: ActionBinding = {
+  service: "gmail",
+  method: "search",
+  argSchema: z.object({ query: z.string().min(1) }).strict(),
+  toParams: (a) => ({ query: (a as { query: string }).query }),
+  toCredentialEnv: () => toCredentialEnv(process.env[GMAIL_OAUTH_KEY_ENV]),
+  actionProjector: () => actionProjection("gmail", "search", GMAIL_HOST, []),
+};
+
 // ------------------------------------------------------------------------------------------------
 // Conditional registration (parallel to seedRegistry/seedBindings).
 // ------------------------------------------------------------------------------------------------
@@ -229,10 +413,17 @@ export function seedActionRegistry(wired: ReadonlySet<Primitive> = WIRED_PRIMITI
   const r = new ToolRegistry(undefined, wired);
   if (!intendsActionFamily(wired)) return r;
   // ATTEMPT registration; assertRegisterable (inside register) THROWS on a missing required primitive
-  // (gmail.send: egress-allowlist + approval; drive.read: egress-allowlist). gmail.send is registered
-  // FIRST so a partial wiring is refused on the destructive tool (the strongest deny-by-default signal).
+  // (egress-allowlist for every network-egress action; +approval for the destructive ones). The
+  // destructive tools are registered FIRST so a partial wiring is refused on a destructive tool (the
+  // strongest deny-by-default signal).
   r.register(gmailSendManifest);
   r.register(driveReadManifest);
+  // SLICE-ACT2 — pure addition: 4 more network-egress actions. drive.files.delete is destructive
+  // (egress + approval); the rest are write/read (egress only).
+  r.register(driveFilesDeleteManifest);
+  r.register(calendarEventsCreateManifest);
+  r.register(calendarEventsListManifest);
+  r.register(gmailSearchManifest);
   return r;
 }
 
@@ -251,8 +442,17 @@ export function seedActionBindings(
 ): ReadonlyMap<string, ActionBinding> {
   const entries: [string, ActionBinding][] = [];
   if (!intendsActionFamily(wired)) return new Map<string, ActionBinding>();
-  if (wired.has("egress-allowlist") && wired.has("approval"))
+  // Destructive actions require BOTH egress-allowlist AND approval.
+  if (wired.has("egress-allowlist") && wired.has("approval")) {
     entries.push(["gmail.send", gmailSendBinding]);
-  if (wired.has("egress-allowlist")) entries.push(["drive.read", driveReadBinding]);
+    entries.push(["drive.files.delete", driveFilesDeleteBinding]);
+  }
+  // Non-destructive network-egress actions (read/write) require only egress-allowlist.
+  if (wired.has("egress-allowlist")) {
+    entries.push(["drive.read", driveReadBinding]);
+    entries.push(["calendar.events.create", calendarEventsCreateBinding]);
+    entries.push(["calendar.events.list", calendarEventsListBinding]);
+    entries.push(["gmail.search", gmailSearchBinding]);
+  }
   return new Map<string, ActionBinding>(entries);
 }
