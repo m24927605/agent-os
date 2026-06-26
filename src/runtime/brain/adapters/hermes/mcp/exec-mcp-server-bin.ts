@@ -535,10 +535,22 @@ function buildDeps(
       // seed tools are all requiresApproval:false (and an unregistered name => `undefined` => `?? false`), so
       // the stage is SKIPPED for them => byte-identical. NON-VACUITY: drop this and the destructive tool's
       // approval gate is bypassed (it executes unapproved) — the bin's deny@approval e2e test flips RED.
+      // SLICE-CAP7 — classify the call as EXTERNAL from the SAME manifest `containment` the CAP6 egress
+      // fold already read: a seal-PUNCHING containment (network-egress / host-fs-write) is external; an
+      // in-sandbox effect is not. When external AND the effect executes, the pipeline appends a DISTINCT
+      // post-effect boundary WORM event carrying the ALREADY-redacted `projection` (the SAME R9b-1
+      // projection built above for AGT/egress — credential-blind, never raw args). AUDIT-ONLY: this rides
+      // ONLY the executed path and NEVER changes the combined allow/deny (PDP sovereign). The 14 in-sandbox
+      // seed tools are containment:"in-sandbox" => external:false => NO boundary => byte-identical; only
+      // net.fetch (network-egress) flips external:true. NON-VACUITY: drop `external` here and net.fetch's
+      // executed call appends ONLY the intent (no boundary) — the bin's CAP7 net.fetch e2e test flips RED.
+      const external = toolContainment === "network-egress" || toolContainment === "host-fs-write";
       return {
         effect: combined.effect,
         reason: redactSecrets(combined.reason),
         requiresApproval: registry.lookup(tc.tool)?.requiresApproval ?? false,
+        external,
+        ...(projection !== undefined ? { projection } : {}),
       };
     },
     approve,
