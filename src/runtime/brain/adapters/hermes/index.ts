@@ -44,6 +44,32 @@ export {
   seedBindings,
   seedRegistry,
 } from "./exec-seed-tools.js";
+// SLICE-ACT1 — the SIBLING ActionBinding family (NON-argv app/API actions: gmail/drive). Parallel to the
+// exec family; the exec seam is UNCHANGED. The AgtScope/ManifestLookup/ProjectableCall types are already
+// surfaced by the governance-projection-for-call export above (they are family-agnostic) — NOT re-exported
+// here to avoid a duplicate-name conflict on the barrel.
+export {
+  type ActionBinding,
+  type ActionConnector,
+  type ActionDescriptor,
+  type ActionResult,
+  type BindingWrappedActionEffectOptions,
+  FakeActionConnector,
+  bindingWrappedActionEffect,
+} from "./action-closed-loop.js";
+export { buildActionProjectionForCall } from "./action-projection-for-call.js";
+export {
+  DRIVE_HOST,
+  GMAIL_HOST,
+  GMAIL_OAUTH_KEY_ENV,
+  driveReadBinding,
+  driveReadManifest,
+  gmailSendBinding,
+  gmailSendManifest,
+  seedActionBindings,
+  seedActionRegistry,
+  toCredentialEnv,
+} from "./action-seed-tools.js";
 export { makeArgsCredentialScreen } from "./args-credential-screen.js";
 export {
   type AgtScope,
