@@ -690,8 +690,14 @@ export const gitPushBinding: ExecToolBinding = {
   argvPrefix: ["git", "push", "--"],
   argSchema: z
     .object({
-      url: z.string().min(1).refine(isAllowedFetchUrl),
-      branch: z.string().regex(SAFE_BRANCH_NAME),
+      // SLICE-EXEC-HARDENING (CAP6b MINOR) — `.max(2048)` is a reasonable upper bound on a git remote URL
+      // (a cheap DoS/abuse hardening). Pure tightening: every existing short url is unaffected (the cap is
+      // an upper bound, not a relaxation); it is layered alongside the existing `isAllowedFetchUrl` refine.
+      url: z.string().min(1).max(2048).refine(isAllowedFetchUrl),
+      // SLICE-EXEC-HARDENING (CAP6b MINOR) — `.max(255)` caps the branch at the git ref practical limit,
+      // AFTER the SAFE_BRANCH_NAME charset/no-flag guard. Pure tightening: every existing short branch is
+      // unaffected; only an over-length (>255-char) branch is newly rejected.
+      branch: z.string().regex(SAFE_BRANCH_NAME).max(255),
     })
     .strict(),
   toArgv: (a) => {

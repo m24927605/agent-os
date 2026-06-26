@@ -321,6 +321,70 @@ describe("CAP6b-(e) git.push is IN-SCOPE for projection under the default `effec
 });
 
 // ==================================================================================================
+// SLICE-EXEC-HARDENING (CAP6b MINOR) — git.push branch + url LENGTH CAPS (`.max()`). PURE TIGHTENING:
+//   the branch gains `.max(255)` (the git ref practical limit) AFTER the SAFE_BRANCH_NAME regex; the url
+//   gains `.max(2048)` within its refine chain. Existing SHORT branch/url values are UNAFFECTED
+//   (byte-identical) — these are an upper bound, not a relaxation.
+//   NON-VACUITY: dropping a `.max()` makes the over-length input ACCEPTED again => the "rejects" assertion
+//   flips RED.
+// ==================================================================================================
+describe("SLICE-EXEC-HARDENING — git.push branch + url length caps (.max(), pure tightening)", () => {
+  /** A valid-charset branch of exactly `n` chars (SAFE_BRANCH_NAME: alnum, no leading dash). */
+  function branchOfLength(n: number): string {
+    return "a".repeat(n);
+  }
+
+  it("REJECTS a branch of 256 chars (over the .max(255) cap), even though the charset is valid", () => {
+    const branch = branchOfLength(256);
+    expect(branch.length).toBe(256);
+    // The charset is fine (all 'a', no leading dash — mirrors the production SAFE_BRANCH_NAME shape);
+    // ONLY the length cap rejects it. (Local regex twin so the test doesn't widen the module's exports.)
+    expect(/^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/.test(branch)).toBe(true);
+    expect(
+      gitPushBinding.argSchema.safeParse({ url: "https://github.com/o/r.git", branch }).success,
+    ).toBe(false);
+  });
+
+  it("ACCEPTS a valid branch of exactly 255 chars (the boundary; the cap is inclusive)", () => {
+    const branch = branchOfLength(255);
+    expect(branch.length).toBe(255);
+    expect(
+      gitPushBinding.argSchema.safeParse({ url: "https://github.com/o/r.git", branch }).success,
+    ).toBe(true);
+  });
+
+  it("REJECTS a url longer than .max(2048) (even an otherwise-valid https plain-DNS URL)", () => {
+    // A valid https URL whose path pushes the total length over 2048 — the host is plain-DNS + allowlisted-
+    // shape, so ONLY the length cap can reject it.
+    const longPath = "x".repeat(2100);
+    const url = `https://api.allowed.example/${longPath}`;
+    expect(url.length).toBeGreaterThan(2048);
+    expect(gitPushBinding.argSchema.safeParse({ url, branch: "main" }).success).toBe(false);
+  });
+
+  it("ACCEPTS a normal short url (well under the cap) — byte-identical to today", () => {
+    expect(
+      gitPushBinding.argSchema.safeParse({
+        url: "https://github.com/o/r.git",
+        branch: "main",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("the EXISTING short branch ('main') + url is still ACCEPTED (byte-identical; caps only bound the top)", () => {
+    const parsed = gitPushBinding.argSchema.safeParse({
+      url: "https://github.com/o/r.git",
+      branch: "main",
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    // The argv is unchanged by the caps.
+    const argv = [...gitPushBinding.argvPrefix, ...gitPushBinding.toArgv(parsed.data)];
+    expect(argv).toEqual(["git", "push", "--", "https://github.com/o/r.git", "main"]);
+  });
+});
+
+// ==================================================================================================
 // CAP6b-(f) ⚠️ CREDENTIAL PLACEHOLDER — git.push's OPTIONAL `toEnv` emits a CREDENTIAL PLACEHOLDER (never a
 //   literal secret). makeExecEffect's INPUT guard PASSES the placeholder env and runs the effect; a LITERAL
 //   secret injected into the env is REJECTED (substrate 0 calls). This exercises the placeholder seam that
