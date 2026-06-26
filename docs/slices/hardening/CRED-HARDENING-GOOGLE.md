@@ -29,8 +29,9 @@
 - mutation:移除新 alternation → ya29./AIza/Bearer 測翻紅(本該 redact)。
 - byte-identical:既有 redact/audit/INPUT-guard/全測不變綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(SECRET_VALUE 加 ya29./AIza/Bearer;ya29./AIza/Bearer<token> redact;**placeholder 不誤判**;短/benign 不誤判;既有 6 類 no-regression;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`SECRET_VALUE` += `|ya29\.[0-9A-Za-z._-]{20,}|AIza[0-9A-Za-z._-]{35}|\bBearer\s+[A-Za-z0-9._-]{20,}`(1 行擴充;redact()/redactSecrets()/SECRET_KEY 不動)。RED → verify **exit 0**(1643 passed + 29 skipped;redact 17 測)。獨立 Opus4.8 review **PASS**:**placeholder `openshell:resolve:env:KEY` 不誤判**(直接 probe 真 redactSecrets,colon 斷 {20,} run)、無 false-positive over-match(11 benign〔長路徑/UUID/SHA/URL/短 Bearer/短 AIza〕全 KEPT)、Bearer 20+ run 是 acceptable high-signal heuristic、no-regression(6 類仍 redact)、non-vacuity(移 3 pattern 翻 5 測)、無 catastrophic backtracking(<0.6ms/100k)。1 nit(AIza tail 含 `.` 比真形狀寬 → 只會多 redact,redactor 安全)。
+- **Google 憑證盲區縮小**(INPUT guard + redactSecrets 認得 ya29./AIza/Bearer)。**誠實**:best-effort shape detector,非完備;根本 no-leak 仍靠 placeholder/egress-resolution 設計,本刀是 defense-in-depth。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(一條 regex alternation 擴充)。
