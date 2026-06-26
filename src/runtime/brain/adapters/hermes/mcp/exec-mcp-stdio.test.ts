@@ -492,10 +492,11 @@ dSub(
           expect(obj.jsonrpc).toBe("2.0");
         }
 
-        // tools/list = exactly the registered bounded seed tools. This is the REAL BIN (it wires
-        // "egress-allowlist" + folds the egress decision), so net.fetch IS advertised: CAP2's 14 + CAP6's
-        // net.fetch = 15. (The in-process CORE kits above use the default egress-UNWIRED seedRegistry and
-        // stay at 14 — net.fetch advertises ONLY where egress is wired + enforced.)
+        // tools/list = exactly the registered bounded seed tools. This is the REAL BIN (it wires BOTH
+        // "egress-allowlist" + "approval" + folds the egress decision + the approval stage), so net.fetch
+        // (CAP6) AND git.push (CAP6b) are BOTH advertised: CAP2's 14 + net.fetch + git.push = 16. (The
+        // in-process CORE kits above use the default egress/approval-UNWIRED seedRegistry and stay at 14 —
+        // a network-egress/destructive tool advertises ONLY where its primitive is wired + enforced.)
         const tools = (responses[1]?.result as { tools: { name: string }[] }).tools;
         expect(tools.map((t) => t.name).sort()).toEqual([
           "exec.cat",
@@ -511,6 +512,7 @@ dSub(
           "git.commit",
           "git.diff",
           "git.log",
+          "git.push",
           "git.status",
           "net.fetch",
         ]);
@@ -596,6 +598,7 @@ dSub(
           "git.commit",
           "git.diff",
           "git.log",
+          "git.push",
           "git.status",
           "net.fetch",
         ]);

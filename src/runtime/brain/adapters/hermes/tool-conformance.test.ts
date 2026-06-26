@@ -1,7 +1,8 @@
 /**
  * SLICE-CAP8 — the registry-wide CONFORMANCE SUITE (consolidation).
  *
- * The capability surface is now 15 tools across exec/file/git/network families. Until CAP8 every tool's
+ * The capability surface is now 16 tools across exec/file/git/network families (15 + the CAP6b
+ * destructive tool git.push). Until CAP8 every tool's
  * invariants were RE-ASSERTED by hand, per tool, in `exec-seed-tools.test.ts` (the `for (const tool of
  * tools)` schema-derive loop, the per-tool strict-deny loop, the per-tool credential-blind loop). CAP8
  * CONSOLIDATES those generic invariant re-assertions into ONE reusable property — `assertToolConformant`
@@ -150,8 +151,9 @@ function assertToolConformant(
 }
 
 // ------------------------------------------------------------------------------------------------
-// Build the FULL bin catalog: the 15 tools (incl. net.fetch) the bin composes, with egress WIRED. Mirror
-// the bin's wired set so seedRegistry/seedBindings include the network-egress tool (CAP6).
+// Build the FULL bin catalog: the 16 tools (incl. net.fetch + git.push) the bin composes, with BOTH
+// "approval" + "egress-allowlist" WIRED. Mirror the bin's wired set so seedRegistry/seedBindings include
+// the network-egress tool net.fetch (CAP6) AND the destructive network-egress tool git.push (CAP6b).
 // ------------------------------------------------------------------------------------------------
 const BIN_WIRED = new Set<"approval" | "egress-allowlist">(["approval", "egress-allowlist"]);
 
@@ -161,7 +163,7 @@ interface CatalogEntry {
   readonly binding: ExecToolBinding;
 }
 
-/** The 15 bin tools as (name, manifest, binding), derived from the registry + bindings (single source). */
+/** The 16 bin tools as (name, manifest, binding), derived from the registry + bindings (single source). */
 function binCatalog(): CatalogEntry[] {
   const registry = seedRegistry(BIN_WIRED);
   const bindings = seedBindings(new Map(), BIN_WIRED);
@@ -182,8 +184,9 @@ function advertisedSchemas(): ReadonlyMap<string, JsonSchemaObject> {
   return m;
 }
 
-// The EXACT bin catalog — 15 tools (the 14 in-sandbox seed tools + net.fetch, egress WIRED). A tool
-// removed/added wrongly flips this exact-set assertion (the catalog is the single source the suite runs).
+// The EXACT bin catalog — 16 tools (the 14 in-sandbox seed tools + net.fetch + git.push, BOTH primitives
+// WIRED). A tool removed/added wrongly flips this exact-set assertion (the catalog is the single source the
+// suite runs).
 const FULL_BIN_SET = [
   "exec.cat",
   "exec.echo",
@@ -198,22 +201,25 @@ const FULL_BIN_SET = [
   "git.commit",
   "git.diff",
   "git.log",
+  "git.push",
   "git.status",
   "net.fetch",
 ];
 
 // ==================================================================================================
-// CAP8-0 — sanity: the catalog is EXACTLY the 15 bin tools (so the parameterized suite covers them all).
+// CAP8-0 — sanity: the catalog is EXACTLY the 16 bin tools (so the parameterized suite covers them all).
 // ==================================================================================================
-describe("CAP8-0 the bin catalog is exactly the 15 tools (the conformance suite's coverage set)", () => {
-  it("seedRegistry/seedBindings (egress wired) yield exactly the 15 bin tools", () => {
+describe("CAP8-0 the bin catalog is exactly the 16 tools (the conformance suite's coverage set)", () => {
+  it("seedRegistry/seedBindings (egress + approval wired) yield exactly the 16 bin tools", () => {
     const names = binCatalog()
       .map((e) => e.name)
       .sort();
     expect(names).toEqual(FULL_BIN_SET);
-    expect(names.length).toBe(15);
+    expect(names.length).toBe(16);
     // net.fetch (network-egress) is present ONLY because egress is wired (CAP6 ordering).
     expect(names).toContain("net.fetch");
+    // git.push (network-egress + destructive) is present ONLY because BOTH egress + approval are wired (CAP6b).
+    expect(names).toContain("git.push");
   });
 });
 

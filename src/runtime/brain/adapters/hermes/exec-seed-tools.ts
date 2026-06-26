@@ -603,6 +603,112 @@ export const netFetchBinding: ExecToolBinding = {
   },
 };
 
+// ------------------------------------------------------------------------------------------------
+// SLICE-CAP6b — the FIRST real DESTRUCTIVE tool: `git.push` (`git push -- <url> <branch>`). It is the
+// first tool that is BOTH `sideEffect:"destructive"` (=> the manifest superRefine FORCES
+// `requiresApproval:true`) AND `containment:"network-egress"` (=> it punches the seal to the network and
+// names its egress primitive). CAP2 DEFERRED it because a remote-NAME push is not argv-visible; CAP6b
+// unblocks it by taking an EXPLICIT https URL (NOT a remote name) — so the URL host is IN argv and
+// PROJECTABLE: the egress fold can gate it AND it clears CAP6's "network-egress with no projectable host =>
+// deny" fail-closed rule (git.push HAS a host via the URL).
+//
+// requiredPrimitives (network-egress + destructive) => `["egress-allowlist","approval"]`. The bin wires
+// BOTH, so git.push REGISTERS there; a composition missing EITHER primitive => CAP3 assertRegisterable
+// refuses it (deny-by-default).
+//
+// NO SHELL / NO FLAG INJECTION: argv is ALWAYS exactly ["git","push","--",<url>,<branch>]. The `--`
+// (mirroring git.add's `--`) makes a `-`-leading repo arg a SINGLE LITERAL token, never a `git push` flag
+// (VERIFIED valid git syntax: `git push -- <repository> <refspec>` parses the repo as a pathname, and a
+// `--upload-pack=evil` AFTER `--` is rejected as a "strange pathname", never executed as a flag). The
+// branch is a strictly-validated literal token (`^[A-Za-z0-9._/-]+$`, no leading `-`), so it can never be
+// coerced into a flag (`--force`/`-d`) either — defense-in-depth on top of the positional ordering.
+//
+// CREDENTIAL-BLIND: `toEnv` emits ONLY a credential PLACEHOLDER (`placeholderForKey`, NEVER a literal
+// secret); the url is validated by the SAME `isAllowedFetchUrl` net.fetch uses (rejects userinfo), and the
+// projection's networkHosts is host-ONLY. `governanceProjector` reuses net.fetch's EXACT hostname
+// projection (`new URL(url).hostname`, NOT buildExecRunProjection's raw token), so the projected host ==
+// git's real connect host AND matches a host-only egress allowlist entry.
+//
+// HONEST BOUNDARY: the approval gate + egress gate + boundary record + credential placeholder are REAL
+// in-repo (fake-proven). The real push reaching a remote + the SecretResolver-at-egress credential
+// resolution are deploy/EXEC2-gated (git.push is unauthenticated-to-allowlisted until EXEC2). git in the
+// sandbox is a deploy fact. Remote-name push, SSH URLs, and real auth are OUT OF SCOPE.
+// ------------------------------------------------------------------------------------------------
+
+/** A valid `git.push` ToolManifest — the FIRST real DESTRUCTIVE + network-egress tool (https URL, approval-gated). */
+export const gitPushManifest = {
+  name: "git.push",
+  version: "1.0.0",
+  description:
+    "push a branch to an https git remote (git push -- <url> <branch>) — egress + approval gated",
+  action: "tool:invoke",
+  resourcePattern: "git/push",
+  sideEffect: "destructive" as const,
+  idempotent: false,
+  // FORCED true by the manifest superRefine (sideEffect "destructive" => requiresApproval:true). A
+  // destructive tool can NEVER escape the approval gate; set it true to satisfy parseToolManifest.
+  requiresApproval: true,
+  bundleRefOnly: false,
+  containment: "network-egress" as const,
+};
+
+/**
+ * SLICE-CAP6b — the env var naming the OPTIONAL git-credential KEY git.push's `toEnv` emits a PLACEHOLDER
+ * for. NON-secret config (it names a KEY, never a value). UNCONFIGURED (unset / blank) => NO auth env =>
+ * git.push is unauthenticated-to-allowlisted (the EXEC2-until honest boundary, mirroring net.fetch). The
+ * KEY's real value is resolved by OpenShell's SecretResolver at the sandbox egress boundary; agent-os only
+ * ever assembles the PLACEHOLDER, never the secret. Reuses net.fetch's SAFE_ENV_KEY shape + the fail-closed
+ * `netFetchAuthEnv` builder (an uppercase C-identifier that is NOT a curl/proxy-control name).
+ */
+const GIT_PUSH_AUTH_KEY_ENV = "AGENTOS_GIT_PUSH_AUTH_KEY";
+
+/**
+ * The strict branch-name validator: a `git` ref-name shape — dot/slash/dash/underscore + alphanumerics —
+ * that does NOT start with `-`. The leading-`-` exclusion is the NO-FLAG-INJECTION guard: a branch can
+ * never be `--force` / `-d` / `--mirror` / `--delete` (a `git push` flag). The charset excludes whitespace
+ * and shell metacharacters, so the branch is always a SINGLE literal argv token. (This is intentionally
+ * stricter than full git ref-name rules — it is an allowlist, not a denylist; exotic but legal ref names
+ * are out of scope for this slice and can widen later if needed.)
+ */
+const SAFE_BRANCH_NAME = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
+
+/**
+ * git.push binding. argvPrefix = ["git","push","--"] (the `--` guard, VERIFIED valid `git push` syntax).
+ * The url is validated by the SAME `isAllowedFetchUrl` net.fetch uses (http/https + plain DNS host + no
+ * userinfo), so every admitted url produces a host subject to the egress fold AND the projected host equals
+ * git's real connect host. The branch is validated by `SAFE_BRANCH_NAME` (no leading `-` => no flag
+ * injection). `.strict()` rejects any smuggled extra key. `toArgv` -> [url, branch] (two literal tokens
+ * after `--`). `toEnv` emits the OPTIONAL credential PLACEHOLDER (never a literal secret; default unset =>
+ * `{}`), reusing net.fetch's fail-closed `netFetchAuthEnv` key validator.
+ *
+ * `governanceProjector` builds the credential-blind projection over the argv, then OVERRIDES `networkHosts`
+ * to the BARE `new URL(url).hostname` (NO port) — the EXACT net.fetch pattern (NOT buildExecRunProjection's
+ * raw token), so the gated token is host-only and equals git's real connect host. NON-VACUITY: remove this
+ * projector => no networkHosts => the network-egress fail-closed gate denies (the destination is unknown).
+ */
+export const gitPushBinding: ExecToolBinding = {
+  argvPrefix: ["git", "push", "--"],
+  argSchema: z
+    .object({
+      url: z.string().min(1).refine(isAllowedFetchUrl),
+      branch: z.string().regex(SAFE_BRANCH_NAME),
+    })
+    .strict(),
+  toArgv: (a) => {
+    const v = a as { url: string; branch: string };
+    return [v.url, v.branch];
+  },
+  toEnv: () => netFetchAuthEnv(process.env[GIT_PUSH_AUTH_KEY_ENV]),
+  governanceProjector: (a) => {
+    const url = (a as { url: string }).url;
+    const branch = (a as { branch: string }).branch;
+    const base = buildExecRunProjection({ argv: ["git", "push", "--", url, branch] });
+    // Override networkHosts to the BARE hostname (no port): the egress allowlist is host-based. The url is
+    // already validated (http/https + plain DNS host), so `new URL` cannot throw here.
+    return { ...base, networkHosts: [new URL(url).hostname] };
+  },
+};
+
 /**
  * A fresh ToolRegistry holding the seed exec tools (so authorize can admit only these names).
  * SLICE-HDI2a grew this from the two EXEC3a tools to the read-only-safe set; SLICE-HDI2b adds the ONE
@@ -650,6 +756,12 @@ export function seedRegistry(
   // which lives in the bin authorize closure, is the matching enforcement). Defense-in-depth: even if it
   // were registered here, the ToolRegistry's own CAP3 gate would THROW without the primitive wired.
   if (wired.has("egress-allowlist")) r.register(netFetchManifest);
+  // SLICE-CAP6b — git.push (network-egress + destructive) registers ONLY where BOTH "egress-allowlist" AND
+  // "approval" are WIRED + enforced (the bin). It is the FIRST destructive tool: a composition missing
+  // EITHER primitive never sees it (the CAP3 ordering — egress fold + approval stage are the matching
+  // enforcement). Defense-in-depth: even if registered here, the ToolRegistry's CAP3 gate would THROW
+  // without BOTH primitives wired (network-egress needs egress-allowlist; destructive needs approval).
+  if (wired.has("egress-allowlist") && wired.has("approval")) r.register(gitPushManifest);
   for (const m of extra) r.register(m);
   return r;
 }
@@ -691,5 +803,11 @@ export function seedBindings(
   // wired + enforced (PARALLEL to seedRegistry's conditional registration). No egress wired => not
   // advertised, not invocable (its manifest is also not registered).
   if (wired.has("egress-allowlist")) entries.push(["net.fetch", netFetchBinding]);
+  // SLICE-CAP6b — git.push's binding (and thus its tools/list advertisement) appears ONLY where BOTH
+  // egress AND approval are wired + enforced (PARALLEL to seedRegistry's conditional registration). A
+  // composition missing EITHER primitive advertises neither git.push's binding nor its manifest — "a
+  // WIRED primitive ⟺ enforcement present" stays honest for the FIRST destructive tool.
+  if (wired.has("egress-allowlist") && wired.has("approval"))
+    entries.push(["git.push", gitPushBinding]);
   return new Map<string, ExecToolBinding>([...entries, ...extra]);
 }
