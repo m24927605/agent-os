@@ -39,6 +39,17 @@ describe("PolicyRequest.governanceProjection — optional, credential-blind advi
     expect(parsed.governanceProjection?.destructiveFlags).toContain("-rf");
   });
 
+  it("SLICE-CAP9: the schema carries writeTargets (parallel to networkHosts); defaults [] for exec.run", () => {
+    const parsed = PolicyRequest.parse({ ...base, governanceProjection: projection });
+    expect(parsed.governanceProjection?.writeTargets).toEqual([]);
+    // A projection WITH writeTargets parses + preserves them (the shape a host-fs-write projector emits).
+    const withWrites = PolicyRequest.parse({
+      ...base,
+      governanceProjection: { ...projection, writeTargets: ["/work/out.txt"] },
+    });
+    expect(withWrites.governanceProjection?.writeTargets).toEqual(["/work/out.txt"]);
+  });
+
   it("rejects a malformed governanceProjection (wrong version literal) — fail-closed schema", () => {
     const bad = { ...base, governanceProjection: { ...projection, version: 2 } };
     expect(PolicyRequest.safeParse(bad).success).toBe(false);

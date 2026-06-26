@@ -356,6 +356,10 @@ function boundarySummaryFromProjection(projection: unknown): Record<string, unkn
   const summary: Record<string, unknown> = {
     networkHosts: strings(p.networkHosts),
     destructiveFlags: strings(p.destructiveFlags),
+    // SLICE-CAP9 — writeTargets are SAFE path metadata (the very thing the host-write gate decides on:
+    // lexically canonical write-target paths, NOT a raw arg). Rebuilt via the SAME string-filter the other
+    // array fields use; like networkHosts, parallel and safe-by-construction. NO argvRedacted.
+    writeTargets: strings(p.writeTargets),
   };
   if (typeof p.version === "number") summary.version = p.version;
   if (typeof p.operationClass === "string") summary.operationClass = p.operationClass;

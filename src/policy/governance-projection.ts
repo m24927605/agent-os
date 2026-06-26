@@ -50,6 +50,9 @@ export const GovernanceProjectionSchema = z.object({
   usesShellInterpreter: z.boolean(),
   networkHosts: z.array(z.string()),
   destructiveFlags: z.array(z.string()),
+  // SLICE-CAP9 — host write-target paths (parallel to networkHosts). [] for every existing tool; only a
+  // host-fs-write tool's custom projector sets it (like net.fetch's hostname projector sets networkHosts).
+  writeTargets: z.array(z.string()),
 });
 
 /**
@@ -77,6 +80,14 @@ export interface GovernanceProjection {
   readonly networkHosts: readonly string[];
   /** Best-effort intersection with a known destructive-flag set — a HINT for AGT, not exhaustive. */
   readonly destructiveFlags: readonly string[];
+  /**
+   * SLICE-CAP9 — host write-target paths the bin's host-write fold (`hostWriteDecisionForProjection`)
+   * gates (parallel to `networkHosts`). The general `exec.run` projector sets it to `[]` (no host-write
+   * classifier — no real host-write tool exists); only a future host-fs-write tool's custom projector
+   * populates it (mirroring how net.fetch's hostname projector sets `networkHosts`). Paths are safe
+   * derived metadata (not a raw arg) — the very thing the host-write gate decides on.
+   */
+  readonly writeTargets: readonly string[];
 }
 
 /** Bound on `argvRedacted` — caps the projection size; overflow sets `truncated`. */
@@ -203,6 +214,9 @@ export function buildExecRunProjection(validated: {
       usesShellInterpreter: false,
       networkHosts: [],
       destructiveFlags: [],
+      // SLICE-CAP9 — exec.run has no host-write classifier; default []. A host-fs-write tool's custom
+      // projector overrides this (parallel to net.fetch overriding networkHosts).
+      writeTargets: [],
     };
   }
 
@@ -244,5 +258,8 @@ export function buildExecRunProjection(validated: {
     usesShellInterpreter,
     networkHosts,
     destructiveFlags,
+    // SLICE-CAP9 — exec.run projects NO host-write target (no real host-write tool exists). Default [];
+    // a host-fs-write tool's custom projector overrides it (parallel to net.fetch's networkHosts override).
+    writeTargets: [],
   };
 }

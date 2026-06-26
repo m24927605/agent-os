@@ -15,3 +15,9 @@ export * from "./governance-projection.js";
 // truth the inference second-chokepoint gate re-uses) + `egressDecisionForProjection` (the PDP-side
 // defense-in-depth decision the bin's authorize folds in for a tool whose projection carries networkHosts).
 export * from "./egress-allowlist.js";
+// SLICE-CAP9 — the vendor-neutral host-write-target PRIMITIVE (precise PARALLEL to egress-allowlist):
+// `matchHostWriteTarget` (lexical canonicalization + deny-by-default under-root containment) +
+// `hostWriteDecisionForProjection` (the PDP-side defense-in-depth decision the bin's authorize folds in
+// for a tool whose projection carries writeTargets). The REAL host-write enforcement is a deploy fact
+// (sandbox host-mount + kernel realpath); this lexical check is best-effort defense-in-depth.
+export * from "./host-write-target.js";
