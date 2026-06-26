@@ -14,6 +14,7 @@
  * the policy decision, the credential screen, and the effect are injected by the composition root, so
  * orchestration never reaches into another module's internals and names no vendor.
  */
+import { createAuditEvent } from "../audit/index.js";
 import { type CommitAppender, commitBeforeEffect } from "../commitgate/index.js";
 import type { CostGate } from "../cost/index.js";
 import type { MaybePromise } from "../policy/index.js";
@@ -50,6 +51,24 @@ export type AuthorizeDecision = {
   effect: "allow" | "deny";
   reason: string;
   readonly requiresApproval?: boolean;
+  /**
+   * SLICE-CAP7 — set by the composition root's authorize closure from the tool manifest's
+   * `containment`: `true` when the effect PUNCHES the sandbox seal (`network-egress` / `host-fs-write`),
+   * absent / `false` for an `in-sandbox` effect. When `=== true` AND the effect EXECUTES, the pipeline
+   * appends a DISTINCT post-effect boundary WORM event (a stronger record than the commit-before-effect
+   * intent). This is AUDIT-ONLY: it NEVER changes allow/deny (the PDP stays the sole deny authority) and
+   * is consulted ONLY on the `executed` path — a denied/aborted call (the effect never ran) appends NO
+   * boundary. Absent / `false` => byte-identical to pre-CAP7 (the 14 in-sandbox seed tools).
+   */
+  readonly external?: boolean;
+  /**
+   * SLICE-CAP7 — the OPTIONAL redacted GovernanceProjection (R9b-1-redacted; credential-blind) the
+   * composition root already builds. When `external === true` and the effect executes, it rides the
+   * boundary record AS-IS (opaque to the pipeline — the pipeline never inspects/redacts it; it is
+   * already redacted). Present-only: absent => the boundary event carries neutral fields only. The
+   * pipeline NEVER records raw args/env/stdin — only this redacted projection + neutral context ids.
+   */
+  readonly projection?: unknown;
 };
 export type EffectResult = { ok: boolean; detail?: string; tokensUsed?: number };
 
@@ -101,6 +120,17 @@ export type CostSettlement =
   | { status: "committed"; overrun: boolean }
   | { status: "denied"; reason: string };
 
+/**
+ * SLICE-CAP7 — the result of appending the post-effect boundary WORM event for an EXTERNAL effect that
+ * EXECUTED. Surfaced (like {@link CostSettlement}) so a boundary-append FAILURE is NEVER silently
+ * swallowed. The external effect is IRREVERSIBLE (commit-before-effect -> effect -> boundary), so a
+ * failed boundary append does NOT change the executed status — it is an auditable/alertable marker the
+ * caller/composition root can react to (re-drive the ledger, alert), not a reason to fake "didn't run".
+ * Present ONLY on an `executed` outcome whose decision was `external === true` (absent otherwise =>
+ * byte-identical for in-sandbox tools).
+ */
+export type BoundaryRecord = { status: "recorded" } | { status: "append-failed" };
+
 export type GovernedOutcome<R> =
   | {
       status: "executed";
@@ -108,6 +138,8 @@ export type GovernedOutcome<R> =
       receipt: R;
       detail?: string;
       settlement: CostSettlement;
+      /** SLICE-CAP7 — present ONLY for an external effect; the boundary-ledger append result. */
+      boundary?: BoundaryRecord;
     }
   | { status: "denied"; stage: GovernedStage; reason: string };
 
@@ -218,11 +250,117 @@ export async function runGovernedToolCall<TC extends GovernedCall, R>(
       reason: "cost settlement failed (post-effect; effect already ran)",
     };
   }
+
+  // 6) SLICE-CAP7 — the external-effect BOUNDARY LEDGER. The effect has ALREADY run (executed). IF the
+  // PDP decision classified this call as `external` (a seal-PUNCHING containment: network-egress /
+  // host-fs-write), append a DISTINCT post-effect boundary WORM event — a stronger record than the
+  // commit-before-effect intent ("the irreversible external fact happened", not just "about to run").
+  //
+  // This is AUDIT-ONLY, NOT a second deny authority: it runs ONLY on the executed path (a denied/aborted
+  // call never reached here, so there is NEVER a boundary-without-effect), it NEVER changes the executed
+  // status, and the boundary's own `policyDecision` is a forward `allow` record (the PDP stays the sole
+  // deny).
+  //
+  // CREDENTIAL-BLIND (the WORM is IMMUTABLE — get this right): the GovernanceProjection is only
+  // BEST-EFFORT redacted — its OWN R9b-1 header (src/policy/governance-projection.ts) warns that a
+  // NON-shape credential (e.g. a `?access_token=...` URL query, `--password=hunter2`) SURVIVES
+  // `argvRedacted`, so the projection is safe ONLY for the local AGT engine, "NEVER a log / WORM / audit
+  // payload" sink. We therefore record NOT the full projection but ONLY a `boundarySummary` of its SAFE
+  // DERIVED fields (networkHosts = userinfo-stripped host-only; operationClass; the shape flags) — NEVER
+  // `argv0` / `argvRedacted` / `argc` / any raw token. Plus the neutral context ids + tool name. So a
+  // URL-query token can never reach the immutable WORM via this event.
+  //
+  // POST-EFFECT FAIL-SAFE (mirrors the settlement try/catch above): a boundary-append REJECT does NOT
+  // un-run the irreversible effect — the status STAYS "executed" and a `boundary:"append-failed"` marker
+  // is SURFACED (never swallowed; the caller can alert / re-drive the ledger). It is NEVER faked as
+  // "didn't run". An in-sandbox call (external !== true) skips this entirely => byte-identical.
+  let boundary: BoundaryRecord | undefined;
+  if (decision.external === true) {
+    const ids = boundaryContextIds(toolCall.context);
+    const summary = boundarySummaryFromProjection(decision.projection);
+    try {
+      await deps.appender.append({
+        ...createAuditEvent({
+          ...ids,
+          action: "effect.boundary-crossed",
+          resource: toolCall.tool,
+          result: committed.result.ok ? "success" : "error",
+          policyDecision: { effect: "allow", reason: "external effect boundary" },
+        }),
+        // ONLY the SAFE derived summary (if any) rides — NEVER argv0/argvRedacted/argc/raw tokens.
+        ...(summary !== undefined ? { boundarySummary: summary } : {}),
+      });
+      boundary = { status: "recorded" };
+    } catch {
+      boundary = { status: "append-failed" };
+    }
+  }
+
   return {
     status: "executed",
     reservationId: reservation.reservationId,
     receipt: committed.receipt,
     detail: committed.result.detail,
     settlement,
+    ...(boundary !== undefined ? { boundary } : {}),
   };
+}
+
+/**
+ * SLICE-CAP7 — pull the neutral context ids the boundary AuditEvent needs from the (structural) tool-call
+ * context. The composition root's context carries the branded ids as strings (the SAME shape
+ * `createAuditEvent` validates). Best-effort structural read (the pipeline stays decoupled from the
+ * concrete context type); `createAuditEvent` fail-closes on a missing/invalid id (no partial boundary
+ * event). NO raw args/env are read — ONLY these five neutral identity fields.
+ */
+function boundaryContextIds(context: unknown): {
+  actorId: string;
+  tenantId: string;
+  projectId: string;
+  taskId: string;
+  requestId: string;
+} {
+  const c = (context ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  return {
+    actorId: str(c.actorId),
+    tenantId: str(c.tenantId),
+    projectId: str(c.projectId),
+    taskId: str(c.taskId),
+    requestId: str(c.requestId),
+  };
+}
+
+/**
+ * SLICE-CAP7 — the SAFE-fields-only summary of the GovernanceProjection for the IMMUTABLE WORM boundary
+ * event. ALLOW-LIST (never deny-list): pick ONLY the fields R9b-1 derives that cannot carry a raw token —
+ *
+ *   - `networkHosts`   : userinfo-stripped, host-ONLY (no path/query) — the very thing the egress gate
+ *                        decides on; safe by construction.
+ *   - `operationClass` : a coarse bucket (filesystem/network/shell/process/unknown).
+ *   - `usesShellInterpreter`, `truncated` : booleans.
+ *   - `destructiveFlags` : an intersection with a KNOWN flag set (no free-form token).
+ *   - `version`        : the contract pin.
+ *
+ * DELIBERATELY DROPPED: `argv0`, `argvRedacted`, `argc` — `argvRedacted` is only SHAPE-redacted, so a
+ * non-shape credential (a `?access_token=...` URL query, `--password=hunter2`) survives it (R9b-1's own
+ * header). Those MUST NOT reach the WORM. Returns `undefined` for an absent/non-object projection (the
+ * boundary event then carries neutral fields only). Reads defensively (the projection is `unknown` to the
+ * pipeline) and copies ONLY string entries out of the string-array fields (no nested object passthrough).
+ */
+function boundarySummaryFromProjection(projection: unknown): Record<string, unknown> | undefined {
+  if (projection === null || typeof projection !== "object") return undefined;
+  const p = projection as Record<string, unknown>;
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const summary: Record<string, unknown> = {
+    networkHosts: strings(p.networkHosts),
+    destructiveFlags: strings(p.destructiveFlags),
+  };
+  if (typeof p.version === "number") summary.version = p.version;
+  if (typeof p.operationClass === "string") summary.operationClass = p.operationClass;
+  if (typeof p.usesShellInterpreter === "boolean")
+    summary.usesShellInterpreter = p.usesShellInterpreter;
+  if (typeof p.truncated === "boolean") summary.truncated = p.truncated;
+  return summary;
 }
