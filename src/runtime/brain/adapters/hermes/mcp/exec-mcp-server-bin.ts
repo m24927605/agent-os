@@ -582,6 +582,33 @@ function buildDeps(
       } else {
         egressDecisions = [];
       }
+      // SLICE-EXEC-HARDENING — the CAP6 cross-cutting gap: a KNOWN network BINARY run via exec.run
+      // (containment:"in-sandbox") with an UNVERIFIABLE target. `buildExecRunProjection` classifies
+      // basename(argv0) ∈ NETWORK_CMDS {curl,wget,nc,ssh,scp,ftp} as `operationClass === "network"`. A
+      // URL-shaped target (`curl https://evil.com`) yields networkHosts -> the egress fold above ALREADY
+      // gates it. But a BARE-HOST target with NO scheme (`curl evil.com`) yields networkHosts=[] -> the
+      // egress fold (networkHosts.length > 0) does NOT fire, leaving only the substrate seal. FAIL-CLOSED:
+      // a network-class projection with NO projectable host => DENY (the destination cannot be verified
+      // against the egress allowlist). Keyed PURELY on the projection (operationClass + empty networkHosts),
+      // NOT on containment, so it fires for the in-sandbox exec.run too — folded the SAME way the egress
+      // decision is (over the projection). A NON-network operationClass (echo/cat/git/…) is UNAFFECTED even
+      // if an arg merely CONTAINS a hostname-like string; net.fetch/git.push (network-egress with a
+      // projectable host) are UNAFFECTED (they hit the networkHosts.length > 0 branch above). This SHRINKS
+      // the PDP's exec.run network blind spot — best-effort defense-in-depth; the substrate seal stays
+      // PRIMARY (a non-NETWORK_CMDS custom binary or a shell-wrapped network call can still evade the PDP).
+      const networkCommandDecisions: PolicyDecision[] =
+        projection !== undefined &&
+        projection.operationClass === "network" &&
+        projection.networkHosts.length === 0
+          ? [
+              {
+                effect: "deny",
+                reason:
+                  "network command with unverifiable target — denied (deny-by-default egress, EXEC-HARDENING)",
+                auditRequired: true,
+              },
+            ]
+          : [];
       // SLICE-CAP9 — the HOST-WRITE defense-in-depth fold (precise PARALLEL to the CAP5/CAP6 egress fold).
       // When the tool's credential-blind projection carries writeTargets, build
       // `hostWriteDecisionForProjection(writeTargets, binHostWriteAllow)` and fold it in as an extra
@@ -619,6 +646,7 @@ function buildDeps(
       const combined = combineDecisions(pdp, [
         ...(await evaluateSecondaries(secondaries, req as unknown as PolicyRequest)),
         ...egressDecisions,
+        ...networkCommandDecisions,
         ...hostWriteDecisions,
       ]);
       // SLICE-AGT1-A: redact the combined reason before it leaves the authorize boundary (mirrors the

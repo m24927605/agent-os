@@ -28,8 +28,9 @@
 - git.push:branch 256 字元 → argSchema 拒;255 字元有效 branch → 過;url 過長 → 拒;既有短 branch/url → 過(byte-identical)。
 - byte-identical:既有 16 工具 + CAP1-9/6b + projection 測不變綠(非網路 exec.run、URL-shaped 路徑、短 git.push 不變)。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(exec.run network-command fail-closed〔operationClass network + networkHosts 空 → deny〕+ git.push branch/url `.max()`;URL-shaped/非網路/短 git.push byte-identical;mutation 證〔移除規則 → curl evil.com 翻〕;PDP-sovereign;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:bin closure 折入 network-command fail-closed decision(`projection.operationClass === "network"` 且 `projection.networkHosts.length === 0` → static-reason deny,折進 `combineDecisions`,純依 projection 非 containment → 對 in-sandbox exec.run 也觸發)+ git.push `url.max(2048)`/`branch.max(255)`。RED → verify **exit 0**(1525 passed + 29 skipped;**remove-rule mutation 翻 4〔curl/wget/ssh evil-host + default-deny-all〕**)。獨立 Opus4.8 review **PASS,零 findings**:fail-closed 非 vacuous、no-false-positive(echo/cat/allowlisted-URL 不受影響)、**bypass 誠實標**(sh -c / custom-binary / 大小寫逃 → substrate PRIMARY,spec/comment/test/commit 四處一致;**絕對路徑 `/usr/bin/curl` 仍 caught**〔basename〕;bare `host:port` 由既有 egress fold 處理)、net.fetch/git.push 不受影響(networkHosts 非空 → 走既有 egress branch)、PDP-sovereign、`.max()` 邊界正確、byte-identical。
+- **誠實**:縮小 PDP 對 exec.run 已知網路 binary(NETWORK_CMDS)+ 無法驗證目標的盲區;**substrate seal 仍 PRIMARY**(shell-wrapped / 非-NETWORK_CMDS 自訂 binary 仍可逃 PDP)——best-effort defense-in-depth,非完備攔截。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(一條 deny 規則 + `.max()` 純收緊)。
