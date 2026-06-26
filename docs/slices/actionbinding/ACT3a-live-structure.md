@@ -40,8 +40,9 @@
 - mutation:host-pin 改成吃 descriptor 的 host → unknown-service 測翻(本該 refuse)。
 - byte-identical:既有全測不變綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(`HttpActionTransport` port + `FakeHttpActionTransport` + `createGoogleActionConnector`〔host-pin + gmail.send/drive.read builder + placeholder auth〕+ 過 guard;未知 service/method refuse;credential-blind〔placeholder-only,canary 不入 req〕;fail-closed;host-pin 不吃 descriptor host;byte-identical;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`action-google-connector.ts`——`HttpActionTransport` port + `FakeHttpActionTransport` + `createGoogleActionConnector(http)`(host pin `SERVICE_HOST_PIN`〔gmail/drive/calendar〕經 `Object.hasOwn` lookup、prototype-key safe;gmail.send `POST .../messages/send` body `{raw:base64url(RFC822)}`、drive.read `GET .../files/{id}?alt=media`,皆 hand-rolled base64url/RFC822 無新依賴;Authorization=`Bearer `+env placeholder,forward verbatim 不合成;2xx→ok,else/throw→ok:false body 不 echo)。過 `createGuardedActionConnector`。RED → verify **exit 0**(1631 passed + 29 skipped;15 connector 測;host-from-descriptor mutation 翻)。獨立 Opus4.8 review **PASS**:host-pin 非 vacuous(Object.hasOwn load-bearing、descriptor 不能 retarget)、**credential-blind layering 健全**(INPUT guard 結構上在 bindingWrappedActionEffect 上游、placeholder 非-secret、依賴文件化)、deny-by-default、fail-closed(body 不 echo)、guard-gating、documented-not-live 誠實、byte-identical(未接 bin)、無新依賴。2 MINOR(**ya29./Bearer 不在 redact.ts secret pattern → 後續 CRED-HARDENING 補**;authorizationFromEnv 單 key 約定)。
+- **連接器結構就位**。**BLOCKED(ACT3a-live-real,你的 GCP/部署 + go-live)**:真 HttpActionTransport(經 egress 打 googleapis.com)+ 真 token 解析(OAuth/SecretResolver/EXEC2)+ 真 AccountResolver + 真寄。Google REST 形狀依官方文件、Fake 證形狀(非 live)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 transport port + connector)。
