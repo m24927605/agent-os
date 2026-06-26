@@ -93,6 +93,18 @@ export {
   seedActionRegistry,
   toCredentialEnv,
 } from "./action-seed-tools.js";
+// SLICE-ACT3a-live-structure — the GoogleActionConnector STRUCTURE (descriptor -> pinned Google REST request)
+// + the HttpActionTransport port + in-repo FakeHttpActionTransport. Host per-service PINNED (descriptor can't
+// retarget); credential carried as the PLACEHOLDER only (connector never holds a real token); fail-closed
+// response mapping. PURE ADDITION — NOT wired into the production bin's live deps; the REAL transport + token
+// resolution are ACT3a-live-real (BLOCKED). Wrap with createGuardedActionConnector in composition.
+export {
+  FakeHttpActionTransport,
+  type HttpActionRequest,
+  type HttpActionResponse,
+  type HttpActionTransport,
+  createGoogleActionConnector,
+} from "./action-google-connector.js";
 export { makeArgsCredentialScreen } from "./args-credential-screen.js";
 export {
   type AgtScope,
