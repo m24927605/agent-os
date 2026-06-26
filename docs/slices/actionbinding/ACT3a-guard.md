@@ -37,8 +37,9 @@
 - mutation:guard 略過 live 檢查 → live-off 測翻(inner 被呼叫);略過 allowlist → main-account 測翻。
 - byte-identical:ACT1/ACT2/exec 全測不變綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(`createGuardedActionConnector`〔live-off-by-default + 測試帳號 allowlist + fail-closed〕+ env config + AccountResolver port + Fake;每拒 inner-never-called;credential-blind 靜態 reason;byte-identical;mutation 證〔skip-live 翻、skip-allowlist 翻〕;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`action-guard.ts`——`createGuardedActionConnector(inner, {live, testAccounts, resolveAccount})`(4 refusal branch:live≠true / resolver throw〔fail-closed〕/ allowlist 空或帳號∉allowlist → 靜態-reason refuse,各 inner-never-called;else delegate)+ `AccountResolver` port + `FakeAccountResolver` + env readers(`actionLiveFromEnv` 只精確 "true"/"1"、`testAccountsFromEnv` comma/trim/blank-filter→unset 空、`actionGuardConfigFromEnv`)。RED → verify **exit 0**(1616 passed + 29 skipped;guard 19 測;skip-live/skip-allowlist mutation 翻)。獨立 Opus4.8 review **PASS**:每 refusal inner-never-called(探針 10 斷言)、master switch off-by-default + exact-token(unset/blank/"false"/"TRUE"/"yes"/"true " 全 off)、主帳號 blocked + credential-blind(canary 不洩、帳號不 interpolate)、empty-allowlist=deny-all、byte-identical(無 production 接線,un-wrapped 路徑不變)、depcruise bite + secret-scan clean、無新依賴。
+- **安全閘就位**:日後接真 transport + go-live 時,真連接器**只能**對 allowlist 內測試帳號動作、且須明確開 `AGENTOS_ACTION_LIVE`。**BLOCKED(ACT3a-live,user-initiated+授權)**:真 transport(agent-os runtime 自己的 Google/MCP client,非此 session MCP 工具)+ 真 AccountResolver(live 認證取帳號)+ 對測試帳號真 send。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 guard + env reader + resolver port)。

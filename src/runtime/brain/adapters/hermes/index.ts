@@ -57,6 +57,19 @@ export {
   FakeActionConnector,
   bindingWrappedActionEffect,
 } from "./action-closed-loop.js";
+// SLICE-ACT3a-guard — the real-connector SAFETY GATE (live-off-by-default + test-account allowlist;
+// fail-closed). Wraps any ActionConnector; the REAL transport + real account resolver are ACT3a-live
+// (deploy/auth-gated). PURE ADDITION — the un-wrapped ACT1/ACT2 composition is unchanged.
+export {
+  type AccountResolver,
+  type ActionGuardConfig,
+  type FakeAccountResolverMode,
+  FakeAccountResolver,
+  actionGuardConfigFromEnv,
+  actionLiveFromEnv,
+  createGuardedActionConnector,
+  testAccountsFromEnv,
+} from "./action-guard.js";
 export { buildActionProjectionForCall } from "./action-projection-for-call.js";
 export {
   CALENDAR_HOST,
