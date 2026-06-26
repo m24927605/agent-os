@@ -17,7 +17,7 @@ const SECRET_KEY =
 // Matched substrings are replaced with REDACTED. Patterns contain regex metacharacters, so this
 // source does not match itself under scan_secrets.sh.
 const SECRET_VALUE =
-  /sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g;
+  /sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+|ya29\.[0-9A-Za-z._-]{20,}|AIza[0-9A-Za-z._-]{35}|\bBearer\s+[A-Za-z0-9._-]{20,}/g;
 
 function scrubSecretValues(value: string): string {
   return value.replace(SECRET_VALUE, REDACTED);
