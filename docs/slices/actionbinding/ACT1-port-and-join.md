@@ -47,8 +47,9 @@ capability-breadth 後的下一個能力面:**non-argv app/API**。ACT1 建 sibl
 - mutation 證:bindingWrappedActionEffect 略過 INPUT guard → 含-secret 測翻;略過 no-binding deny → unbound 測翻。
 - byte-identical:既有 16 exec 工具 + CAP/exec 測全不變綠(action family 純加,pipeline 零改)。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(ActionBinding port + FakeActionConnector + bindingWrappedActionEffect〔deny-by-default/strict/credential-blind〕+ parallel buildActionProjectionForCall + gmail.send/drive.read manifest+binding+條件註冊 + 端到端 join 過 REAL runGovernedToolCall 證 6 性質;projector 無 params;boundary 無 to/subject/body/token;pipeline/exec 零改 byte-identical;mutation 證;depcruise no-vendor-in-core 綠;secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:新模組(hermes 區,**不碰 core/exec**)`action-closed-loop.ts`(ActionBinding + ActionConnector + FakeActionConnector + bindingWrappedActionEffect)+ `action-projection-for-call.ts`(buildActionProjectionForCall)+ `action-seed-tools.ts`(gmail.send/drive.read + seedActionRegistry/Bindings,條件註冊讓 assertRegisterable 對缺 primitive throw)+ index barrel(+26)。RED → verify **exit 0**(1559 passed + 29 skipped;action 34 測〔21+13〕;mutation:INPUT-guard-skip 翻 secret、no-binding-skip 翻 unbound)。獨立 Opus4.8 review **PASS**:**JOIN FAITHFULNESS**(join 用 REAL runGovernedToolCall + 真 gate 函式,`makeJoinDeps.authorize` 與 production bin `buildDeps.authorize` 結構相同,只換 action projection + 省 exec.run-specific decisions〔對 action 不可能觸發〕)、credential-blind(canary 零進 projection/intent/boundary、params 只到 connector、literal secret 擋)、6 SEATBELT 性質端到端、no-shell、**pipeline/exec diff EMPTY byte-identical**。2 MINOR(CAP6-no-host join 分支硬寫 inline〔e2e gate 由其他測+探針已證;可加 projector-stripping fixture〕;SLICE-P0-003 — 註:deps:check 確在 verify)。
+- **ActionBinding family 確立**:non-argv app/API 的 governed port,fake-proven 過真 pipeline。**誠實**:真 send + OAuth/SecretResolver-at-egress + 真 MCP transport + 真 egress 抵達 = deploy/EXEC2-gated(ACT3);API SDK 可能 resolve projector 看不到的 host → substrate seal 必 PRIMARY,真 connector(ACT3)須拒未宣告 host。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(新模組 + seed actions + parallel projection helper 純加;pipeline/exec 零改)。
