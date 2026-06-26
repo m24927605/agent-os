@@ -34,8 +34,9 @@
 - 參數化 suite:`describe.each` 對 15 工具各跑;mutation:把某真工具的 projector 拿掉(暫)→ 該工具 conformance 翻紅(證 suite 真的逐工具檢查)。
 - 刪冗餘斷言後:被刪的不變量仍由 conformance suite 綠覆蓋(全測綠)。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(`assertToolConformant` + 參數化 conformance suite 涵蓋 15 工具〔no-drift/strict-deny/effectful⇒projector/credential-blind〕+ 刪冗餘逐工具斷言〔不丟覆蓋〕;non-vacuity〔合成非-conformant 工具被抓:無-projector/非-strict/不可導〕;production 不動 byte-identical;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測)
+- [x] **DONE（merged)**:`tool-conformance.test.ts` 的 `assertToolConformant(manifest, binding, advertisedInputSchema, opts)`(4 檢查:no-drift〔argSchemaToJsonSchema 不 throw + == advertised〕/ strict-deny〔.strict() 拒 unknown key〕/ effectful⇒projector / credential-blind〔string-arg 的 sk- canary 被 args screen deny;`stringFieldsOf` 解 ZodEffects/Optional,net.fetch url 真測;無 string-arg N/A〕)+ `describe.each(15 bin 工具)`。**test-only,production 0 改動**(4 個 imported 模組 byte-unchanged,build byte-identical)。刪 HDI2a-1 schema-derive loop / HDI2a-3 strict-deny loop / HDI2a-4 credential-blind loop(被 conformance registry-wide 覆蓋,check#4 strictly broader;pipeline 後果經單一 execution edge〔exec-mcp-server.ts:391〕保留;tool-specific 斷言〔exact-set/forbidden-name/description/schema-value〕全留)。RED → verify **exit 0**(1430 passed + 29 skipped;suite 21 測;**neuter-helper 翻剛好 5〔合成 無-projector/非-strict/不可導/credential-blind-miss + strip-real-projector〕**;credential-blind 真擋 canary)。獨立 Opus4.8 review PASS:non-vacuity 真、**NO COVERAGE LOST**、15 工具 × 4 不變量真跑、honest。2 INFO(deps:check 確在 verify;刪的 end-to-end 後果由 exec.run HDI2b-3 + 共用 execution edge 覆蓋)。
+- **registry-wide property 就位**:未來任何新工具自動受 4 不變量檢查。**誠實**:證不變量成立,非 effectAdapter domain 正確;commit-before-effect 留 pipeline 級(既有測)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純測 + helper;production 不動)。

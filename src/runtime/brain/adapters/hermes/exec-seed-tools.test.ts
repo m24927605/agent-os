@@ -184,14 +184,12 @@ describe("HDI2a-1 tools/list advertises the full read-only seed set, each schema
       expect(names).not.toContain(forbidden);
     }
 
-    // Each inputSchema is BYTE-DERIVED from its binding's strict argSchema (single source of truth).
-    const bindings = seedBindings();
-    for (const tool of tools) {
-      const binding = bindings.get(tool.name);
-      expect(binding).toBeDefined();
-      if (binding === undefined) continue;
-      expect(tool.inputSchema).toEqual(argSchemaToJsonSchema(binding.argSchema));
-    }
+    // NOTE (SLICE-CAP8): the per-tool "advertised inputSchema == argSchemaToJsonSchema(binding.argSchema)"
+    // re-assertion that used to live here (a `for (const tool of tools)` schema-derive loop) is now a
+    // REGISTRY-WIDE invariant proven by `assertToolConformant`'s schema-no-drift check (#1) over the whole
+    // catalog in `tool-conformance.test.ts` (CAP8-1, advertised == derived). This test keeps ONLY the
+    // server-advertisement BEHAVIOR (the EXACT advertised set + the forbidden-name guard above) — which is
+    // a property of THIS server kit, not a per-tool conformance invariant.
   });
 
   // INFO polish: each advertised description is SOURCED from the registered manifest (single source of
@@ -300,75 +298,21 @@ describe("HDI2a-2 each new tool builds its EXACT argv from the binding (pure vec
 });
 
 // ==================================================================================================
-// HDI2a-3 — for EACH new tool, a smuggled extra key -> strict argSchema reject -> isError:true, the
-//           substrate sees 0 calls. The brain cannot smuggle argv through the MCP arguments.
-//           NON-VACUITY: a non-strict argSchema (a mutation) would ADMIT the extra key -> this RED.
+// HDI2a-3 / HDI2a-4 — DELETED (SLICE-CAP8 consolidation). These two `for (const ... of cases)` loops
+// re-asserted, PER TOOL, two GENERIC invariants:
+//   - HDI2a-3: strict-args deny-by-default (a smuggled extra key is rejected by the strict argSchema).
+//   - HDI2a-4: credential-blind (a secret-shaped string arg is denied at the screen).
+// Both are now REGISTRY-WIDE invariants proven over the WHOLE 15-tool catalog by `assertToolConformant`
+// in `tool-conformance.test.ts`: check #2 (strict-deny: `safeParse({unknown}).success === false`) and
+// check #4 (credential-blind: every string field's sk- canary is DENIED at the args screen). The
+// END-TO-END PIPELINE consequence of each (a denied call reaches the substrate 0 times / isError:true /
+// the canary never egresses) is NOT a per-tool fact — it is ONE governed-pipeline code path
+// (`bindingWrappedExecEffect` strict-reject; the screen-deny short-circuit) and stays covered end-to-end
+// by HDI2b-3 below (`exec.run {argv, cmd}` -> strict reject -> substrate 0; `exec.run {argv:['echo',
+// <canary>]}` -> denied@screen -> substrate 0 -> canary never egresses). So no coverage is lost: the
+// GENERIC invariant moved to the registry-wide conformance suite, and one END-TO-END instance of each
+// pipeline path remains.
 // ==================================================================================================
-describe("HDI2a-3 a smuggled extra key is rejected by the strict argSchema (substrate 0 calls)", () => {
-  const cases: { name: string; args: Record<string, unknown> }[] = [
-    { name: "exec.cat", args: { path: "f", argv: "; rm -rf /" } },
-    { name: "exec.head", args: { path: "f", argv: "; rm -rf /" } },
-    { name: "exec.pwd", args: { argv: "; rm -rf /" } },
-    { name: "exec.wc", args: { path: "f", argv: "; rm -rf /" } },
-    { name: "exec.grep", args: { pattern: "x", path: "f", argv: "; rm -rf /" } },
-  ];
-
-  for (const { name, args } of cases) {
-    it(`${name} {..., argv:'; rm -rf /'} -> isError:true, execSandbox 0 calls`, async () => {
-      const { deps, substrate } = await makeServerKit();
-      const server = createExecMcpServer(deps);
-
-      const resp = await server.handle({
-        jsonrpc: "2.0",
-        id: 11,
-        method: "tools/call",
-        params: { name, arguments: args },
-      });
-      const result = resp.result as { isError: boolean; content: { text: string }[] };
-      expect(result.isError).toBe(true);
-      // The smuggled command NEVER executed and never echoed back.
-      expect(substrate.execCalls.length).toBe(0);
-      expect(result.content[0]?.text).not.toContain("rm -rf");
-    });
-  }
-});
-
-// ==================================================================================================
-// HDI2a-4 — for EACH new tool that takes a string arg, a secret-shaped value (runtime-built sk- canary)
-//           is denied at the screen stage -> isError:true, the substrate sees 0 calls, the canary never
-//           egresses (redacted). NON-VACUITY: removing the credential-blind screen (a mutation) would
-//           let the secret through to the effect -> this RED.
-// ==================================================================================================
-describe("HDI2a-4 a secret-shaped arg is denied@screen (substrate 0 calls, canary never egresses)", () => {
-  // pwd has no string arg to poison; the other four each carry a secret-shaped value in a declared field.
-  const cases: { name: string; field: string; other?: Record<string, unknown> }[] = [
-    { name: "exec.cat", field: "path" },
-    { name: "exec.head", field: "path" },
-    { name: "exec.wc", field: "path" },
-    { name: "exec.grep", field: "pattern", other: { path: "f" } },
-  ];
-
-  for (const { name, field, other } of cases) {
-    it(`${name} {${field}:<canary>} -> isError:true, denied@screen, execSandbox 0 calls`, async () => {
-      const { deps, substrate } = await makeServerKit();
-      const server = createExecMcpServer(deps);
-      const canary = secretCanary();
-
-      const resp = await server.handle({
-        jsonrpc: "2.0",
-        id: 13,
-        method: "tools/call",
-        params: { name, arguments: { [field]: canary, ...(other ?? {}) } },
-      });
-      const result = resp.result as { isError: boolean; content: { text: string }[] };
-      expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toContain("screen");
-      // The screen denied BEFORE the effect — the substrate never saw the call, canary never egresses.
-      expect(substrate.execCalls.length).toBe(0);
-      expect(result.content[0]?.text).not.toContain(canary);
-    });
-  }
-});
 
 // ==================================================================================================
 // SLICE-HDI2b — the ONE bounded GENERAL exec tool `exec.run {argv: string[]}` (the "maximum utility"
