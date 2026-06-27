@@ -44,8 +44,8 @@ ActionBinding(ACT1-4)的核心不變量:「brain 提議 → composer 把 validat
 - **ACT5d [DEPLOY-GATED]**:真沙盒瀏覽器 substrate + 真 BrowserConnector(headless Chromium,zero-cred/egress-controlled)。
 - **ACT5e [DEPLOY-GATED/posture]**:`AGENTOS_ADVERTISE_BROWSER` 把瀏覽器原語 advertise 給 brain(ACT4 同款 deny-by-default + dispatcher)。
 
-## (4) ⚠️ Open questions（需人工/產品決策,開 ACT5b 前必答 #1）
-1. **screen-state-return policy(最重要)**:`browser.read` 回傳給 brain 的內容要怎麼治理?選項:(a) 原文 size-bounded;(b) redactSecrets'd;(c) content-egress allowlist(只允許讀特定 host/區域);(d) 只回結構化抽取(text/links)不回 raw HTML;(e) 標記為 untrusted-content 進 brain。**決定資料外洩面的大小**。
+## (4) ⚠️ Open questions（需人工/產品決策）
+1. **screen-state-return policy ✅ DECIDED(2026-06-27,user)= 分層強制(layered, fail-closed)**:`browser.read` 回傳 brain 的內容 = (i) **只讀 egress-allowlist 內 host**(navigate 已 egress-gate → session 當前頁必在 allowlist host;substrate 強制真網路邊界)+ (ii) **redactSecrets'd**(抽已知形狀 secret;best-effort,故 host-allowlist 為主防線)+ (iii) **size-bounded**(上限,截斷)+ (iv) **標記 untrusted-content**(緩解 injection-IN)。實作 = 一個 **return-content sanitizer**(資料-OUT gate,credential-blind input guard 的對偶),在內容回 brain 前套用。
 2. **click/type 的 approval posture**:每個 click/type 都互動 approval(安全但難自主),還是 Personal 預授權 budget(像 git.push)?不可逆 UI 動作能否自主?
 3. **session 模型**:per-tenant session、逾時、resume 權、最大並發。
 4. **dynamic egress 的預設**:per-navigation deny-all + allowlist(嚴),還是「browsing 模式」放寬到一組 host?
