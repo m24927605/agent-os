@@ -49,8 +49,20 @@ import { type ExecSecretDetector, defaultExecSecretDetector } from "../../../sub
 /** The default size bound for `browser.read` content returned to the brain (8 KiB). */
 export const DEFAULT_READ_MAX_BYTES = 8192;
 
-/** A primitive the browser sub-family understands. ACT5a+b: navigate + read; ACT5c adds click + type. */
-export type BrowserPrimitive = "navigate" | "read" | "click" | "type";
+/**
+ * A primitive the browser sub-family understands. ACT5a+b: navigate + read; ACT5c adds click + type; ACT5f
+ * adds the GOVERNED SESSION LIFECYCLE: `session.open` (MINT a server-held session, return its opaque
+ * id) + `session.close` (release a session — idempotent). The lifecycle primitives let a brain bootstrap a
+ * sessionId end-to-end (open -> navigate -> … -> close), each step governed; the moat is unchanged (the
+ * brain receives ONLY the opaque id, never the handle/cookies).
+ */
+export type BrowserPrimitive =
+  | "navigate"
+  | "read"
+  | "click"
+  | "type"
+  | "session.open"
+  | "session.close";
 
 /**
  * The credential placeholder grammar the BROWSER connector resolves at EGRESS — OpenShell's
@@ -119,6 +131,13 @@ export interface BrowserStepResult {
   readonly detail?: string;
   readonly content?: string;
   readonly currentHost?: string;
+  /**
+   * ACT5f — set ONLY by a successful `session.open`: the freshly-MINTED opaque session id (the brain's new
+   * reference). It is the ONLY thing `session.open` surfaces — NEVER the handle/cookies/url. The effect
+   * (`bindingWrappedBrowserEffect`) reads it and returns it to the brain so the brain can drive the rest of
+   * the task on this session. A cap-exhausted `session.open` returns `ok:false` with NO `sessionId`.
+   */
+  readonly sessionId?: string;
 }
 
 /**
@@ -194,7 +213,17 @@ export interface BindingWrappedBrowserEffectOptions {
   readonly readMaxBytes?: number;
 }
 
-/** A cryptographically-opaque-ish session id. Server-generated; the brain treats it as a black box. */
+/** The default cap on concurrently-open sessions a connector will hold (fail-closed exhaustion guard). */
+export const DEFAULT_BROWSER_SESSION_CAP = 8;
+
+/**
+ * A cryptographically-opaque-ish session id. Server-generated; the brain treats it as a black box.
+ *
+ * ⚠️ TEST-ONLY id-gen: the FAKE uses `Math.random` for opacity + in-test unguessability ONLY. The CONTRACT
+ * requires the REAL connector (ACT5d page connector) to mint with `crypto.randomUUID` (it already does) so
+ * a compromised brain cannot GUESS a phantom sessionId. The shape (`bsess_` + url-safe chars) matches the
+ * strict `SESSION_ID` schema the bindings validate; the unknown-session gate denies any id never minted.
+ */
 function newSessionId(): string {
   // No new dep: a high-entropy opaque id from two Math.random draws + a monotonic-ish time component.
   // (A real connector would use crypto.randomUUID; the FAKE only needs opacity + unguessability-in-test.)
@@ -222,6 +251,13 @@ export interface FakeBrowserConnectorOptions {
    * placeholder with no value fails closed).
    */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * ACT5f — the cap on concurrently-open sessions (fail-closed resource-exhaustion guard). A
+   * `session.open` when the open count is AT the cap returns `ok:false` (deny — a compromised brain cannot
+   * exhaust the connector by minting unbounded sessions). A `session.close` frees a slot. Defaults to
+   * {@link DEFAULT_BROWSER_SESSION_CAP}. Injectable so a test can drive the cap with a small value.
+   */
+  readonly browserSessionCap?: number;
 }
 
 /**
@@ -238,6 +274,8 @@ export class FakeBrowserConnector implements BrowserConnector {
   private readonly canned: string;
   private readonly cookieSecret: string;
   private readonly env: Readonly<Record<string, string | undefined>>;
+  /** ACT5f — the fail-closed cap on concurrently-open sessions (resource-exhaustion guard). */
+  private readonly sessionCap: number;
   /**
    * The RESOLVED value the connector last "typed" at egress — the ACTOR's materialized credential. It is
    * reachable ONLY via {@link peekLastTyped} (a TEST probe, never a brain channel) and is NEVER pushed
@@ -249,16 +287,27 @@ export class FakeBrowserConnector implements BrowserConnector {
     this.canned = opts.content ?? "fake page content";
     this.cookieSecret = opts.cookieSecret ?? "fake-cookie-do-not-leak";
     this.env = opts.env ?? {};
+    this.sessionCap = opts.browserSessionCap ?? DEFAULT_BROWSER_SESSION_CAP;
   }
 
-  /** Open a session SERVER-SIDE; return ONLY the opaque id (the brain holds nothing else). */
+  /**
+   * Open a session SERVER-SIDE; return ONLY the opaque id (the brain holds nothing else). This is the
+   * trusted server-side helper (uncapped — a test/operator opening sessions directly). The FAIL-CLOSED CAP
+   * (resource-exhaustion guard) is enforced on the GOVERNED `session.open` primitive in {@link perform}
+   * (via {@link atSessionCap}), so a brain-driven open is bounded while this helper stays simple.
+   */
   openSession(): string {
     const id = newSessionId();
     this.sessions.set(id, {});
     return id;
   }
 
-  /** Close a session (idempotent). */
+  /** True iff the connector is AT its session cap (the fail-closed exhaustion guard for `session.open`). */
+  private atSessionCap(): boolean {
+    return this.sessions.size >= this.sessionCap;
+  }
+
+  /** Close a session (idempotent — closing an unknown/already-closed id is a safe no-op). */
   closeSession(sessionId: string): void {
     this.sessions.delete(sessionId);
   }
@@ -283,7 +332,26 @@ export class FakeBrowserConnector implements BrowserConnector {
   }
 
   perform(_context: unknown, step: BrowserStep): BrowserStepResult {
-    // Fail-closed on an unknown session (defense-in-depth; the effect already gates this).
+    // ACT5f — the GOVERNED SESSION LIFECYCLE primitives dispatch BEFORE the unknown-session gate (a
+    // session.open has no live session yet — it MINTS one; a session.close is idempotent over an
+    // unknown/already-closed id). They are NOT pushed onto `steps` as a navigation/UI step.
+    if (step.primitive === "session.open") {
+      // FAIL-CLOSED CAP: at the session cap => deny (NO sessionId surfaced). A close frees a slot. The
+      // cap is checked on this GOVERNED primitive (a compromised brain cannot mint unbounded sessions).
+      if (this.atSessionCap()) {
+        return { ok: false, detail: "session cap reached (fake, fail-closed)" };
+      }
+      const id = this.openSession();
+      return { ok: true, sessionId: id };
+    }
+    if (step.primitive === "session.close") {
+      // Idempotent: closing an unknown/already-closed id is a safe ok no-op (frees a slot if present).
+      const id = typeof step.params.sessionId === "string" ? step.params.sessionId : "";
+      this.closeSession(id);
+      return { ok: true, detail: "session closed (fake)" };
+    }
+    // Fail-closed on an unknown session (defense-in-depth; the effect already gates this). The lifecycle
+    // primitives above are handled first, so this gate applies ONLY to navigate/read/click/type.
     if (!this.hasSession(step.sessionId)) {
       return { ok: false, detail: "unknown session (fake)" };
     }
@@ -367,18 +435,29 @@ export function bindingWrappedBrowserEffect(
         return { ok: false, detail: `no browser binding for ${toolCall.tool} (deny-by-default)` };
       }
 
-      // (a') UNKNOWN-SESSION gate: the brain may only drive a live, server-held session. A missing /
+      // ACT5f — the GOVERNED SESSION LIFECYCLE primitives are EXEMPT from the unknown-session gate:
+      //   - `session.open` has NO sessionId yet — it MINTS one (a sessionId arg is not even in its schema);
+      //   - `session.close` is idempotent — closing an unknown/already-closed id is a safe no-op ok.
+      // For these, the connector's `perform` is reached after the strict-schema + credential-blind gates
+      // (below). For navigate/read/click/type the unknown-session gate STILL fail-closes (no phantom-session
+      // driving). `isLifecycle` keys PURELY on the composer-fixed primitive (NEVER brain-supplied).
+      const isLifecycle =
+        binding.primitive === "session.open" || binding.primitive === "session.close";
+
+      // (a') UNKNOWN-SESSION gate: the brain may only DRIVE a live, server-held session. A missing /
       // malformed sessionId, or one the connector does not hold, is a fail-closed deny — the connector's
       // `perform` is NEVER called (no phantom-session driving). We read the sessionId from the RAW args
-      // (it is a declared field on every browser primitive's schema) and probe the connector via the
+      // (it is a declared field on every DRIVING primitive's schema) and probe the connector via the
       // structural `hasSession` capability when present (the Fake exposes it; a real one would too).
-      const sessionId = readSessionId(toolCall.args);
-      if (sessionId === undefined) {
-        return { ok: false, detail: "browser: missing/malformed sessionId (deny)" };
-      }
-      const hasSession = (connector as { hasSession?: (id: string) => boolean }).hasSession;
-      if (typeof hasSession === "function" && !hasSession.call(connector, sessionId)) {
-        return { ok: false, detail: "browser: unknown session (deny)" };
+      if (!isLifecycle) {
+        const sessionId = readSessionId(toolCall.args);
+        if (sessionId === undefined) {
+          return { ok: false, detail: "browser: missing/malformed sessionId (deny)" };
+        }
+        const hasSession = (connector as { hasSession?: (id: string) => boolean }).hasSession;
+        if (typeof hasSession === "function" && !hasSession.call(connector, sessionId)) {
+          return { ok: false, detail: "browser: unknown session (deny)" };
+        }
       }
 
       // (b) STRICT validation of the brain's DECLARED args. Unknown/extra/missing key => deny.
@@ -413,8 +492,15 @@ export function bindingWrappedBrowserEffect(
         };
       }
 
-      // (d) delegate to the connector with the validated, credential-blind step.
-      const step: BrowserStep = { sessionId, primitive: binding.primitive, params };
+      // (d) delegate to the connector with the validated, credential-blind step. The step's `sessionId` is
+      // read from the RAW args (a declared field on every DRIVING primitive's schema, and on session.close);
+      // for `session.open` (which MINTS) there is no incoming id, so the step carries an empty reference
+      // (the connector ignores it and returns the minted one).
+      const step: BrowserStep = {
+        sessionId: readSessionId(toolCall.args) ?? "",
+        primitive: binding.primitive,
+        params,
+      };
       const result = await connector.perform(toolCall.context, step);
 
       // (e) READ DATA-OUT GATE: for `read`, the connector's content is run through the sanitizer BEFORE it
@@ -425,8 +511,22 @@ export function bindingWrappedBrowserEffect(
         return { ok: result.ok, detail: JSON.stringify(sanitized) };
       }
 
-      // navigate (and any non-read step): surface ONLY the connector's own ok + safe detail. We do NOT
-      // surface `currentHost`/`currentUrl` — the brain learns nothing about the session's location here.
+      // ACT5f — SESSION.OPEN: surface the connector's freshly-MINTED opaque sessionId to the brain (its new
+      // reference), and ONLY that — NEVER the handle/cookies/url/currentHost. The brain reads the id from
+      // the detail and uses it in subsequent calls. A cap-exhausted open has `ok:false` + NO sessionId, so
+      // the brain sees a non-mint (deny). The MOAT: `result.sessionId` is the sole field surfaced; the
+      // connector NEVER puts a handle/cookie on the result, and we do not echo `currentHost`/`currentUrl`.
+      if (binding.primitive === "session.open") {
+        if (result.ok && typeof result.sessionId === "string") {
+          return { ok: true, detail: `session opened: ${result.sessionId}` };
+        }
+        // Cap-exhausted / failed mint => deny (no session minted). Static reason; no id surfaced.
+        return { ok: false, detail: "session.open denied (cap reached or unavailable)" };
+      }
+
+      // navigate / click / type / session.close (and any non-read step): surface ONLY the connector's own
+      // ok + safe static detail. We do NOT surface `currentHost`/`currentUrl`/`sessionId` — the brain learns
+      // nothing about the session's location or any minted handle here.
       return {
         ok: result.ok,
         ...(result.detail !== undefined ? { detail: result.detail } : {}),

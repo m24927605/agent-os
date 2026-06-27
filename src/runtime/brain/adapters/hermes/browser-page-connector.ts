@@ -34,11 +34,13 @@
  * (`BrowserConnector`, `BrowserStep`, `BrowserStepResult`, `resolveCredentialText`). NO vendor named in
  * core, NO new dependency, NO browser import.
  */
+import { randomUUID } from "node:crypto";
 import type { MaybePromise } from "../../../../orchestration/index.js";
 import {
   type BrowserConnector,
   type BrowserStep,
   type BrowserStepResult,
+  DEFAULT_BROWSER_SESSION_CAP,
   resolveCredentialText,
 } from "./browser-closed-loop.js";
 
@@ -69,6 +71,13 @@ export interface BrowserConnectorOverPageOptions {
    * env (so a placeholder with no value fails closed). The operator runner passes `process.env`.
    */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * ACT5f M-1 — the fail-closed cap on concurrently-open sessions (resource-exhaustion guard), enforced
+   * on the GOVERNED brain-reachable `session.open` (mirrors the FakeBrowserConnector). A `session.open`
+   * when the open count is AT the cap returns `ok:false` (no sessionId). Defaults to
+   * {@link DEFAULT_BROWSER_SESSION_CAP}. The trusted `openSession()` helper stays uncapped (runner-side).
+   */
+  readonly browserSessionCap?: number;
 }
 
 /**
@@ -85,12 +94,15 @@ export interface PageBrowserConnector extends BrowserConnector {
   hasSession(sessionId: string): boolean;
 }
 
-/** A cryptographically-opaque-ish session id (same grammar the SESSION_ID schema validates). */
+/**
+ * A CSPRNG-backed opaque session id (same grammar the SESSION_ID schema validates: `bsess_[A-Za-z0-9]+`).
+ * Uses `crypto.randomUUID` (Node built-in, no new dep) so a brain CANNOT guess another session's id — the
+ * unknown-session gate is the primary defense, this is defense-in-depth. (The in-repo FakeBrowserConnector
+ * uses `Math.random` for its id, which is test-only; the SHIPPING connector here is the one that must be
+ * unguessable.)
+ */
 function newSessionId(): string {
-  const a = Math.random().toString(36).slice(2);
-  const b = Math.random().toString(36).slice(2);
-  const t = Date.now().toString(36);
-  return `bsess_${a}${b}${t}`;
+  return `bsess_${randomUUID().replace(/-/g, "")}`;
 }
 
 /**
@@ -106,6 +118,7 @@ export function createBrowserConnectorOverPage(
   opts: BrowserConnectorOverPageOptions = {},
 ): PageBrowserConnector {
   const env = opts.env ?? {};
+  const sessionCap = opts.browserSessionCap ?? DEFAULT_BROWSER_SESSION_CAP;
   // The server-held session set. The single demo page backs whichever session is open; the map exists
   // so `hasSession` is a real gate (the brain may only drive a live, server-held session).
   const sessions = new Set<string>();
@@ -115,7 +128,26 @@ export function createBrowserConnectorOverPage(
   }
 
   async function perform(_context: unknown, step: BrowserStep): Promise<BrowserStepResult> {
-    // Fail-closed on an unknown session (defense-in-depth; the effect already gates this).
+    // ACT5f — the GOVERNED SESSION LIFECYCLE primitives dispatch BEFORE the unknown-session gate (a
+    // session.open has no live session yet; a session.close is idempotent over an unknown/already-closed
+    // id). They call the connector's OWN openSession/closeSession; session.open surfaces ONLY the minted
+    // opaque id (never the page handle/cookies).
+    if (step.primitive === "session.open") {
+      // ACT5f M-1 — fail-closed exhaustion guard on the brain-reachable governed open (the trusted
+      // `openSession()` helper stays uncapped for runner-side callers). At cap => deny, NO sessionId.
+      if (sessions.size >= sessionCap) {
+        return { ok: false, detail: "session cap reached (page connector, fail-closed)" };
+      }
+      const id = connector.openSession();
+      return { ok: true, sessionId: id };
+    }
+    if (step.primitive === "session.close") {
+      const id = typeof step.params.sessionId === "string" ? step.params.sessionId : "";
+      connector.closeSession(id);
+      return { ok: true, detail: "session closed (page)" };
+    }
+    // Fail-closed on an unknown session (defense-in-depth; the effect already gates this). The lifecycle
+    // primitives above are handled first, so this gate applies ONLY to navigate/read/click/type.
     if (!hasSession(step.sessionId)) {
       return { ok: false, detail: "unknown session (page connector)" };
     }

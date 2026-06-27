@@ -246,6 +246,91 @@ export const browserTypeBinding: BrowserBinding = {
 };
 
 // ------------------------------------------------------------------------------------------------
+// browser.session.open — a GOVERNED, BENIGN SESSION BOOTSTRAP (ACT5f). It MINTS a server-held session
+// and returns ONLY the opaque sessionId to the brain (the moat: never a handle/cookies/url). It takes NO
+// params (it does NOT receive a sessionId — it mints one). NON-DESTRUCTIVE: opening a session has no
+// external effect (navigation is egress; click/type is approval), so it needs NO approval — it is a
+// `write` (it configures a server-side resource) that is reversible via session.close. The cap
+// (fail-closed exhaustion guard) lives on the connector.
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `browser.session.open` ToolManifest. `containment:"in-sandbox"` (opening a session does NOT
+ * punch the egress seal — it provisions a server-side resource; navigation is the egress, gated
+ * separately); `sideEffect:"write"` (it allocates a server-side session — but NOT destructive, so it needs
+ * NO approval); `idempotent:false` (each open MINTS a NEW session); `requiresApproval:false` (a benign
+ * lifecycle with no external effect — a deliberate posture judgment; see the slice doc).
+ */
+export const browserSessionOpenManifest = {
+  name: "browser.session.open",
+  version: "1.0.0",
+  description:
+    "open a server-held browser session and return its opaque sessionId (mints a new session; no params)",
+  action: "tool:invoke",
+  resourcePattern: "browser/session/open",
+  sideEffect: "write" as const,
+  idempotent: false,
+  requiresApproval: false,
+  bundleRefOnly: false,
+  containment: "in-sandbox" as const,
+};
+
+/**
+ * browser.session.open binding: primitive "session.open", STRICT `{}` (NO params — it MINTS a sessionId,
+ * it does NOT take one), `toParams` -> `{}` (the connector mints + returns the id), projector -> in-sandbox
+ * (NO host, NO params — only operationClass). `.strict()` rejects a smuggled extra key (incl. a smuggled
+ * sessionId). The EFFECT surfaces the connector's minted opaque sessionId to the brain (and ONLY that).
+ */
+export const browserSessionOpenBinding: BrowserBinding = {
+  primitive: "session.open",
+  argSchema: z.object({}).strict(),
+  toParams: () => ({}),
+  governanceProjector: () => browserProjection("session.open", []),
+};
+
+// ------------------------------------------------------------------------------------------------
+// browser.session.close — release a server-held session (ACT5f). STRICT `{sessionId}`; IDEMPOTENT (closing
+// an unknown/already-closed id is a safe ok no-op); in-sandbox; write; NO approval (benign lifecycle). A
+// close FREES a cap slot. After close, navigate/read/click/type on that id => unknown-session deny.
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `browser.session.close` ToolManifest. `containment:"in-sandbox"` (releasing a session does NOT
+ * punch the egress seal); `sideEffect:"write"` (it releases a server-side session — NOT destructive, so NO
+ * approval); `idempotent:true` (closing an already-closed/unknown id is a safe no-op).
+ */
+export const browserSessionCloseManifest = {
+  name: "browser.session.close",
+  version: "1.0.0",
+  description:
+    "close a server-held browser session by its opaque sessionId (idempotent; frees a slot)",
+  action: "tool:invoke",
+  resourcePattern: "browser/session/close",
+  sideEffect: "write" as const,
+  idempotent: true,
+  requiresApproval: false,
+  bundleRefOnly: false,
+  containment: "in-sandbox" as const,
+};
+
+/**
+ * browser.session.close binding: primitive "session.close", STRICT `{sessionId}`, `toParams` ->
+ * `{sessionId}` (the connector reads it from the params to release the right session), projector ->
+ * in-sandbox (NO host, NO params beyond the operationClass bucket). `.strict()` rejects a smuggled extra
+ * key. The unknown-session gate is EXEMPT for this primitive (close is idempotent — a safe no-op).
+ */
+export const browserSessionCloseBinding: BrowserBinding = {
+  primitive: "session.close",
+  argSchema: z
+    .object({
+      sessionId: SESSION_ID,
+    })
+    .strict(),
+  toParams: (a) => ({ sessionId: (a as { sessionId: string }).sessionId }),
+  governanceProjector: () => browserProjection("session.close", []),
+};
+
+// ------------------------------------------------------------------------------------------------
 // Conditional registration (parallel to seedActionRegistry/seedActionBindings).
 // ------------------------------------------------------------------------------------------------
 
@@ -278,6 +363,14 @@ export function seedBrowserRegistry(
 ): ToolRegistry {
   const r = new ToolRegistry(undefined, wired);
   if (!intendsBrowserFamily(wired)) return r;
+  // SLICE-ACT5f — the GOVERNED SESSION LIFECYCLE (browser.session.open/close). BENIGN: both are in-sandbox
+  // write + NON-destructive + no-approval (opening/closing a session has no external effect), so they need
+  // NO egress/approval primitive — they register whenever the browser family registers (the family-opening
+  // egress-allowlist intent above). This lets a brain MINT a sessionId and drive the browser end-to-end;
+  // ACT5e's family-generic advertise (browserDescriptors/dispatcher/`browser.**` allow rule) AUTO-includes
+  // them. The session.open MINTS + returns ONLY the opaque id (the moat) — the sessionId is never a tool.
+  r.register(browserSessionOpenManifest);
+  r.register(browserSessionCloseManifest);
   r.register(browserNavigateManifest);
   r.register(browserReadManifest);
   // browser.click/type are destructive (in-sandbox) => `requiredPrimitives` includes "approval". They
@@ -303,7 +396,13 @@ export function seedBrowserBindings(
   if (!intendsBrowserFamily(wired)) return new Map<string, BrowserBinding>();
   // browser.navigate (network-egress) requires egress-allowlist; browser.read (in-sandbox) requires none,
   // but the read is only meaningful alongside an egress-gated navigate, so it rides the same gate.
+  // SLICE-ACT5f — the GOVERNED SESSION LIFECYCLE (session.open/close) rides the SAME family-opening gate
+  // (benign in-sandbox write, no extra primitive): a brain needs them to MINT a sessionId before it can
+  // navigate. session.open MINTS + the effect returns ONLY the opaque id (the moat); session.close frees a
+  // cap slot. They register alongside navigate/read so ACT5e's advertise auto-includes them.
   if (wired.has("egress-allowlist")) {
+    entries.push(["browser.session.open", browserSessionOpenBinding]);
+    entries.push(["browser.session.close", browserSessionCloseBinding]);
     entries.push(["browser.navigate", browserNavigateBinding]);
     entries.push(["browser.read", browserReadBinding]);
   }

@@ -244,6 +244,40 @@ describe("createBrowserConnectorOverPage — type resolves the credential AT EGR
 });
 
 // ==================================================================================================
+// ACT5f review M-1/N-1 — the REAL page connector hardening (the actor that ships, not just the Fake).
+//   M-1: the brain-reachable governed session.open is cap-fail-closed (resource-exhaustion guard).
+//   N-1: a minted session id is CSPRNG-backed (crypto.randomUUID), not Math.random — unguessable.
+// ==================================================================================================
+describe("createBrowserConnectorOverPage — ACT5f M-1 session cap + N-1 unguessable id", () => {
+  const open = (conn: ReturnType<typeof createBrowserConnectorOverPage>) =>
+    conn.perform({}, { sessionId: "", primitive: "session.open", params: {} });
+
+  it("⚠️ N-1: a minted session id is CSPRNG-shaped (bsess_ + 32 hex), not base36", async () => {
+    const out = await open(createBrowserConnectorOverPage(new FakePage()));
+    expect(out.ok).toBe(true);
+    expect(out.sessionId).toMatch(/^bsess_[0-9a-f]{32}$/);
+  });
+
+  it("⚠️ M-1: the brain-reachable session.open is cap-fail-closed; a close frees a slot", async () => {
+    const conn = createBrowserConnectorOverPage(new FakePage(), { browserSessionCap: 2 });
+    const a = await open(conn);
+    const b = await open(conn);
+    expect(a.ok && b.ok).toBe(true);
+    const overflow = await open(conn); // AT cap => deny, NO sessionId (resource-exhaustion guard)
+    expect(overflow.ok).toBe(false);
+    expect(overflow.sessionId).toBeUndefined();
+    // close one => a slot frees => open succeeds again
+    await conn.perform(
+      {},
+      { sessionId: "", primitive: "session.close", params: { sessionId: a.sessionId } },
+    );
+    const c = await open(conn);
+    expect(c.ok).toBe(true);
+    expect(c.sessionId).toMatch(/^bsess_[0-9a-f]{32}$/);
+  });
+});
+
+// ==================================================================================================
 // (A) READ-CANARY through the GOVERNED EFFECT — the page canary is sanitized before the brain.
 // This wires the SAME bindingWrappedBrowserEffect over the page-backed connector (the runner's edge).
 // ==================================================================================================
