@@ -105,6 +105,29 @@ export {
   type HttpActionTransport,
   createGoogleActionConnector,
 } from "./action-google-connector.js";
+// SLICE-ACT3-live — the REAL HttpActionTransport (egress actor: resolves the credential placeholder from env
+// at the network boundary, then node fetch) + the PURE testable `resolveCredentialHeaders`. The real `fetch`
+// is LIVE-ONLY (operator runner); tests inject a fake fetch. PURE ADDITION — NOT wired into verify's network.
+export {
+  type FetchImpl,
+  type HttpActionTransportOptions,
+  type ResolveCredentialError,
+  type ResolvedHeaders,
+  createHttpActionTransport,
+  resolveCredentialHeaders,
+} from "./action-http-transport.js";
+// SLICE-ACT3-live — the REAL AccountResolver: GET Google userinfo via the injected transport (carrying the
+// placeholder), parse `email`; any error/missing/non-2xx => undefined (guard denies, fail-closed).
+export { createGoogleAccountResolver } from "./action-google-account-resolver.js";
+// SLICE-ACT3-live — the importable CORE of the live self-send runner (the full governed pipeline for
+// gmail.send + guard + google connector + real transport). Tested with a FAKE fetch + FAKE resolver (no
+// network); the operator runner injects globalThis.fetch (live egress). PURE ADDITION.
+export {
+  type CapturedHttp,
+  type RunGmailSelfSendOptions,
+  type RunGmailSelfSendResult,
+  runGmailSelfSend,
+} from "./action-live-gmail-runner.js";
 export { makeArgsCredentialScreen } from "./args-credential-screen.js";
 export {
   type AgtScope,
