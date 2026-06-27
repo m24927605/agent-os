@@ -152,6 +152,100 @@ export const browserReadBinding: BrowserBinding = {
 };
 
 // ------------------------------------------------------------------------------------------------
+// browser.click — an IN-SANDBOX DESTRUCTIVE UI action (click can submit/delete/trigger — its network/UI
+// effect is OPAQUE, so it cannot be projected ahead of time; the substrate's REAL boundary is PRIMARY and
+// the seal-relevant control is destructive => approval, layered with session-on-allowlisted-host + sandbox).
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `browser.click` ToolManifest. `containment:"in-sandbox"` (a click has NO projectable host — its
+ * network effect is opaque and is forced by the substrate, not predicted here; honestly marked in-sandbox so
+ * the seal-relevant gate is APPROVAL, not a phantom egress projection); `sideEffect:"destructive"` (a click
+ * can submit/delete/trigger => superRefine FORCES `requiresApproval:true` — per-step approval);
+ * `idempotent:false` (re-clicking is NOT safely replayable).
+ */
+export const browserClickManifest = {
+  name: "browser.click",
+  version: "1.0.0",
+  description:
+    "click an element in a server-held browser session (destructive — per-step approval)",
+  action: "tool:invoke",
+  resourcePattern: "browser/click",
+  sideEffect: "destructive" as const,
+  idempotent: false,
+  requiresApproval: true,
+  bundleRefOnly: false,
+  containment: "in-sandbox" as const,
+};
+
+/**
+ * browser.click binding: primitive "click", STRICT `{sessionId, selector}`, `toParams` -> `{selector}` (a
+ * plain structured field, NEVER a script — no DOM injection面), projector -> in-sandbox (NO host, NO params
+ * — only operationClass). `.strict()` rejects a smuggled extra key.
+ */
+export const browserClickBinding: BrowserBinding = {
+  primitive: "click",
+  argSchema: z
+    .object({
+      sessionId: SESSION_ID,
+      selector: z.string().min(1).max(1024),
+    })
+    .strict(),
+  toParams: (a) => ({ selector: (a as { selector: string }).selector }),
+  governanceProjector: () => browserProjection("click", []),
+};
+
+// ------------------------------------------------------------------------------------------------
+// browser.type — an IN-SANDBOX DESTRUCTIVE UI action with a TEXT that MAY be a credential PLACEHOLDER
+// (resolved at the connector EGRESS, credential-blind). A LITERAL secret in `text` is denied by the
+// credential-blind INPUT guard (the connector is never called); a placeholder passes (not a secret shape)
+// and is materialized ONLY at the connector, never reaching the brain/WORM/projection.
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * A valid `browser.type` ToolManifest. `containment:"in-sandbox"` (no projectable host — opaque UI effect);
+ * `sideEffect:"destructive"` (typing can trigger submit/validation/side effects => superRefine FORCES
+ * `requiresApproval:true`); `idempotent:false`.
+ */
+export const browserTypeManifest = {
+  name: "browser.type",
+  version: "1.0.0",
+  description:
+    "type text into an element in a server-held browser session (destructive — per-step approval; text may be a credential placeholder resolved at egress)",
+  action: "tool:invoke",
+  resourcePattern: "browser/type",
+  sideEffect: "destructive" as const,
+  idempotent: false,
+  requiresApproval: true,
+  bundleRefOnly: false,
+  containment: "in-sandbox" as const,
+};
+
+/**
+ * browser.type binding: primitive "type", STRICT `{sessionId, selector, text}`, `toParams` ->
+ * `{selector, text}` (structured fields, NEVER a script). The `text` MAY be a credential PLACEHOLDER
+ * (`openshell:resolve:env:KEY`): a placeholder is NOT secret-shaped so it PASSES the credential-blind INPUT
+ * guard and the connector resolves it at EGRESS (`resolveCredentialText`); a LITERAL secret in `text` IS
+ * secret-shaped so the INPUT guard DENIES it (the connector is never called). projector -> in-sandbox (NO
+ * host, NO params — only operationClass; the brain/WORM never see the text). `.strict()` rejects an extra key.
+ */
+export const browserTypeBinding: BrowserBinding = {
+  primitive: "type",
+  argSchema: z
+    .object({
+      sessionId: SESSION_ID,
+      selector: z.string().min(1).max(1024),
+      text: z.string().min(1).max(4096),
+    })
+    .strict(),
+  toParams: (a) => {
+    const v = a as { selector: string; text: string };
+    return { selector: v.selector, text: v.text };
+  },
+  governanceProjector: () => browserProjection("type", []),
+};
+
+// ------------------------------------------------------------------------------------------------
 // Conditional registration (parallel to seedActionRegistry/seedActionBindings).
 // ------------------------------------------------------------------------------------------------
 
@@ -186,6 +280,13 @@ export function seedBrowserRegistry(
   if (!intendsBrowserFamily(wired)) return r;
   r.register(browserNavigateManifest);
   r.register(browserReadManifest);
+  // browser.click/type are destructive (in-sandbox) => `requiredPrimitives` includes "approval". They
+  // register ONLY when "approval" is wired; a composition without it gets navigate/read but NOT the
+  // destructive primitives (deny-by-default at registration — `assertRegisterable` would throw otherwise).
+  if (wired.has("approval")) {
+    r.register(browserClickManifest);
+    r.register(browserTypeManifest);
+  }
   return r;
 }
 
@@ -205,6 +306,13 @@ export function seedBrowserBindings(
   if (wired.has("egress-allowlist")) {
     entries.push(["browser.navigate", browserNavigateBinding]);
     entries.push(["browser.read", browserReadBinding]);
+  }
+  // browser.click/type (destructive) ride the APPROVAL gate — their bindings are included ONLY when
+  // "approval" is wired (mirroring the registry's posture; a binding without its manifest registered would
+  // be unreachable). Deny-by-default: an approval-less composition gets no click/type binding.
+  if (wired.has("approval")) {
+    entries.push(["browser.click", browserClickBinding]);
+    entries.push(["browser.type", browserTypeBinding]);
   }
   return new Map<string, BrowserBinding>(entries);
 }

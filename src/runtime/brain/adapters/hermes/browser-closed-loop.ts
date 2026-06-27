@@ -49,8 +49,53 @@ import { type ExecSecretDetector, defaultExecSecretDetector } from "../../../sub
 /** The default size bound for `browser.read` content returned to the brain (8 KiB). */
 export const DEFAULT_READ_MAX_BYTES = 8192;
 
-/** A primitive the browser sub-family understands. ACT5a+b ships navigate + read (click/type = ACT5c). */
-export type BrowserPrimitive = "navigate" | "read";
+/** A primitive the browser sub-family understands. ACT5a+b: navigate + read; ACT5c adds click + type. */
+export type BrowserPrimitive = "navigate" | "read" | "click" | "type";
+
+/**
+ * The credential placeholder grammar the BROWSER connector resolves at EGRESS — OpenShell's
+ * `openshell:resolve:env:<KEY>` (the SAME contract `resolveCredentialHeaders` resolves for the action
+ * transport). A LOCAL constant copy (NOT imported) so the adapter never deep-imports a non-barrel
+ * internal; this string IS the cross-boundary contract.
+ */
+const PLACEHOLDER_PREFIX = "openshell:resolve:env:";
+
+/** The successful `resolveCredentialText` result — the materialized text the connector would type. */
+export interface ResolvedText {
+  readonly text: string;
+}
+
+/** The fail-closed `resolveCredentialText` result — a STATIC reason (NEVER a resolved/env-derived value). */
+export interface ResolveTextError {
+  readonly error: string;
+}
+
+/**
+ * Resolve a credential PLACEHOLDER in a `type` text against `env` — PURE, NO network, the dual of
+ * `resolveCredentialHeaders` for the browser family. This is the SINGLE last-mile materialization point;
+ * it runs ONLY at the connector (the actor) at EGRESS, NEVER in the brain/effect path:
+ *   - a text that IS `openshell:resolve:env:<KEY>` is resolved: `env[KEY]` must be a NON-EMPTY string,
+ *     else => {@link ResolveTextError} (FAIL-CLOSED — the connector must NOT type a phantom value).
+ *   - a NON-placeholder text passes through VERBATIM.
+ *
+ * CREDENTIAL-BLIND: the error reason is a STATIC string — it NEVER includes the KEY's value or any
+ * env-derived text. The resolved value is the ACTOR's; it must NEVER ride back to the brain/result/WORM.
+ */
+export function resolveCredentialText(
+  text: string,
+  env: Readonly<Record<string, string | undefined>>,
+): ResolvedText | ResolveTextError {
+  if (text.startsWith(PLACEHOLDER_PREFIX)) {
+    const key = text.slice(PLACEHOLDER_PREFIX.length);
+    const resolved = env[key];
+    if (typeof resolved !== "string" || resolved.length === 0) {
+      // FAIL-CLOSED: a missing/empty env value => error (static reason; NEVER echo the value/KEY).
+      return { error: "credential placeholder could not be resolved from env (fail-closed)" };
+    }
+    return { text: resolved };
+  }
+  return { text };
+}
 
 /**
  * One step the {@link BrowserConnector} performs against a SERVER-HELD session. The brain holds ONLY the
@@ -170,6 +215,13 @@ export interface FakeBrowserConnectorOptions {
   readonly content?: string;
   /** A secret cookie/handle the connector holds — used to PROVE it never leaks to the brain/WORM. */
   readonly cookieSecret?: string;
+  /**
+   * The env the connector resolves `type` text PLACEHOLDERS against AT EGRESS (mirrors the action
+   * transport's injected env). The Fake holds it on the ACTOR side; tests inject a runtime canary value
+   * to PROVE the resolved value never rides back to the brain/WORM. Defaults to an EMPTY env (so a
+   * placeholder with no value fails closed).
+   */
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 /**
@@ -185,10 +237,18 @@ export class FakeBrowserConnector implements BrowserConnector {
   private readonly sessions = new Map<string, FakeSession>();
   private readonly canned: string;
   private readonly cookieSecret: string;
+  private readonly env: Readonly<Record<string, string | undefined>>;
+  /**
+   * The RESOLVED value the connector last "typed" at egress — the ACTOR's materialized credential. It is
+   * reachable ONLY via {@link peekLastTyped} (a TEST probe, never a brain channel) and is NEVER pushed
+   * into the {@link steps} trace (the step records the placeholder only). `undefined` until a type runs.
+   */
+  private lastTyped: string | undefined;
 
   constructor(opts: FakeBrowserConnectorOptions = {}) {
     this.canned = opts.content ?? "fake page content";
     this.cookieSecret = opts.cookieSecret ?? "fake-cookie-do-not-leak";
+    this.env = opts.env ?? {};
   }
 
   /** Open a session SERVER-SIDE; return ONLY the opaque id (the brain holds nothing else). */
@@ -213,6 +273,15 @@ export class FakeBrowserConnector implements BrowserConnector {
     return this.cookieSecret;
   }
 
+  /**
+   * TEST-ONLY probe of the RESOLVED value the connector last "typed" at egress — to assert the actor's
+   * materialized credential is what-it-would-type, while proving (in the brain/WORM blobs) it never
+   * leaks back. `undefined` until a `type` step has run. NEVER a brain channel.
+   */
+  peekLastTyped(): string | undefined {
+    return this.lastTyped;
+  }
+
   perform(_context: unknown, step: BrowserStep): BrowserStepResult {
     // Fail-closed on an unknown session (defense-in-depth; the effect already gates this).
     if (!this.hasSession(step.sessionId)) {
@@ -230,6 +299,25 @@ export class FakeBrowserConnector implements BrowserConnector {
         currentHost = "";
       }
       return { ok: true, detail: "navigated (fake)", currentHost };
+    }
+    if (step.primitive === "click") {
+      // The step is already recorded (the auditable trace); a real connector would dispatch the click.
+      // The actual network/UI effect is OPAQUE (substrate-enforced); the Fake just confirms ok.
+      return { ok: true, detail: "clicked (fake)" };
+    }
+    if (step.primitive === "type") {
+      // EGRESS credential resolution — the ONE place the placeholder is materialized (the actor side,
+      // mirroring resolveCredentialHeaders). The brain/effect saw ONLY the placeholder in `params.text`.
+      const text = typeof step.params.text === "string" ? step.params.text : "";
+      const resolved = resolveCredentialText(text, this.env);
+      if ("error" in resolved) {
+        // FAIL-CLOSED: the placeholder could not be resolved => type NOTHING (lastTyped stays unset).
+        return { ok: false, detail: "type: credential could not be resolved (fake, fail-closed)" };
+      }
+      // Record the RESOLVED value as what-it-would-type — reachable ONLY via peekLastTyped (a test probe).
+      // It is NOT pushed into `this.steps` (the recorded step carries the placeholder only).
+      this.lastTyped = resolved.text;
+      return { ok: true, detail: "typed (fake)" };
     }
     // read — return the canned page content (the EFFECT sanitizes it before the brain sees it).
     return { ok: true, content: this.canned };
