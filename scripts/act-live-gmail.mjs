@@ -17,9 +17,22 @@
 // confirmation (self-send + minimal blast radius). Imports the COMPILED dist (the sh runs build first).
 
 import { redactSecrets } from "../dist/audit/index.js";
-import { runGmailSelfSend } from "../dist/runtime/brain/adapters/hermes/index.js";
+import { liveGmailPreflight, runGmailSelfSend } from "../dist/runtime/brain/adapters/hermes/index.js";
 
-const live = process.env.AGENTOS_ACTION_LIVE === "1" || process.env.AGENTOS_ACTION_LIVE === "true";
+// CREDENTIAL-BLIND preflight: validate the opt-in env via a FIXED-reason gate that NEVER echoes any env
+// VALUE (so a token mis-pasted into AGENTOS_GMAIL_OAUTH_KEY can never leak into this script's output).
+// On skip/blocked we print ONLY the fixed reason and exit fail-closed; on ok we proceed.
+const preflight = liveGmailPreflight(process.env);
+if (preflight.status !== "ok") {
+  // preflight.reason is FIXED-string-only (no env value). skip => 0 (opt-out), blocked => 2 (fail-closed).
+  if (preflight.status === "skip") {
+    console.log(`act-live-gmail: ${preflight.reason}`);
+    process.exit(0);
+  }
+  console.error(`act-live-gmail: ${preflight.reason}`);
+  process.exit(2);
+}
+
 const testAccount = process.env.AGENTOS_ACTION_TEST_ACCOUNT ?? "";
 const oauthKey = process.env.AGENTOS_GMAIL_OAUTH_KEY ?? "";
 // The egress host allowlist (comma-separated). The fold only lets the gmail host through.
@@ -27,17 +40,6 @@ const egressAllow = (process.env.AGENTOS_EGRESS_ALLOW ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter((s) => s.length > 0);
-
-// Defensive (the .sh already gated): if anything required is missing, fail-closed (never fake-green).
-if (!live || testAccount.length === 0 || oauthKey.length === 0 || egressAllow.length === 0) {
-  console.error("act-live-gmail: BLOCKED — required env not fully set (fail-closed)");
-  process.exit(2);
-}
-// The OAuth KEY must actually be present in env (else the transport fails closed at egress — no fetch).
-if (typeof process.env[oauthKey] !== "string" || process.env[oauthKey].length === 0) {
-  console.error(`act-live-gmail: BLOCKED — env[${oauthKey}] (the OAuth token) is not set (fail-closed)`);
-  process.exit(2);
-}
 
 console.log("act-live-gmail: governed live self-send (runtime-direct; credential-blind to brain/audit)");
 console.log(`act-live-gmail: egress allowlist = ${egressAllow.join(", ")}`);

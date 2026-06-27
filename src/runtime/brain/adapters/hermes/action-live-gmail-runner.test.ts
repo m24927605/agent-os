@@ -18,7 +18,11 @@
  *     the resolved value.
  */
 import { describe, expect, it } from "vitest";
-import { type CapturedHttp, runGmailSelfSend } from "./action-live-gmail-runner.js";
+import {
+  type CapturedHttp,
+  liveGmailPreflight,
+  runGmailSelfSend,
+} from "./action-live-gmail-runner.js";
 
 const TEST_EMAIL = "mrfed1913@gmail.com";
 
@@ -118,5 +122,115 @@ describe("ACT3-live runner wiring — fail-closed gates (no send)", () => {
     if (out.outcome.status === "denied") expect(out.outcome.stage).toBe("policy");
     const captured = out.http as CapturedHttp;
     expect(captured.requests.length).toBe(0);
+  });
+});
+
+// ================================================================================================
+// SLICE-CRED-LEAK-FIX — liveGmailPreflight: a credential-blind, fixed-reason env gate. The reason
+// is assembled from FIXED string literals ONLY; it NEVER interpolates any env VALUE (so a user who
+// mis-pastes a token into AGENTOS_GMAIL_OAUTH_KEY can never have it echoed by the operator script's
+// diagnostic). These tests pin BOTH the status logic AND the zero-env-value-leak invariant.
+// ================================================================================================
+
+/** A runtime-built OAuth-shaped canary (NOT a source literal; never a real token). */
+function preflightCanary(): string {
+  return `ya29.${"Zk9p".repeat(8)}`;
+}
+
+/** A fully-populated, correctly-two-level-configured env (AGENTOS_GMAIL_OAUTH_KEY names GMAIL_TOKEN). */
+function okEnv(over: Record<string, string | undefined> = {}): Record<string, string | undefined> {
+  return {
+    AGENTOS_ACTION_LIVE: "true",
+    AGENTOS_ACTION_TEST_ACCOUNT: TEST_EMAIL,
+    AGENTOS_EGRESS_ALLOW: "gmail.googleapis.com",
+    AGENTOS_GMAIL_OAUTH_KEY: "GMAIL_TOKEN",
+    GMAIL_TOKEN: "a-token-value",
+    ...over,
+  };
+}
+
+describe("liveGmailPreflight — status logic (fake env, no network)", () => {
+  it('all four gate vars set + key names a SET token env => "ok"', () => {
+    const r = liveGmailPreflight(okEnv());
+    expect(r.status).toBe("ok");
+  });
+
+  it('AGENTOS_ACTION_LIVE unset => "skip"', () => {
+    const r = liveGmailPreflight(okEnv({ AGENTOS_ACTION_LIVE: undefined }));
+    expect(r.status).toBe("skip");
+    expect(r.reason.length).toBeGreaterThan(0);
+  });
+
+  it('AGENTOS_ACTION_LIVE blank => "skip"', () => {
+    expect(liveGmailPreflight(okEnv({ AGENTOS_ACTION_LIVE: "" })).status).toBe("skip");
+  });
+
+  it('AGENTOS_ACTION_TEST_ACCOUNT / AGENTOS_EGRESS_ALLOW / AGENTOS_GMAIL_OAUTH_KEY unset => "skip"', () => {
+    expect(liveGmailPreflight(okEnv({ AGENTOS_ACTION_TEST_ACCOUNT: undefined })).status).toBe(
+      "skip",
+    );
+    expect(liveGmailPreflight(okEnv({ AGENTOS_EGRESS_ALLOW: undefined })).status).toBe("skip");
+    expect(liveGmailPreflight(okEnv({ AGENTOS_GMAIL_OAUTH_KEY: undefined })).status).toBe("skip");
+  });
+
+  it('AGENTOS_GMAIL_OAUTH_KEY is a token-shape (not a valid env-var NAME) => "blocked" + teaching reason', () => {
+    const canary = preflightCanary();
+    const r = liveGmailPreflight(okEnv({ AGENTOS_GMAIL_OAUTH_KEY: canary }));
+    expect(r.status).toBe("blocked");
+    // The teaching reason points the operator to the TWO-LEVEL setup (name the env var, not the token).
+    expect(r.reason).toContain("must be the NAME");
+    expect(r.reason).toContain("GMAIL_TOKEN");
+  });
+
+  it('AGENTOS_GMAIL_OAUTH_KEY names an UNSET token env => "blocked" (token-not-set)', () => {
+    const r = liveGmailPreflight(
+      okEnv({ AGENTOS_GMAIL_OAUTH_KEY: "GMAIL_TOKEN", GMAIL_TOKEN: undefined }),
+    );
+    expect(r.status).toBe("blocked");
+    expect(r.reason).toContain("not set");
+  });
+
+  it('AGENTOS_GMAIL_OAUTH_KEY names a BLANK token env => "blocked" (token-not-set)', () => {
+    const r = liveGmailPreflight(
+      okEnv({ AGENTOS_GMAIL_OAUTH_KEY: "GMAIL_TOKEN", GMAIL_TOKEN: "" }),
+    );
+    expect(r.status).toBe("blocked");
+  });
+});
+
+describe("liveGmailPreflight — ZERO env-value leak invariant (the heart of the slice)", () => {
+  it("token-shaped key => reason contains NO part of the canary (and not 'ya29')", () => {
+    const canary = preflightCanary();
+    const r = liveGmailPreflight(okEnv({ AGENTOS_GMAIL_OAUTH_KEY: canary }));
+    expect(r.status).toBe("blocked");
+    // ⚠️ The offending VALUE must NEVER appear in the diagnostic reason.
+    expect(r.reason.includes(canary)).toBe(false);
+    expect(r.reason.includes("ya29")).toBe(false);
+  });
+
+  it("token-not-set path => reason contains NO part of the resolved-key-name value nor the (absent) token", () => {
+    const keyNameCanary = `MYSECRETKEYNAME_${"X9".repeat(8)}`;
+    // A valid env-var NAME shape, but a canary so we can assert it is never echoed.
+    const r = liveGmailPreflight(
+      okEnv({ AGENTOS_GMAIL_OAUTH_KEY: keyNameCanary, GMAIL_TOKEN: undefined }),
+    );
+    expect(r.status).toBe("blocked");
+    expect(r.reason.includes(keyNameCanary)).toBe(false);
+  });
+
+  it("GENERAL: a canary placed in EACH relevant env value never appears in preflight.reason", () => {
+    const canary = preflightCanary();
+    const slots: (keyof ReturnType<typeof okEnv>)[] = [
+      "AGENTOS_ACTION_LIVE",
+      "AGENTOS_ACTION_TEST_ACCOUNT",
+      "AGENTOS_EGRESS_ALLOW",
+      "AGENTOS_GMAIL_OAUTH_KEY",
+      "GMAIL_TOKEN",
+    ];
+    for (const slot of slots) {
+      const r = liveGmailPreflight(okEnv({ [slot]: canary }));
+      // Whatever the status, the reason must never carry the canary value.
+      expect(r.reason.includes(canary)).toBe(false);
+    }
   });
 });
