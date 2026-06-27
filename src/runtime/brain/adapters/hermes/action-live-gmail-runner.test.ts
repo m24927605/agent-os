@@ -20,6 +20,8 @@
 import { describe, expect, it } from "vitest";
 import {
   type CapturedHttp,
+  type RunGmailSelfSendResult,
+  classifyLiveOutcome,
   liveGmailPreflight,
   runGmailSelfSend,
 } from "./action-live-gmail-runner.js";
@@ -216,5 +218,102 @@ describe("liveGmailPreflight — ZERO env-value leak invariant (ONE-LEVEL; the t
       // Whatever the status, the reason must never carry the canary value.
       expect(r.reason.includes(canary)).toBe(false);
     }
+  });
+});
+
+// ================================================================================================
+// SLICE-REPORT-FIX — classifyLiveOutcome: the HONEST send/not-sent verdict the runner returns so the
+// operator script can NEVER print "ok … executed" on a non-send. `sent` is TRUE ONLY when the pipeline
+// outcome is "executed" AND the effect's ActionResult.ok === true (a REAL send). A pipeline that "executed"
+// the effect but whose effect (guard/connector) refused (ok:false) is NOT a send. The label is a fixed
+// shape, redactSecrets'd, and NEVER echoes a token or a resolved account email (PII).
+// ================================================================================================
+
+/** A minimal fake RunGmailSelfSendResult carrying ONLY the fields classifyLiveOutcome reads. */
+function fakeResult(over: {
+  outcome: RunGmailSelfSendResult["outcome"];
+  effectOk?: boolean;
+  effectDetail?: string;
+}): RunGmailSelfSendResult {
+  return {
+    outcome: over.outcome,
+    appended: [],
+    trace: [],
+    http: { requests: [] },
+    ...(over.effectOk !== undefined ? { effectOk: over.effectOk } : {}),
+    ...(over.effectDetail !== undefined ? { effectDetail: over.effectDetail } : {}),
+  };
+}
+
+/** A runtime-built OAuth-shaped canary (NOT a source literal; never a real token). */
+function classifyCanary(): string {
+  return `ya29.${"Yr4t".repeat(8)}`;
+}
+
+describe("classifyLiveOutcome — HONEST send verdict (fake results, no network)", () => {
+  it("executed + effect ok:true => { sent: true } (a real send) and label is the SENT label", () => {
+    const v = classifyLiveOutcome(
+      fakeResult({ outcome: { status: "executed" } as never, effectOk: true }),
+    );
+    expect(v.sent).toBe(true);
+    expect(v.label.includes("NOT SENT")).toBe(false);
+  });
+
+  it('executed + effect ok:false => { sent: false } + label includes "NOT SENT" (guard/connector refused)', () => {
+    const v = classifyLiveOutcome(
+      fakeResult({
+        outcome: { status: "executed" } as never,
+        effectOk: false,
+        effectDetail: "acting account not in the test allowlist (deny-by-default)",
+      }),
+    );
+    // ⚠️ NON-VACUITY: a mutation that sets sent = (outcome === "executed") IGNORING effectOk would
+    // wrongly return sent:true here and flip this assertion RED.
+    expect(v.sent).toBe(false);
+    expect(v.label.includes("NOT SENT")).toBe(true);
+    // The connector's (accurate) reason rides the label so the operator learns WHY nothing was sent.
+    expect(v.label.includes("allowlist")).toBe(true);
+  });
+
+  it('denied@policy (pipeline-level deny) => { sent: false } + label "NOT SENT — denied@policy"', () => {
+    const v = classifyLiveOutcome(
+      fakeResult({
+        outcome: { status: "denied", stage: "policy", reason: "egress denied" } as never,
+      }),
+    );
+    expect(v.sent).toBe(false);
+    expect(v.label.includes("NOT SENT")).toBe(true);
+    expect(v.label.includes("denied@policy")).toBe(true);
+  });
+
+  it('denied@approval => { sent: false } + label "NOT SENT — denied@approval"', () => {
+    const v = classifyLiveOutcome(
+      fakeResult({
+        outcome: { status: "denied", stage: "approval", reason: "approval denied" } as never,
+      }),
+    );
+    expect(v.sent).toBe(false);
+    expect(v.label.includes("denied@approval")).toBe(true);
+  });
+
+  it("executed but effectOk MISSING (defensive) => { sent: false } (fail-closed: not a proven send)", () => {
+    const v = classifyLiveOutcome(fakeResult({ outcome: { status: "executed" } as never }));
+    expect(v.sent).toBe(false);
+    expect(v.label.includes("NOT SENT")).toBe(true);
+  });
+
+  it("CREDENTIAL-BLIND: a canary token in the effect detail is redactSecrets'd out of the label", () => {
+    const canary = classifyCanary();
+    const v = classifyLiveOutcome(
+      fakeResult({
+        outcome: { status: "executed" } as never,
+        effectOk: false,
+        effectDetail: `blocked Bearer ${canary} leaked`,
+      }),
+    );
+    expect(v.sent).toBe(false);
+    // ⚠️ ZERO-ECHO: neither the token value nor its "ya29"/Bearer-prefixed shape may appear in the label.
+    expect(v.label.includes(canary)).toBe(false);
+    expect(v.label.includes("ya29")).toBe(false);
   });
 });

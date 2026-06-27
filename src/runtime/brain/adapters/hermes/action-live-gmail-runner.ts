@@ -120,6 +120,21 @@ export interface RunGmailSelfSendResult {
   readonly appended: unknown[];
   readonly trace: { stage: string; detail: string }[];
   readonly http: CapturedHttp;
+  /**
+   * SLICE-REPORT-FIX — the EFFECT's own ActionResult.ok (the guarded connector's `ok`), surfaced so the
+   * caller can tell a REAL send (effect ok:true) from an "executed-but-refused" non-send (effect ok:false
+   * — e.g. the guard's "acting account not in the test allowlist"). The pipeline's `executed` status alone
+   * only means "the effect stage RAN", NOT that the send succeeded — so the bare outcome is NOT enough to
+   * honestly report "sent". PRESENT only when the effect actually ran (the executed path); ABSENT on a
+   * pipeline-level deny (denied@<stage>, where the effect never ran).
+   */
+  readonly effectOk?: boolean;
+  /**
+   * SLICE-REPORT-FIX — the EFFECT's own (connector) detail (e.g. the guard's deny reason). Surfaced for the
+   * honest NOT-SENT label; {@link classifyLiveOutcome} redactSecrets it before it is ever shown. Never a
+   * token / resolved-account email (the guard's reasons are static, credential-blind).
+   */
+  readonly effectDetail?: string;
 }
 
 /**
@@ -171,6 +186,13 @@ export async function runGmailSelfSend(
   // --- An in-memory WORM appender (records every appended event). Credential-blind: the events carry only
   // safe-derived fields; we assert the canary never lands here.
   const appended: unknown[] = [];
+  // SLICE-REPORT-FIX — capture the EFFECT's own ActionResult (ok + detail) as it flows through the
+  // pipeline's injected effect. The pipeline's `executed` outcome surfaces only the effect `detail`, NOT
+  // its `ok` — so without this capture the caller cannot tell a real send from an "executed-but-refused"
+  // non-send (guard deny => effect ok:false). We thread it onto the result so classifyLiveOutcome can read
+  // the truth. Stays undefined on a pipeline-level deny (the effect never runs).
+  let effectOk: boolean | undefined;
+  let effectDetail: string | undefined;
   let receiptId = 0;
   const appender: CommitAppender<unknown, { id: number }> = {
     append: (event) => {
@@ -262,12 +284,19 @@ export async function runGmailSelfSend(
         return appender.append(event);
       },
     },
-    effect: (tc) => {
+    effect: async (tc) => {
       trace.push({
         stage: "effect",
         detail: "guarded connector → google connector → transport (egress)",
       });
-      return baseEffect(tc);
+      // SLICE-REPORT-FIX — record the EFFECT's own result (the guarded connector's ActionResult.ok +
+      // detail) so the runner can surface whether a REAL send happened (ok:true) vs the guard/connector
+      // refusing (ok:false) — the bit the pipeline's `executed` status does NOT carry. (Effect-result `ok`
+      // lives HERE; the pipeline's GovernedOutcome forwards only `detail`, not `ok`.)
+      const r = await baseEffect(tc);
+      effectOk = r.ok;
+      effectDetail = r.detail;
+      return r;
     },
   };
 
@@ -288,7 +317,74 @@ export async function runGmailSelfSend(
   });
   trace.push({ stage: "outcome", detail: outcome.status });
 
-  return { outcome, appended, trace, http: captured };
+  return {
+    outcome,
+    appended,
+    trace,
+    http: captured,
+    // SLICE-REPORT-FIX — surface the effect's own ok/detail (undefined when the effect never ran, i.e. a
+    // pipeline-level deny). classifyLiveOutcome reads these to honestly distinguish a send from a non-send.
+    ...(effectOk !== undefined ? { effectOk } : {}),
+    ...(effectDetail !== undefined ? { effectDetail } : {}),
+  };
+}
+
+// ================================================================================================
+// SLICE-REPORT-FIX — classifyLiveOutcome: the HONEST send/not-sent verdict for the operator script.
+//
+// THE BUG THIS FIXES: the pipeline's `outcome.status === "executed"` only means "the effect stage RAN" —
+// it does NOT mean the send succeeded. On the guard-deny path the effect RAN but the guarded connector
+// returned `{ ok:false, detail:"acting account not in the test allowlist …" }`, so NOTHING was sent — yet
+// the old script printed "ok — executed". This function reads the EFFECT's own ActionResult.ok (threaded
+// onto {@link RunGmailSelfSendResult.effectOk}) so a non-send can NEVER be reported as a send.
+//
+// `sent` is TRUE iff the pipeline outcome is "executed" AND the effect's ok === true (a REAL send).
+// Otherwise `sent` is false and `label` is a FIXED-shape, redactSecrets'd "NOT SENT — …" reason:
+//   - executed + effect ok:false   => "NOT SENT — <redactSecrets(connector detail)>" (guard/connector refused);
+//   - denied@<stage>               => "NOT SENT — denied@<stage>" (pipeline-level deny: policy/approval/commit);
+//   - executed + effect ok missing => "NOT SENT — effect result unavailable" (fail-closed; not a proven send).
+//
+// ZERO-CREDENTIAL: the label is redactSecrets'd and assembled from fixed literals + the guard's own static
+// (credential-blind) detail — it NEVER echoes a token or a resolved-account email (PII).
+// ================================================================================================
+
+/** The honest verdict: was anything REALLY sent, and a fixed-shape, redacted human label. */
+export interface LiveOutcomeVerdict {
+  /** TRUE only when the pipeline executed the effect AND the effect's ActionResult.ok === true. */
+  readonly sent: boolean;
+  /** A FIXED-shape, redactSecrets'd label. On a non-send it is the "NOT SENT — …" reason. No token / PII. */
+  readonly label: string;
+}
+
+/**
+ * Classify a {@link RunGmailSelfSendResult} into an HONEST send verdict. PURE over the result; performs no
+ * I/O. `sent` is TRUE iff `outcome.status === "executed"` AND `result.effectOk === true`. The label is
+ * always redactSecrets'd before return so a connector detail can never become a credential/PII sink.
+ */
+export function classifyLiveOutcome(result: RunGmailSelfSendResult): LiveOutcomeVerdict {
+  const { outcome } = result;
+
+  // Pipeline-level deny (policy / approval / commit / screen / cost): the effect NEVER ran => NOT SENT.
+  if (outcome.status !== "executed") {
+    return { sent: false, label: redactSecrets(`NOT SENT — denied@${outcome.stage}`) };
+  }
+
+  // Executed AND the effect's own ActionResult.ok === true => a REAL send. This is the ONLY `sent:true`.
+  if (result.effectOk === true) {
+    return { sent: true, label: "SENT — governed live self-send executed" };
+  }
+
+  // Executed but the effect (guard/connector) refused (ok:false) — or the effect-ok is unavailable
+  // (defensive, fail-closed) => NOT SENT. The connector's static detail (when present) rides the label so
+  // the operator learns WHY; redactSecrets guarantees no token/secret-shape can leak through it.
+  if (result.effectOk === false) {
+    const reason =
+      result.effectDetail !== undefined && result.effectDetail.trim().length > 0
+        ? result.effectDetail
+        : "blocked by the action guard/connector";
+    return { sent: false, label: redactSecrets(`NOT SENT — ${reason}`) };
+  }
+  return { sent: false, label: redactSecrets("NOT SENT — effect result unavailable") };
 }
 
 // ================================================================================================

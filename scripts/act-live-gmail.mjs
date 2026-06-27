@@ -17,7 +17,11 @@
 // confirmation (self-send + minimal blast radius). Imports the COMPILED dist (the sh runs build first).
 
 import { redactSecrets } from "../dist/audit/index.js";
-import { liveGmailPreflight, runGmailSelfSend } from "../dist/runtime/brain/adapters/hermes/index.js";
+import {
+  classifyLiveOutcome,
+  liveGmailPreflight,
+  runGmailSelfSend,
+} from "../dist/runtime/brain/adapters/hermes/index.js";
 
 // CREDENTIAL-BLIND preflight: validate the opt-in env via a FIXED-reason gate that NEVER echoes any env
 // VALUE (so a token mis-pasted into AGENTOS_GMAIL_OAUTH_KEY can never leak into this script's output).
@@ -69,18 +73,21 @@ for (const req of result.http.requests) {
   console.log(`act-live-gmail: egress ${req.method} ${req.url} (Authorization: ${hasAuth ? "[REDACTED]" : "none"})`);
 }
 
-if (result.outcome.status === "executed") {
-  // The connector maps a 2xx to ok:true; the detail is the effect's (redacted) detail. The real Gmail message
-  // id is in the live response body, which we deliberately do NOT echo (it could carry account context) —
-  // the operator confirms receipt in the test mailbox.
-  console.log(`act-live-gmail: OUTCOME executed — detail: ${redactSecrets(result.outcome.detail ?? "(none)")}`);
-  console.log("act-live-gmail: ok — governed live self-send executed (confirm receipt in the test mailbox)");
+// SLICE-REPORT-FIX — HONEST reporting. The pipeline's `executed` status only means the effect stage RAN —
+// NOT that the send succeeded. classifyLiveOutcome reads the EFFECT's own ActionResult.ok (threaded onto
+// the result) so a guard/connector deny (effect ok:false) — or any pipeline-level deny — can NEVER be
+// reported as a send. We print "ok … executed" ONLY when `sent === true` (effect ok:true == a real send).
+// The label is fixed-shape + redactSecrets'd (zero token / resolved-account echo).
+const verdict = classifyLiveOutcome(result);
+if (verdict.sent) {
+  // A REAL send (effect ok:true). The real Gmail message id is in the live response body, which we
+  // deliberately do NOT echo (it could carry account context) — the operator confirms receipt in the mailbox.
+  console.log(`act-live-gmail: SENT ok — ${redactSecrets(verdict.label)} (confirm receipt in the test mailbox)`);
   process.exit(0);
 }
 
-console.error(
-  `act-live-gmail: NOT SENT — ${result.outcome.status}${
-    result.outcome.status === "denied" ? ` @${result.outcome.stage}: ${redactSecrets(result.outcome.reason)}` : ""
-  }`,
-);
+// NOT SENT (guard/connector refused, or a pipeline-level deny). Report the fixed, redacted reason and exit
+// NON-ZERO — never the misleading "ok … executed". The label already encodes denied@<stage> or the
+// connector's static (credential-blind) deny reason.
+console.error(`act-live-gmail: ${redactSecrets(verdict.label)}`);
 process.exit(1);
