@@ -30,8 +30,9 @@
 - **credential-blind**:brain-proposed gmail.send(canary token in env)→ fake connector 收 descriptor、canary 不入 WORM/tools/call 回應/trace。
 - byte-identical:既有 exec/CAP/ACT1-3 全測續綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(deps.effect dispatcher + tools/list 雙家族 + registry/allow-rule 併入 + `AGENTOS_ADVERTISE_ACTIONS` deny-by-default gate + 注入式 connector;off→byte-identical〔16 exec、action deny〕;on+fake→action advertised + 提議走完整 governed pipeline〔egress/approval/commit-before-effect/boundary/credential-blind〕;dispatch 正確;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`actionAdvertiseFromEnv`(exact true/1,deny-by-default)+ MCP server `ExecMcpServerDeps.actionDescriptors?`(tools/list 併入,inputSchema 經 argSchemaToJsonSchema)+ `.effect?`(注入 dispatcher)+ bin gated 接線(advertise-on:action manifests 併進 registry + gmail.**/drive.**/calendar.** allow-rule + family-aware projection〔buildActionProjectionForCall 餵 egress fold〕+ actionDescriptors + 注入式 connector)。RED → verify **exit 0**(1697 passed + 29 skipped;act4 9 測;**dispatcher-always-exec mutation 翻 2**)。獨立 Opus4.8 review **PASS**:deny-by-default(off→byte-identical 16 exec、action 拒)、**單一 execution edge 無旁路**(brain-proposed action 過 egress/approval/commit-before-effect/boundary;denied 各階段 fake 0 calls/0 appends)、commit-before-effect 序、**brain 無法 retarget**(composer-fixed service/method/host + strict;走私 host/service/method 被拒)、credential-blind(canary 零入 descriptor-env/response/WORM)、exec 路徑 on/off 不變、verify network-free(fake connector)、depcruise bite + 無新依賴。
+- **ActionBinding 終局**:Hermes 出意圖 → agent-os 受治理執行。暴露給 brain = deny-by-default;開了之後每個 action 提議仍層層把關(advertise→live→guard→egress→approval→commit-before-effect→boundary→credential-blind)。真 live 需 AGENTOS_ADVERTISE_ACTIONS + AGENTOS_ACTION_LIVE + 真 connector + 有效 token(operator)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(dispatcher + advertise gate + 注入;off byte-identical)。
