@@ -48,6 +48,7 @@ import type { CommitAppender } from "../../../../../commitgate/index.js";
 import { type CostGate, InMemoryCostGate, failClosedCostGate } from "../../../../../cost/index.js";
 import {
   type ApprovalOutcome,
+  type EffectResult,
   type MaybePromise,
   createBudgetApprover,
 } from "../../../../../orchestration/index.js";
@@ -66,11 +67,34 @@ import { createPartitionedIngestSink, createRpcAppendTransport } from "../../../
 import { integrationsFromEnv } from "../../../../spendguard/index.js";
 import type { ExecCapableSandboxAdapter } from "../../../../substrate/index.js";
 import { FakeSandboxAdapter } from "../../../../substrate/index.js";
+// SLICE-ACT4 — the ACTION family (sibling modules; NON-argv app/API actions). The connector port + the
+// binding-wrapped action effect + the seed action manifests/bindings. The REAL guarded connector pieces
+// (transport / google connector / account resolver) are LAZILY imported on the live path ONLY (so no test
+// path pulls a network vendor, and verify stays network-free).
+import {
+  type ActionBinding,
+  type ActionConnector,
+  bindingWrappedActionEffect,
+} from "../action-closed-loop.js";
+import { createGoogleAccountResolver } from "../action-google-account-resolver.js";
+import { createGoogleActionConnector } from "../action-google-connector.js";
+import {
+  actionLiveFromEnv,
+  createGuardedActionConnector,
+  testAccountsFromEnv,
+} from "../action-guard.js";
+import { createHttpActionTransport } from "../action-http-transport.js";
+import { buildActionProjectionForCall } from "../action-projection-for-call.js";
+import { seedActionBindings, seedActionRegistry } from "../action-seed-tools.js";
 import { makeArgsCredentialScreen } from "../args-credential-screen.js";
-import type { ExecToolBinding } from "../exec-closed-loop.js";
+import { type ExecToolBinding, bindingWrappedExecEffect } from "../exec-closed-loop.js";
 import { seedBindings, seedRegistry } from "../exec-seed-tools.js";
 import { type AgtScope, buildProjectionForCall } from "../governance-projection-for-call.js";
-import type { ExecMcpServerDeps } from "./exec-mcp-server.js";
+import {
+  type ExecMcpServerDeps,
+  type McpToolDescriptor,
+  argSchemaToJsonSchema,
+} from "./exec-mcp-server.js";
 import { runExecMcpStdio } from "./exec-mcp-stdio.js";
 
 /** A single diagnostic line — ALWAYS to stderr (stdout is the protocol-only MCP wire). */
@@ -196,6 +220,24 @@ export interface BuildBinOpts {
    * Default EMPTY => deny-all. A tool with NO writeTargets is never gated by it (byte-identical).
    */
   readonly hostWriteAllow?: readonly string[];
+  /**
+   * SLICE-ACT4 — a TEST seam to force the ADVERTISE-ACTIONS master switch ON without setting env (a Fake
+   * `true` proves the advertise-on wiring). The LIVE bin omits this and the switch is derived from env via
+   * `actionAdvertiseFromEnv(process.env)` (`AGENTOS_ADVERTISE_ACTIONS`; UNCONFIGURED => off => byte-
+   * identical). When OFF (default), NONE of the action wiring happens (no manifests/bindings/descriptors/
+   * allow rules; the deps.effect stays the exec effect) and an action tools/call is denied at authorize.
+   */
+  readonly actionAdvertise?: boolean;
+  /**
+   * SLICE-ACT4 — inject the ACTION connector the dispatcher routes a brain-proposed action to (a TEST seam:
+   * a `FakeActionConnector` proves the bin routes + governs an action WITHOUT a real network). Used ONLY
+   * when advertise is ON. The LIVE bin omits this and builds the REAL guarded connector
+   * (`createGuardedActionConnector(createGoogleActionConnector(createHttpActionTransport(env)), {live:
+   * actionLiveFromEnv(env), testAccounts: testAccountsFromEnv(env), resolveAccount:
+   * createGoogleAccountResolver(...)})`) — so live execution ADDITIONALLY needs `AGENTOS_ACTION_LIVE` on +
+   * a valid token + the test-account allowlist (the ACT3a guard). verify NEVER touches the real network.
+   */
+  readonly actionConnector?: ActionConnector;
 }
 
 /**
@@ -244,6 +286,28 @@ function egressAllowFromEnv(env: NodeJS.ProcessEnv): readonly string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * SLICE-ACT4 — the env var that is the MASTER SWITCH for ADVERTISING the ACTION family to the brain.
+ * DENY-BY-DEFAULT (mirrors `actionLiveFromEnv`): exposing "send an email / delete a file" to an untrusted/
+ * autonomous brain is a deliberate security posture, so the action family is advertised + governed ONLY
+ * when this is EXACTLY a true-token. UNSET / blank / any other string (incl. "TRUE"/"yes"/"true ") => off.
+ */
+const ADVERTISE_ACTIONS_ENV = "AGENTOS_ADVERTISE_ACTIONS";
+
+/** The exact tokens that turn the advertise switch ON (mirrors action-guard's LIVE_TRUE_TOKENS). */
+const ADVERTISE_TRUE_TOKENS: ReadonlySet<string> = new Set(["true", "1"]);
+
+/**
+ * Read the ADVERTISE-ACTIONS master switch from env (FAIL-CLOSED, mirroring `actionLiveFromEnv`). Returns
+ * `true` ONLY when `AGENTOS_ADVERTISE_ACTIONS` is EXACTLY a true-token (`"true"` or `"1"`); unset / blank /
+ * any other string (e.g. `"false"`, `"TRUE"`, `"yes"`, `"true "`) => `false`. Pure over env —
+ * deny-by-default: the default-off bin is BYTE-IDENTICAL (no action manifests/bindings/descriptors/allow
+ * rules; an action tools/call is denied at authorize — neither registered nor allow-ruled).
+ */
+export function actionAdvertiseFromEnv(env: NodeJS.ProcessEnv): boolean {
+  return ADVERTISE_TRUE_TOKENS.has(env[ADVERTISE_ACTIONS_ENV] ?? "");
 }
 
 /**
@@ -417,11 +481,38 @@ function buildDeps(
     "egress-allowlist",
     "host-write-target",
   ]);
+  // SLICE-ACT4 — the ADVERTISE-ACTIONS master switch. A TEST seam (opts.actionAdvertise) takes precedence;
+  // else FAKE mode is ALWAYS off (the EXEC4c-a subprocess test stays byte-identical regardless of ambient
+  // env), and REAL mode reads `actionAdvertiseFromEnv(process.env)` (AGENTOS_ADVERTISE_ACTIONS; UNSET =>
+  // off). DENY-BY-DEFAULT: off => NONE of the action wiring below (the registry/bindings/allow rules/effect
+  // are byte-identical to today; deps.actionDescriptors absent; an action tools/call is denied at authorize
+  // — neither registered nor allow-ruled). Exposing actions to an autonomous brain is a deliberate opt-in.
+  const advertiseActions =
+    opts.actionAdvertise ?? (fake ? false : actionAdvertiseFromEnv(process.env));
+  // The bin's `binWired` already contains {approval, egress-allowlist}, so `seedActionRegistry`/
+  // `seedActionBindings` register the FULL set (the destructive gmail.send/drive.files.delete need BOTH;
+  // the read/write actions need egress-allowlist). When advertise is OFF, we never call them — the action
+  // family is fully absent (deny-by-default). The manifests are merged into the bin's SINGLE registry (so
+  // the authorize closure's `registry.lookup` sees their containment/requiresApproval -> egress fold /
+  // approval / external / boundary all apply, exactly as for net.fetch/git.push).
+  const actionRegistry = advertiseActions ? seedActionRegistry(binWired) : undefined;
+  const actionBindings: ReadonlyMap<string, ActionBinding> = advertiseActions
+    ? seedActionBindings(binWired)
+    : new Map<string, ActionBinding>();
+  // The action manifests to MERGE into the bin's registry (drained from the freshly-seeded actionRegistry
+  // so the SAME parsed manifests drive both lookup and the merge — no duplicate manifest source).
+  const actionManifests: readonly unknown[] = advertiseActions
+    ? [...actionBindings.keys()]
+        .map((name) => actionRegistry?.lookup(name))
+        .filter((m) => m !== undefined)
+    : [];
   const extraSeedTools = opts.extraSeedTools ?? [];
-  const registry = seedRegistry(
-    binWired,
-    extraSeedTools.map((t) => t.manifest),
-  );
+  const registry = seedRegistry(binWired, [
+    ...extraSeedTools.map((t) => t.manifest),
+    // SLICE-ACT4 — merge the action manifests so the authorize closure admits + governs them. Empty when
+    // advertise is OFF => byte-identical.
+    ...actionManifests,
+  ]);
   const allowRules = [
     {
       id: "allow-exec",
@@ -450,6 +541,36 @@ function buildDeps(
       resource: "net.**",
       tenantId: BIN_CONTEXT.tenantId,
     },
+    // SLICE-ACT4 — the ACTION family allow rules (gmail.**/drive.**/calendar.**), OR-combined alongside the
+    // exec.**/git.**/net.** rules, ONLY when advertise is ON. PURE ADDITION: an allow rule admits the NAME,
+    // but the egress fold STILL gates the host (a non-allowlisted gmail host => denied@policy) and the
+    // approval stage STILL gates a destructive action (gmail.send/drive.files.delete => denied@approval
+    // without pre-auth). When advertise is OFF these rules are ABSENT, so an action name is denied at
+    // authorize (no allow rule + not registered) — deny-by-default, byte-identical. The PDP still
+    // deny-by-defaults an UNREGISTERED name even with these rules present, so they only admit the action
+    // manifests merged into the registry above.
+    ...(advertiseActions
+      ? [
+          {
+            id: "allow-gmail",
+            action: "tool:invoke",
+            resource: "gmail.**",
+            tenantId: BIN_CONTEXT.tenantId,
+          },
+          {
+            id: "allow-drive",
+            action: "tool:invoke",
+            resource: "drive.**",
+            tenantId: BIN_CONTEXT.tenantId,
+          },
+          {
+            id: "allow-calendar",
+            action: "tool:invoke",
+            resource: "calendar.**",
+            tenantId: BIN_CONTEXT.tenantId,
+          },
+        ]
+      : []),
     // SLICE-CAP4b — EXTRA allow rules (TEST seam: makes an injected synthetic tool PDP-authorizable). Empty
     // by default => byte-identical (the live bin injects none — no extra tools, no extra rules).
     ...(opts.extraAllowRules ?? []),
@@ -510,11 +631,55 @@ function buildDeps(
   // host-fs-write tool register AND (b) folds the host-write decision for a tool whose projection carries
   // writeTargets.
   const binHostWriteAllow: readonly string[] = resolveBinHostWriteAllow(opts);
+  // SLICE-ACT4 — when advertise is ON, build (a) the ACTION descriptors for tools/list (derived from each
+  // binding's STRICT argSchema via the SAME `argSchemaToJsonSchema` converter the exec path uses — no
+  // hand-written drift), and (b) the deps.effect DISPATCHER. The dispatcher routes a brain-proposed ACTION
+  // (`actionBindings.has(tc.tool)`) to the action connector and an exec tool to the substrate — BOTH still
+  // reached ONLY by `runGovernedToolCall` (the single execution edge; no gate bypass). When advertise is
+  // OFF, BOTH are `undefined` => the MCP server advertises the exec set only + builds the exec effect
+  // exactly as today (byte-identical).
+  let actionDescriptors: McpToolDescriptor[] | undefined;
+  let effect:
+    | ((toolCall: {
+        tool: string;
+        context: unknown;
+        args?: Record<string, unknown>;
+      }) => Promise<EffectResult>)
+    | undefined;
+  if (advertiseActions) {
+    actionDescriptors = [...actionBindings].map(([name, binding]) => ({
+      name,
+      description: registry.lookup(name)?.description ?? name,
+      inputSchema: argSchemaToJsonSchema(binding.argSchema),
+    }));
+    // The ACTION connector the dispatcher routes to: a TEST seam (opts.actionConnector — a Fake, no
+    // network) takes precedence; the LIVE bin builds the REAL guarded connector. The guard is the live-
+    // safety ring: deny-all unless AGENTOS_ACTION_LIVE is on AND the resolved account ∈ the test allowlist.
+    // The transport/connector/resolver factories do NO network at construction — `fetch` fires ONLY on a
+    // real send, and ONLY when the guard has admitted the call (live + allowlisted). verify always injects
+    // the Fake, so no test path touches the network.
+    const actionConnector: ActionConnector =
+      opts.actionConnector ??
+      (() => {
+        const transport = createHttpActionTransport({ env: process.env });
+        return createGuardedActionConnector(createGoogleActionConnector(transport), {
+          live: actionLiveFromEnv(process.env),
+          testAccounts: testAccountsFromEnv(process.env),
+          resolveAccount: createGoogleAccountResolver(transport),
+        });
+      })();
+    const execEffect = bindingWrappedExecEffect(substrate, sandboxId, bindings);
+    const actionEffect = bindingWrappedActionEffect(actionConnector, actionBindings);
+    effect = (toolCall) =>
+      actionBindings.has(toolCall.tool) ? actionEffect(toolCall) : execEffect(toolCall);
+  }
   return {
     substrate,
     sandboxId,
     bindings,
     registry,
+    ...(actionDescriptors !== undefined ? { actionDescriptors } : {}),
+    ...(effect !== undefined ? { effect } : {}),
     screen: makeArgsCredentialScreen(),
     authorize: async (tc) => {
       const c = tc.context as typeof BIN_CONTEXT;
@@ -546,12 +711,28 @@ function buildDeps(
       // invalid-args / no-projector call yields `undefined`, so the request is left UNCHANGED (byte-identical).
       // The projection is what a configured AGT secondary consumes; an absent AGT secondary never reads it,
       // so attaching it when AGT is unconfigured is a behavioural no-op (PDP ignores it; [] secondaries skip it).
-      const projection = buildProjectionForCall(
-        { tool: tc.tool, ...(tc.args !== undefined ? { args: tc.args } : {}) },
-        bindings,
-        (name) => registry.lookup(name),
-        agtScope,
-      );
+      // SLICE-ACT4 — the projection source is FAMILY-AWARE: an EXEC tool projects via the exec helper
+      // (`buildProjectionForCall` over the exec `bindings`); an ACTION tool projects via the SIBLING action
+      // helper (`buildActionProjectionForCall` over `actionBindings`). The action helper emits the SAME
+      // credential-blind GovernanceProjection (networkHosts = composer-fixed provider host + operationClass
+      // + destructiveFlags, NEVER the params), so the SAME egress fold / boundary summary below gate the
+      // action exactly as they gate net.fetch. When advertise is OFF, `actionBindings` is EMPTY so the
+      // action branch never fires (byte-identical) — and an action tool is denied at the PDP anyway (no
+      // allow rule + not registered). An exec tool never appears in `actionBindings`, so only ONE helper
+      // ever produces a projection for a given call (no double-projection).
+      const projection =
+        buildProjectionForCall(
+          { tool: tc.tool, ...(tc.args !== undefined ? { args: tc.args } : {}) },
+          bindings,
+          (name) => registry.lookup(name),
+          agtScope,
+        ) ??
+        buildActionProjectionForCall(
+          { tool: tc.tool, ...(tc.args !== undefined ? { args: tc.args } : {}) },
+          actionBindings,
+          (name) => registry.lookup(name),
+          agtScope,
+        );
       if (projection !== undefined) req.governanceProjection = projection;
       // PDP = the SOLE deny authority (deny-by-default for an unregistered tool). It is a `PolicyDecision`.
       const pdp: PolicyDecision = authorizeToolInvoke(req, registry, allowRules);

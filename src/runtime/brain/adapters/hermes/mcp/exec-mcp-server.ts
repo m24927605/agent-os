@@ -36,6 +36,7 @@ import type { CostGate } from "../../../../../cost/index.js";
 import {
   type ApprovalOutcome,
   type AuthorizeDecision,
+  type EffectResult,
   type GovernedToolCallDeps,
   type MaybePromise,
   type ScreenOutcome,
@@ -225,6 +226,28 @@ export interface ExecMcpServerDeps {
   readonly sandboxId: string;
   /** The composer-held bindings (parallel to the registry). tools/list advertises EXACTLY these keys. */
   readonly bindings: ReadonlyMap<string, ExecToolBinding>;
+  /**
+   * SLICE-ACT4 — OPTIONAL extra tool descriptors MERGED into `tools/list` ALONGSIDE the exec `bindings`
+   * descriptors. The bin uses this to advertise the ACTION family (gmail.send/drive.read/...) when
+   * `AGENTOS_ADVERTISE_ACTIONS` is on — each descriptor's `inputSchema` is DERIVED by the bin via
+   * `argSchemaToJsonSchema(binding.argSchema)` (the SAME no-drift converter the exec path uses), never
+   * hand-written. ABSENT or EMPTY => byte-identical (the exec bindings descriptors ONLY); the array is
+   * APPENDED after the exec descriptors so the exec-only ordering/set is unchanged when it is empty. These
+   * are an ADVERTISEMENT concern ONLY — execution still flows through the SINGLE governed edge
+   * (`runGovernedToolCall` -> `deps.effect`); an advertised name with no governed routing is denied there.
+   */
+  readonly actionDescriptors?: ReadonlyArray<McpToolDescriptor>;
+  /**
+   * SLICE-ACT4 — OPTIONAL injected effect DISPATCHER (the SINGLE execution edge's effect). When PRESENT it
+   * REPLACES the default `bindingWrappedExecEffect(substrate, sandboxId, bindings, ...)` the server builds
+   * — the bin injects a dispatcher `(tc) => actionBindings.has(tc.tool) ? <action effect>(tc) : <exec
+   * effect>(tc)` so a brain-proposed ACTION routes to the action connector and an exec tool routes to the
+   * substrate, BOTH through the SAME `runGovernedToolCall`. ABSENT => the server builds the exec effect
+   * exactly as today (byte-identical). The pipeline remains the ONLY caller of this effect; the `onEffect`
+   * probe + the `effectOk` capture still wrap it, so commit-before-effect ordering + isError reporting are
+   * unchanged regardless of which family the dispatcher routes to.
+   */
+  readonly effect?: (toolCall: BoundExecCall) => Promise<EffectResult>;
   /** The ToolRegistry the PDP admits against (deny-by-default for any unregistered name). `lookup` sources
    * each advertised tool's description from its registered manifest (single source of truth, no drift). */
   readonly registry: {
@@ -286,6 +309,14 @@ export function createExecMcpServer(deps: ExecMcpServerDeps): ExecMcpServer {
       description: descriptionFor(name, deps.registry),
       inputSchema: argSchemaToJsonSchema(binding.argSchema),
     });
+  }
+  // SLICE-ACT4 — MERGE the OPTIONAL action descriptors AFTER the exec descriptors. Absent/empty =>
+  // byte-identical (the exec set is unchanged); present => the action family is advertised ALONGSIDE exec.
+  // The bin derives each `inputSchema` via the SAME `argSchemaToJsonSchema` converter (no hand-written
+  // drift). This is an ADVERTISEMENT-ONLY merge — every tools/call still routes through the single governed
+  // edge below, so an advertised tool with no governed routing is denied there (never a bypass).
+  if (deps.actionDescriptors !== undefined) {
+    for (const d of deps.actionDescriptors) descriptors.push(d);
   }
 
   return {
@@ -353,10 +384,17 @@ async function handleToolsCall(
 
   // Build the binding-wrapped effect for the fixed (substrate, sandboxId). This is the INJECTED effect —
   // the pipeline is the ONLY caller of it. Tagging via `onEffect` lets a test observe commit-before-effect.
-  const baseEffect = bindingWrappedExecEffect(deps.substrate, deps.sandboxId, deps.bindings, {
-    ...(deps.maxOutputBytes !== undefined ? { maxOutputBytes: deps.maxOutputBytes } : {}),
-    ...(deps.detectSecret !== undefined ? { detectSecret: deps.detectSecret } : {}),
-  });
+  // SLICE-ACT4 — an injected `deps.effect` DISPATCHER REPLACES this default (the bin routes a brain-proposed
+  // ACTION to the action connector and an exec tool to the substrate, BOTH through the SAME pipeline);
+  // ABSENT => the exec effect exactly as today (byte-identical). Either way the pipeline is the ONLY caller,
+  // and the `onEffect` + `effectOk` wrapping below is unchanged, so commit-before-effect ordering + isError
+  // reporting hold regardless of which family the dispatcher routes to.
+  const baseEffect =
+    deps.effect ??
+    bindingWrappedExecEffect(deps.substrate, deps.sandboxId, deps.bindings, {
+      ...(deps.maxOutputBytes !== undefined ? { maxOutputBytes: deps.maxOutputBytes } : {}),
+      ...(deps.detectSecret !== undefined ? { detectSecret: deps.detectSecret } : {}),
+    });
   // The pipeline maps a reached-but-failed effect (binding deny / strict-schema reject / failed exec) to an
   // "executed" outcome that DROPS `EffectResult.ok`. We capture that flag here so the MCP result reports
   // `isError:true` for a failed effect (e.g. a smuggled `argv` key the binding rejected) — a fabricated
