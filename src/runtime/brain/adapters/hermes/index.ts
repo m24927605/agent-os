@@ -166,6 +166,18 @@ export {
   returnContentSanitizer,
 } from "./browser-closed-loop.js";
 export { buildBrowserProjectionForCall } from "./browser-projection-for-call.js";
+// SLICE-ACT5d — the REAL-BROWSER connector over a STRUCTURAL `BrowserPage` interface (no browser
+// library imported — fully fake-page testable). The operator runner (scripts/act5-live-browser.mjs)
+// adapts a real headless browser page to `BrowserPage` and wires this connector through the SAME
+// governed pipeline; verify stays ZERO-new-dep + browser-free (the real browser is the .mjs's
+// dynamic-imported, fail-closed-if-absent live-drive install). PURE ADDITION — the ACT5a-c seams are
+// unchanged.
+export {
+  type BrowserConnectorOverPageOptions,
+  type BrowserPage,
+  type PageBrowserConnector,
+  createBrowserConnectorOverPage,
+} from "./browser-page-connector.js";
 export {
   browserClickBinding,
   browserClickManifest,
