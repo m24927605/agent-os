@@ -29,9 +29,9 @@
 - byte-identical:ACT5a-c + 既有全測續綠;**package.json/lock 無 diff**(verify 證無新依賴)。
 - **live(operator,非 verify)**:`e2e:live-browser` 裝好 playwright + 設 AGENTOS_EGRESS_ALLOW=allowed-host → 真開 Chromium、route-abort 非-allowlist、navigate+read 過治理、印 sanitized 內容 + boundary。未裝/未設 → skip。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(`createBrowserConnectorOverPage`〔結構化 Page、無 playwright import〕+ runner〔動態 import playwright + route-interception egress + 治理 wiring〕+ e2e:live-browser gated skip;fake page 測映射 + read sanitizer + type egress-resolve;**verify 零新依賴零真瀏覽器**〔package.json 無 diff〕;mutation 證;depcruise/secret-scan clean);獨立 Opus 4.8 review PASS。
-- [ ] **live drive(operator + authorized):** 裝 playwright + chromium → `e2e:live-browser`(AGENTOS_EGRESS_ALLOW=公開 host)→ 真 Chromium 過治理 navigate+read,印 sanitized 內容。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged `321f1c6`)**:`createBrowserConnectorOverPage`〔結構化 Page、無 playwright import〕+ runner〔動態 import playwright + route-interception egress + 治理 wiring〕+ e2e:live-browser gated skip;fake page 測映射 + read sanitizer + type egress-resolve;**verify 零新依賴零真瀏覽器**(package.json 只 script 行、pnpm-lock byte-unchanged);RED → verify **exit 0**(1761 passed + 29 skipped;13 測;un-resolved-fill/leak-resolved/raw-content mutation 各翻);獨立 Opus 4.8 review **PASS,零 findings**(零新依賴 + browser-free、type credential-blind、read sanitizer、route.abort substrate-PRIMARY、playwright-absent fail-closed、.sh SKIP exit 0、byte-identical)。
+- [x] **live drive 成功(2026-06-27,operator authorized):** 裝 playwright 1.61.1 + chromium → `AGENTOS_EGRESS_ALLOW=example.com` `e2e:live-browser` → **真 Chromium 導到 https://example.com + read,全程過治理**(navigate + read 各:screen→authorize egress folded→commit WORM→effect〔real browser, egress route-abort primary〕→outcome executed)→ `SENT ok`,sanitized read = `{"content":"Example Domain…","truncated":false,"untrusted":true}`,exit 0。資料-OUT sanitizer 對真頁面生效(untrusted:true);egress 在瀏覽器層真 route-abort。事後 `git checkout package.json pnpm-lock.yaml` → repo 回零依賴(playwright = 本地 live-drive 安裝,不入 commit)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加連接器 + runner;無 package.json 變更)。
