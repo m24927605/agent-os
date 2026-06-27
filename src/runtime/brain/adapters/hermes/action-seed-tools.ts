@@ -103,7 +103,13 @@ function actionProjection(
 // gmail.send — the FIRST destructive action (network-egress + destructive => requiresApproval forced).
 // ------------------------------------------------------------------------------------------------
 
-/** The env var naming the OPTIONAL per-service Gmail OAuth token KEY (NON-secret config: names a KEY). */
+/**
+ * SLICE-CRED-ONELEVEL: the env var that DIRECTLY HOLDS the Gmail OAuth token (a secret) — ONE LEVEL.
+ * The constant is ALSO the placeholder KEY the binding emits (`toCredentialEnv(GMAIL_OAUTH_KEY_ENV)`), so
+ * the transport resolves `env["AGENTOS_GMAIL_OAUTH_KEY"]` = the token at egress. (Previously two-level:
+ * this env var held the NAME of another env var — an intuition-violating footgun, now removed.) The name
+ * itself is a valid `SAFE_ACTION_ENV_KEY` (UPPERCASE C-id), so `toCredentialEnv` emits its placeholder.
+ */
 export const GMAIL_OAUTH_KEY_ENV = "AGENTOS_GMAIL_OAUTH_KEY";
 
 /** The composer-fixed Gmail provider host the egress fold gates. */
@@ -150,7 +156,10 @@ export const gmailSendBinding: ActionBinding = {
     const v = a as { to: string; subject: string; body: string };
     return { to: v.to, subject: v.subject, body: v.body };
   },
-  toCredentialEnv: () => toCredentialEnv(process.env[GMAIL_OAUTH_KEY_ENV]),
+  // ONE-LEVEL: key the placeholder by the CONSTANT NAME (NOT by an env value) — so the descriptor env is
+  // `{ AGENTOS_GMAIL_OAUTH_KEY: "openshell:resolve:env:AGENTOS_GMAIL_OAUTH_KEY" }` and the transport
+  // resolves that env var (which DIRECTLY HOLDS the token) at egress. No two-level indirection.
+  toCredentialEnv: () => toCredentialEnv(GMAIL_OAUTH_KEY_ENV),
   // destructiveFlags carries a coarse HINT (the send is a destructive, irreversible network effect) — NOT
   // a param value. NON-VACUITY: remove the host => no networkHosts => the network-egress fail-closed gate
   // denies (the destination is unknown).
@@ -205,7 +214,12 @@ export const driveReadBinding: ActionBinding = {
 /** The composer-fixed Google Calendar provider host the egress fold gates (the shared googleapis host). */
 export const CALENDAR_HOST = "www.googleapis.com";
 
-/** The env var naming the OPTIONAL per-service Calendar OAuth token KEY (NON-secret config: names a KEY). */
+/**
+ * SLICE-CRED-ONELEVEL: the env var that DIRECTLY HOLDS the Calendar OAuth token (a secret) — ONE LEVEL,
+ * exactly mirroring `GMAIL_OAUTH_KEY_ENV`. The constant is ALSO the placeholder KEY the calendar binding
+ * emits (`toCredentialEnv(GCAL_OAUTH_KEY_ENV)`); the transport resolves `env["AGENTOS_GCAL_OAUTH_KEY"]`
+ * = the token at egress.
+ */
 export const GCAL_OAUTH_KEY_ENV = "AGENTOS_GCAL_OAUTH_KEY";
 
 // ------------------------------------------------------------------------------------------------
@@ -251,7 +265,8 @@ export const calendarEventsCreateBinding: ActionBinding = {
     const v = a as { summary: string; start: string; end: string };
     return { summary: v.summary, start: v.start, end: v.end };
   },
-  toCredentialEnv: () => toCredentialEnv(process.env[GCAL_OAUTH_KEY_ENV]),
+  // ONE-LEVEL: key the placeholder by the CONSTANT NAME (the env var DIRECTLY HOLDS the token at egress).
+  toCredentialEnv: () => toCredentialEnv(GCAL_OAUTH_KEY_ENV),
   actionProjector: () => actionProjection("calendar", "events.create", CALENDAR_HOST, []),
 };
 
@@ -375,7 +390,8 @@ export const gmailSearchBinding: ActionBinding = {
   method: "search",
   argSchema: z.object({ query: z.string().min(1) }).strict(),
   toParams: (a) => ({ query: (a as { query: string }).query }),
-  toCredentialEnv: () => toCredentialEnv(process.env[GMAIL_OAUTH_KEY_ENV]),
+  // ONE-LEVEL: the SAME constant-name placeholder gmail.send uses (the env var DIRECTLY HOLDS the token).
+  toCredentialEnv: () => toCredentialEnv(GMAIL_OAUTH_KEY_ENV),
   actionProjector: () => actionProjection("gmail", "search", GMAIL_HOST, []),
 };
 

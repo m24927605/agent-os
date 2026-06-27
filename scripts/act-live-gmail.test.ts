@@ -1,13 +1,15 @@
 /**
- * SLICE-CRED-LEAK-FIX (RED-first) — the OPERATOR driver scripts/act-live-gmail.mjs must NEVER echo any
- * env VALUE in its diagnostics. The historical leak: when a user mis-pasted a token into
- * AGENTOS_GMAIL_OAUTH_KEY (which is meant to hold the NAME of the token env var, two-level), the BLOCKED
- * diagnostic echoed `env[${oauthKey}]` — leaking the token into stdout/stderr.
+ * SLICE-CRED-ONELEVEL (RED-first) — the OPERATOR driver scripts/act-live-gmail.mjs must NEVER echo any
+ * env VALUE in its diagnostics. Under ONE-LEVEL, AGENTOS_GMAIL_OAUTH_KEY DIRECTLY HOLDS the token (a
+ * secret), so the zero-echo invariant is even more load-bearing: the token value sits in that env var on
+ * every run and must never reach stdout/stderr.
  *
- * This test SPAWNS the real .mjs with a runtime-built token-shaped CANARY in AGENTOS_GMAIL_OAUTH_KEY
- * (+ the minimal gate env so it reaches the BLOCKED preflight branch — NEVER a real send, NO network),
- * captures the COMBINED stdout+stderr, and asserts it contains NO part of the canary. The .mjs must
- * fail-closed (blocked) on the misconfig and print only the FIXED preflight reason.
+ * This test SPAWNS the real .mjs with a runtime-built token-shaped CANARY in AGENTOS_GMAIL_OAUTH_KEY and a
+ * deliberately INCOMPLETE gate env (AGENTOS_EGRESS_ALLOW omitted) so the preflight returns "skip" and the
+ * driver exits fail-closed WITHOUT any send — NEVER a real network call. It captures the COMBINED
+ * stdout+stderr and asserts it contains NO part of the canary and that the driver never reached the
+ * "ABOUT TO SEND" gate. (We use the skip path rather than a real "ok" so the test never touches the
+ * network; the one-level "ok" path's zero-echo is covered by the unit tests on liveGmailPreflight.)
  *
  * The .mjs imports the COMPILED dist (../dist/...), so this test depends on `pnpm run build` having run
  * (verify runs build before test). The canary is assembled at runtime (never a committed literal), so the
@@ -28,20 +30,21 @@ function tokenCanary(): string {
   return `ya29.${"Wd3k".repeat(8)}`;
 }
 
-describe("act-live-gmail.mjs — operator driver never echoes an env value (CRED-LEAK-FIX)", () => {
-  it("token mis-pasted into AGENTOS_GMAIL_OAUTH_KEY => BLOCKED, NO send, canary NOT in output", () => {
+describe("act-live-gmail.mjs — operator driver never echoes an env value (CRED-ONELEVEL)", () => {
+  it("token in AGENTOS_GMAIL_OAUTH_KEY + incomplete gate => SKIP, NO send, canary NOT in output", () => {
     // Requires the compiled dist (verify runs build first). If absent, fail loudly (deny, not skip).
     expect(existsSync(dist)).toBe(true);
 
     const canary = tokenCanary();
-    // Minimal gate env so the .mjs PASSES the "all set" check and reaches the key-name VALIDATION
-    // (the blocked path) — a token-shaped key is not a valid env-var NAME, so it blocks BEFORE any send.
+    // ONE-LEVEL: AGENTOS_GMAIL_OAUTH_KEY holds the TOKEN directly. We OMIT AGENTOS_EGRESS_ALLOW so the
+    // preflight returns "skip" — the driver exits fail-closed WITHOUT a send (NO network) while the token
+    // canary still sits in the env on this run. This pins the zero-echo invariant with no network call.
     const env = {
       // A clean, synthetic env — NOT the operator's ~/.env. No real credentials.
       PATH: process.env.PATH ?? "",
       AGENTOS_ACTION_LIVE: "true",
       AGENTOS_ACTION_TEST_ACCOUNT: "throwaway@example.test",
-      AGENTOS_EGRESS_ALLOW: "gmail.googleapis.com",
+      // AGENTOS_EGRESS_ALLOW intentionally omitted => preflight "skip" => no send.
       AGENTOS_GMAIL_OAUTH_KEY: canary,
     };
 
@@ -53,12 +56,10 @@ describe("act-live-gmail.mjs — operator driver never echoes an env value (CRED
     });
 
     const combined = `${res.stdout ?? ""}${res.stderr ?? ""}`;
-    // ⚠️ The mis-pasted token VALUE must NEVER appear anywhere in the driver's output.
+    // ⚠️ The token VALUE (held DIRECTLY in AGENTOS_GMAIL_OAUTH_KEY) must NEVER appear in the output.
     expect(combined.includes(canary)).toBe(false);
     expect(combined.includes("ya29")).toBe(false);
-    // Fail-closed: a misconfig blocks (non-zero exit), it must NOT proceed to a send.
-    expect(res.status).not.toBe(0);
-    // It must NOT have reached the "ABOUT TO SEND" gate (no send attempted).
+    // It must NOT have reached the "ABOUT TO SEND" gate (no send attempted, no network).
     expect(combined.includes("ABOUT TO SEND")).toBe(false);
   });
 });

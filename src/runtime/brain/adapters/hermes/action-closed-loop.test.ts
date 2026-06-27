@@ -108,44 +108,44 @@ describe("ACT1 — bindingWrappedActionEffect: deny-by-default / strict / creden
     const effect = bindingWrappedActionEffect(fake, seedActionBindings(ACTION_WIRED), {
       detectSecret: defaultExecSecretDetector,
     });
-    // Configure the per-service OAuth KEY (NON-secret config: it names a KEY). The binding's
-    // toCredentialEnv then emits a PLACEHOLDER for it (never a literal token). UNCONFIGURED => {} (the
-    // honest EXEC2-until boundary, unauthenticated-to-allowlisted, mirroring net.fetch) — proven in (g).
-    const prev = process.env[GMAIL_OAUTH_KEY_ENV];
-    process.env[GMAIL_OAUTH_KEY_ENV] = "GMAIL_OAUTH_TOKEN";
-    try {
-      const res = await effect({
-        tool: "gmail.send",
-        context: validCtx,
-        args: { to: "a@b.com", subject: "hi", body: "hello world" },
-      });
-      expect(res.ok).toBe(true);
-      expect(fake.invokeCalls.length).toBe(1);
-      const desc = fake.invokeCalls[0]?.descriptor as ActionDescriptor;
-      // service/method are composer-fixed (NEVER brain-supplied).
-      expect(desc.service).toBe("gmail");
-      expect(desc.method).toBe("send");
-      // params are the structured body the binding's toParams built (NO command-string).
-      expect(desc.params).toEqual({ to: "a@b.com", subject: "hi", body: "hello world" });
-      // env is placeholder-only (the openshell placeholder grammar) — NEVER a literal token.
-      const envValues = Object.values(desc.env ?? {});
-      expect(envValues.length).toBeGreaterThanOrEqual(1);
-      for (const v of envValues) {
-        expect(v.startsWith("openshell:resolve:env:")).toBe(true);
-        // a placeholder is NOT secret-shaped (the INPUT guard let it through).
-        expect(defaultExecSecretDetector(v)).toBe(false);
-      }
-    } finally {
-      if (prev === undefined) delete process.env[GMAIL_OAUTH_KEY_ENV];
-      else process.env[GMAIL_OAUTH_KEY_ENV] = prev;
+    // SLICE-CRED-ONELEVEL: the binding's toCredentialEnv keys by the CONSTANT NAME
+    // (GMAIL_OAUTH_KEY_ENV = "AGENTOS_GMAIL_OAUTH_KEY"), NOT by any env value — so the descriptor env is
+    // ALWAYS the one-level placeholder, independent of process.env. (The token itself lives in that env
+    // var at egress; only the PLACEHOLDER ever rides the descriptor.)
+    const res = await effect({
+      tool: "gmail.send",
+      context: validCtx,
+      args: { to: "a@b.com", subject: "hi", body: "hello world" },
+    });
+    expect(res.ok).toBe(true);
+    expect(fake.invokeCalls.length).toBe(1);
+    const desc = fake.invokeCalls[0]?.descriptor as ActionDescriptor;
+    // service/method are composer-fixed (NEVER brain-supplied).
+    expect(desc.service).toBe("gmail");
+    expect(desc.method).toBe("send");
+    // params are the structured body the binding's toParams built (NO command-string).
+    expect(desc.params).toEqual({ to: "a@b.com", subject: "hi", body: "hello world" });
+    // env is the ONE-LEVEL placeholder, keyed by the constant NAME — NEVER a literal token.
+    expect(desc.env).toEqual({
+      [GMAIL_OAUTH_KEY_ENV]: `openshell:resolve:env:${GMAIL_OAUTH_KEY_ENV}`,
+    });
+    const envValues = Object.values(desc.env ?? {});
+    expect(envValues.length).toBeGreaterThanOrEqual(1);
+    for (const v of envValues) {
+      expect(v.startsWith("openshell:resolve:env:")).toBe(true);
+      // a placeholder is NOT secret-shaped (the INPUT guard let it through).
+      expect(defaultExecSecretDetector(v)).toBe(false);
     }
   });
 
-  it("(g) UNCONFIGURED OAuth KEY => NO credential env (unauthenticated-to-allowlisted; EXEC2-until)", async () => {
+  it("(g) ONE-LEVEL: the descriptor env is the placeholder keyed by the constant NAME, regardless of process.env", async () => {
     const fake = new FakeActionConnector();
     const effect = bindingWrappedActionEffect(fake, seedActionBindings(ACTION_WIRED), {
       detectSecret: defaultExecSecretDetector,
     });
+    // Even with AGENTOS_GMAIL_OAUTH_KEY UNSET in process.env, the descriptor env is the one-level
+    // placeholder (the binding keys by the CONSTANT, not the env value). The token's presence/absence is
+    // resolved by the TRANSPORT at egress (fail-closed there), not by the descriptor builder here.
     const prev = process.env[GMAIL_OAUTH_KEY_ENV];
     delete process.env[GMAIL_OAUTH_KEY_ENV];
     try {
@@ -156,8 +156,9 @@ describe("ACT1 — bindingWrappedActionEffect: deny-by-default / strict / creden
       });
       expect(res.ok).toBe(true);
       const desc = fake.invokeCalls[0]?.descriptor as ActionDescriptor;
-      // No KEY configured => no credential env at all (fail-closed: never a literal, never a wrong env).
-      expect(Object.keys(desc.env ?? {}).length).toBe(0);
+      expect(desc.env).toEqual({
+        [GMAIL_OAUTH_KEY_ENV]: `openshell:resolve:env:${GMAIL_OAUTH_KEY_ENV}`,
+      });
     } finally {
       if (prev !== undefined) process.env[GMAIL_OAUTH_KEY_ENV] = prev;
     }
