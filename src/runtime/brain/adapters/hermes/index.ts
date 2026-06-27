@@ -125,8 +125,12 @@ export { createGoogleAccountResolver } from "./action-google-account-resolver.js
 export {
   type CapturedHttp,
   type LiveGmailPreflight,
+  // SLICE-REPORT-FIX — the HONEST send/not-sent verdict the operator script keys on (never "ok executed"
+  // on a non-send): sent === true ONLY when the effect's ActionResult.ok is true.
+  type LiveOutcomeVerdict,
   type RunGmailSelfSendOptions,
   type RunGmailSelfSendResult,
+  classifyLiveOutcome,
   liveGmailPreflight,
   runGmailSelfSend,
 } from "./action-live-gmail-runner.js";

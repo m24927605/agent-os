@@ -47,6 +47,10 @@ echo "e2e:live-gmail: driving the real governed gmail.send self-send…"
 ( cd "$ROOT" && node "$DRIVER" )
 RC=$?
 
-if [ "$RC" = 0 ]; then echo "e2e:live-gmail: ok — governed live self-send executed (confirm receipt in the test mailbox)"
-else echo "e2e:live-gmail: FAIL — live e2e exit $RC" >&2; fi
+# SLICE-REPORT-FIX — HONEST gate. The .mjs now exits 0 ONLY on a REAL send (its classifyLiveOutcome
+# verdict sent===true) and NON-ZERO on ANY non-send (guard/connector deny -> effect ok:false, or a
+# pipeline-level deny). So RC=0 here means "actually sent"; otherwise we MUST NOT claim "executed/sent" —
+# the driver already printed the precise "NOT SENT — …" reason on its own stderr.
+if [ "$RC" = 0 ]; then echo "e2e:live-gmail: ok — governed live self-send SENT (confirm receipt in the test mailbox)"
+else echo "e2e:live-gmail: FAIL — NOT SENT (live e2e exit $RC; see the driver's 'NOT SENT — …' reason above)" >&2; fi
 exit "$RC"

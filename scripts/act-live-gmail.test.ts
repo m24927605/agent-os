@@ -62,4 +62,43 @@ describe("act-live-gmail.mjs — operator driver never echoes an env value (CRED
     // It must NOT have reached the "ABOUT TO SEND" gate (no send attempted, no network).
     expect(combined.includes("ABOUT TO SEND")).toBe(false);
   });
+
+  // SLICE-REPORT-FIX — the HONEST-reporting invariant: on a NON-SEND the driver prints "NOT SENT" and
+  // exits NON-ZERO, and NEVER prints "ok … executed". We force a NON-SEND that touches NO network by
+  // setting AGENTOS_EGRESS_ALLOW to a NON-gmail host: the preflight passes ("ok", non-blank), but the
+  // governed pipeline DENIES at the policy stage (egress fold) BEFORE the effect/resolver/transport ever
+  // run — so the real userinfo GET and the real send NEVER happen (no network). The pipeline outcome is
+  // "denied@policy", classifyLiveOutcome => { sent:false }, and the driver must report NOT SENT + exit 1.
+  it("non-gmail egress => DENIED@policy (no network) => prints NOT SENT, exits non-zero, never 'ok … executed'", () => {
+    expect(existsSync(dist)).toBe(true);
+
+    const canary = tokenCanary();
+    const env = {
+      PATH: process.env.PATH ?? "",
+      AGENTOS_ACTION_LIVE: "true",
+      AGENTOS_ACTION_TEST_ACCOUNT: "throwaway@example.test",
+      // A NON-gmail host: preflight is "ok" (non-blank) but the egress fold denies at policy BEFORE the
+      // effect — so the resolver/transport never run (NO network), yet we exercise the real driver path.
+      AGENTOS_EGRESS_ALLOW: "example.test",
+      AGENTOS_GMAIL_OAUTH_KEY: canary,
+    };
+
+    const res = spawnSync("node", [driver], {
+      cwd: repoRoot,
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+
+    const combined = `${res.stdout ?? ""}${res.stderr ?? ""}`;
+    // HONEST: a non-send must report NOT SENT and exit non-zero — NEVER the misleading "ok … executed".
+    expect(combined.includes("NOT SENT")).toBe(true);
+    expect(combined.includes("ok — governed live self-send executed")).toBe(false);
+    expect(combined.includes("OUTCOME executed")).toBe(false);
+    expect(res.status).not.toBe(0);
+    // The captured outbound egress list is empty (the effect never ran), so no Authorization line either.
+    // CREDENTIAL-BLIND: the token canary must not appear anywhere in the driver output.
+    expect(combined.includes(canary)).toBe(false);
+    expect(combined.includes("ya29")).toBe(false);
+  });
 });
