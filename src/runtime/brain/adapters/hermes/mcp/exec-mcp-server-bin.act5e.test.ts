@@ -195,8 +195,15 @@ const EXEC_16 = [
   "net.fetch",
 ];
 
-/** The 4 browser tools the seeded family advertises (session.open/close are server-side, NOT tools). */
-const BROWSER_4 = ["browser.navigate", "browser.read", "browser.click", "browser.type"];
+/**
+ * The browser tools the seeded family advertises. ACT5f CLOSED the session-bootstrap gap: the governed
+ * session lifecycle (browser.session.open/close) is now ADVERTISED alongside the 4 step primitives
+ * (navigate/read/click/type), so a brain can MINT a sessionId and drive the browser end-to-end. The
+ * sessionId itself is still NEVER advertised — session.open MINTS + returns ONLY the opaque id (the moat).
+ */
+const BROWSER_STEP_4 = ["browser.navigate", "browser.read", "browser.click", "browser.type"];
+const BROWSER_SESSION_2 = ["browser.session.open", "browser.session.close"];
+const BROWSER_6 = [...BROWSER_SESSION_2, ...BROWSER_STEP_4];
 
 // ==================================================================================================
 // ENV-GATE — browserAdvertiseFromEnv (deny-by-default; mirrors actionAdvertiseFromEnv: exact "true"/"1").
@@ -219,13 +226,12 @@ describe("ACT5e — browserAdvertiseFromEnv is deny-by-default (exact true/1)", 
 //   tools/call is DENIED (unknown/unauthorized), the fake connector is NEVER called.
 // ==================================================================================================
 describe("ACT5e — advertise OFF (default): the bin is byte-identical (no browser; browser denied)", () => {
-  it("tools/list carries the 16 exec tools ONLY (no browser.navigate / read / click / type)", async () => {
+  it("tools/list carries the 16 exec tools ONLY (no browser.* tool — step OR session)", async () => {
     const { names } = await listTools({});
     expect(names.sort()).toEqual([...EXEC_16].sort());
-    for (const n of BROWSER_4) expect(names).not.toContain(n);
-    // The server-held session lifecycle is NOT a tool either (it never was advertised).
-    expect(names).not.toContain("browser.session.open");
-    expect(names).not.toContain("browser.session.close");
+    // Deny-by-default: NO browser tool when advertise-browser is OFF — neither the step primitives nor
+    // the (ACT5f) governed session lifecycle.
+    for (const n of BROWSER_6) expect(names).not.toContain(n);
   });
 
   it("advertise-actions ON but browser OFF: tools/list is exec + action ONLY (no browser leak)", async () => {
@@ -235,7 +241,7 @@ describe("ACT5e — advertise OFF (default): the bin is byte-identical (no brows
     });
     for (const n of EXEC_16) expect(names).toContain(n);
     expect(names).toContain("gmail.send");
-    for (const n of BROWSER_4) expect(names).not.toContain(n);
+    for (const n of BROWSER_6) expect(names).not.toContain(n);
   });
 
   it("a browser.navigate tools/call is DENIED (deny-by-default) — the fake connector is NEVER called", async () => {
@@ -259,13 +265,14 @@ describe("ACT5e — advertise OFF (default): the bin is byte-identical (no brows
 // ADVERTISE-ON — tools/list INCLUDES the browser tools with the correct derived inputSchema.
 // ==================================================================================================
 describe("ACT5e — advertise ON: tools/list includes the browser family (derived inputSchema)", () => {
-  it("the 16 exec tools PLUS the 4 browser tools are advertised; browser.navigate inputSchema matches its argSchema", async () => {
+  it("the 16 exec tools PLUS the 6 browser tools are advertised; browser.navigate inputSchema matches its argSchema", async () => {
     const { names, tools } = await listTools({
       browserAdvertise: true,
       browserConnector: new FakeBrowserConnector(),
     });
     for (const n of EXEC_16) expect(names).toContain(n);
-    for (const n of BROWSER_4) expect(names).toContain(n);
+    // ACT5f: the advertised browser set is the 4 step primitives PLUS the governed session lifecycle.
+    for (const n of BROWSER_6) expect(names).toContain(n);
     // browser.navigate's inputSchema is DERIVED from its strict argSchema (sessionId + url, both strings).
     const nav = tools.find((t) => t.name === "browser.navigate");
     expect(nav?.inputSchema).toEqual({
@@ -289,20 +296,36 @@ describe("ACT5e — advertise ON: tools/list includes the browser family (derive
       required: ["sessionId", "selector", "text"],
       additionalProperties: false,
     });
+    // ACT5f: browser.session.open takes NO params (it MINTS a sessionId) — its strict {} derives an empty
+    // object schema; browser.session.close takes ONLY the opaque sessionId reference to release.
+    const open = tools.find((t) => t.name === "browser.session.open");
+    expect(open?.inputSchema).toEqual({
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    });
+    const close = tools.find((t) => t.name === "browser.session.close");
+    expect(close?.inputSchema).toEqual({
+      type: "object",
+      properties: { sessionId: { type: "string" } },
+      required: ["sessionId"],
+      additionalProperties: false,
+    });
   });
 
-  it("SESSION NOT EXPOSED: even with browser ON, the session lifecycle is NOT a brain-advertised tool", async () => {
-    // The ACT5 moat: the session lifecycle is the connector's OWN server-side openSession/closeSession, NOT
-    // a tools/list entry — the brain holds ONLY an opaque sessionId reference, never a handle/cookie, and a
-    // brain cannot mint/destroy a session over MCP. ACT5e advertises EXACTLY the 4 step tools the seeders
-    // produce (navigate/read/click/type); it does NOT widen the family to expose session.open/close.
+  it("ACT5f SESSION ADVERTISED: with browser ON, the GOVERNED session lifecycle IS a tool (gap closed)", async () => {
+    // ACT5f CLOSED the ACT5e gap: session.open/close are now GOVERNED tools so a brain can MINT a sessionId
+    // and drive the browser end-to-end. The advertised browser set is EXACTLY the 6 (session.open/close +
+    // navigate/read/click/type). The MOAT holds: session.open MINTS + returns ONLY the opaque sessionId
+    // (never the handle/cookie/url) — the sessionId-as-a-tool is the lifecycle, never the actor's session.
     const { names } = await listTools({
       browserAdvertise: true,
       browserConnector: new FakeBrowserConnector(),
     });
-    expect(names.sort().filter((n) => n.startsWith("browser."))).toEqual([...BROWSER_4].sort());
-    expect(names).not.toContain("browser.session.open");
-    expect(names).not.toContain("browser.session.close");
+    expect(names.sort().filter((n) => n.startsWith("browser."))).toEqual([...BROWSER_6].sort());
+    expect(names).toContain("browser.session.open");
+    expect(names).toContain("browser.session.close");
   });
 });
 

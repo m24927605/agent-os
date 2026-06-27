@@ -604,17 +604,17 @@ function buildDeps(
   const advertiseBrowser =
     opts.browserAdvertise ?? (fake ? false : browserAdvertiseFromEnv(process.env));
   // The bin's `binWired` contains {approval, egress-allowlist, host-write-target}, so `seedBrowserRegistry`/
-  // `seedBrowserBindings` register the FULL browser family: navigate (network-egress => egress-allowlist) +
-  // read (in-sandbox) + click/type (destructive => approval). The server-held session lifecycle is NOT a
-  // tool (it is the connector's own openSession/closeSession — only the opaque sessionId flows to the brain).
-  // When advertise is OFF, we never call them — the browser family is fully absent (deny-by-default). The
-  // manifests are merged into the bin's SINGLE registry (so the authorize closure's `registry.lookup` sees
-  // their containment/requiresApproval -> the SAME egress fold / approval / external / boundary all apply,
-  // exactly as for net.fetch / gmail.send).
-  // INVARIANT: the seeders advertise EXACTLY {browser.navigate/read/click/type}. The session lifecycle is
-  // the connector's server-side openSession/closeSession (NOT a tools/list entry) — the "SESSION NOT
-  // EXPOSED" moat. ACT5e advertises what the seeders produce; governed session.open/close is a follow-up
-  // (see the slice doc for the honest live-boundary rationale).
+  // `seedBrowserBindings` register the FULL browser family: the GOVERNED SESSION LIFECYCLE
+  // session.open/close (ACT5f — in-sandbox write, benign, no extra primitive) + navigate (network-egress =>
+  // egress-allowlist) + read (in-sandbox) + click/type (destructive => approval). When advertise is OFF, we
+  // never call them — the browser family is fully absent (deny-by-default). The manifests are merged into
+  // the bin's SINGLE registry (so the authorize closure's `registry.lookup` sees their
+  // containment/requiresApproval -> the SAME egress fold / approval / external / boundary all apply, exactly
+  // as for net.fetch / gmail.send).
+  // INVARIANT (ACT5f): the seeders advertise {browser.session.open/close + navigate/read/click/type}. The
+  // governed session lifecycle lets a brain MINT a sessionId and drive the browser end-to-end; the moat is
+  // unchanged — session.open MINTS + returns ONLY the opaque sessionId (NEVER the handle/cookies/url), so
+  // the brain holds a reference, the actor holds the session. The sessionId itself is never a tool.
   const browserRegistry = advertiseBrowser ? seedBrowserRegistry(binWired) : undefined;
   const browserBindings: ReadonlyMap<string, BrowserBinding> = advertiseBrowser
     ? seedBrowserBindings(binWired)
@@ -794,10 +794,12 @@ function buildDeps(
       inputSchema: argSchemaToJsonSchema(binding.argSchema),
     }));
   }
-  // SLICE-ACT5e — when advertise-browser is ON, build the BROWSER descriptors (derived from each browser
-  // binding's STRICT argSchema via the SAME `argSchemaToJsonSchema` converter — no hand-written drift). The
-  // server-held session lifecycle is NOT a descriptor (only the opaque sessionId reference flows). OFF =>
-  // `undefined` => tools/list carries no browser tool (byte-identical).
+  // SLICE-ACT5e/ACT5f — when advertise-browser is ON, build the BROWSER descriptors (derived from each
+  // browser binding's STRICT argSchema via the SAME `argSchemaToJsonSchema` converter — no hand-written
+  // drift). ACT5f's governed session.open/close ARE descriptors now (so a brain can MINT a sessionId);
+  // session.open's schema is the empty `{}` (it takes no params — it MINTS), session.close's is `{sessionId}`.
+  // The minted sessionId is surfaced ONLY in the session.open RESULT (the moat), never as an input field.
+  // OFF => `undefined` => tools/list carries no browser tool (byte-identical).
   if (advertiseBrowser) {
     browserDescriptors = [...browserBindings].map(([name, binding]) => ({
       name,
