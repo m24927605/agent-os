@@ -29,8 +29,9 @@ if [ "${AGENTOS_ACTION_LIVE:-}" = "" ] \
   exit 0
 fi
 
-# CREDENTIAL-BLIND: report only the ENV KEY NAME, never the token value behind it.
-echo "e2e:live-gmail: live env present (token KEY = ${AGENTOS_GMAIL_OAUTH_KEY}) — running the governed live self-send…"
+# CREDENTIAL-BLIND: name only the fixed ENV VARIABLE NAME constant, NEVER its value (which a user may have
+# mis-populated with a secret). The .mjs's liveGmailPreflight does the real, fixed-reason validation.
+echo "e2e:live-gmail: live env present (token KEY named by AGENTOS_GMAIL_OAUTH_KEY) — running the governed live self-send…"
 
 echo "e2e:live-gmail: building TS (dist)…"
 ( cd "$ROOT" && pnpm run build >/dev/null 2>&1 ) || { echo "e2e:live-gmail: FAIL — TS build" >&2; exit 1; }

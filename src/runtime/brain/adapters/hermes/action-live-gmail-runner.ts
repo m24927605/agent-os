@@ -289,5 +289,85 @@ export async function runGmailSelfSend(
   return { outcome, appended, trace, http: captured };
 }
 
+// ================================================================================================
+// SLICE-CRED-LEAK-FIX — liveGmailPreflight: the credential-blind env gate for the operator scripts
+// (scripts/e2e-live-gmail.sh -> scripts/act-live-gmail.mjs). It replaces the inline env checks whose
+// diagnostics historically echoed an env VALUE (the user mis-pasted a token into AGENTOS_GMAIL_OAUTH_KEY,
+// the BLOCKED diagnostic printed `env[${oauthKey}]` -> token leak). EVERY reason here is assembled from
+// FIXED string literals ONLY — it NEVER concatenates any env VALUE — so the diagnostic itself can never
+// become a credential sink. The only env identifiers that ever appear in a reason are the fixed VARIABLE
+// NAMES (e.g. the literal "AGENTOS_GMAIL_OAUTH_KEY"), never their values.
+// ================================================================================================
+
+/** The four operator-opt-in gate vars (all must be set+non-blank to attempt a live send). */
+const LIVE_GATE_VARS = [
+  "AGENTOS_ACTION_LIVE",
+  "AGENTOS_ACTION_TEST_ACCOUNT",
+  GMAIL_OAUTH_KEY_ENV, // = "AGENTOS_GMAIL_OAUTH_KEY"
+  "AGENTOS_EGRESS_ALLOW",
+] as const;
+
+/** A safe env-var NAME shape — must match `toCredentialEnv`'s SAFE_ACTION_ENV_KEY (an UPPERCASE C-id). */
+const SAFE_ENV_KEY_NAME = /^[A-Z][A-Z0-9_]*$/;
+
+/** The fixed, zero-interpolation reason strings. NONE of these embed any env VALUE. */
+const PREFLIGHT_REASON = {
+  skip:
+    "SKIP (env not set) — set AGENTOS_ACTION_LIVE + AGENTOS_ACTION_TEST_ACCOUNT + " +
+    "AGENTOS_GMAIL_OAUTH_KEY + AGENTOS_EGRESS_ALLOW to run a real self-send",
+  blockedBadKey:
+    "BLOCKED — AGENTOS_GMAIL_OAUTH_KEY must be the NAME of the env var holding the token " +
+    "(e.g. GMAIL_TOKEN), not the token itself (fail-closed; the value is intentionally not shown)",
+  blockedTokenUnset:
+    "BLOCKED — the token env var named by AGENTOS_GMAIL_OAUTH_KEY is not set (fail-closed; " +
+    "the name's value and the token are intentionally not shown)",
+  ok: "OK — live env present (token resolves at egress; the operator running the script is the confirmation)",
+} as const;
+
+/** The result of {@link liveGmailPreflight} — a status + a FIXED-string reason (never an env value). */
+export interface LiveGmailPreflight {
+  readonly status: "ok" | "skip" | "blocked";
+  /** A FIXED enum-like reason assembled from string literals ONLY — NEVER any env VALUE. */
+  readonly reason: string;
+}
+
+/**
+ * Credential-blind preflight for the operator live-gmail scripts. PURE: reads only the supplied `env`,
+ * returns a status + a FIXED-string reason. ⚠️ The reason is assembled from string literals ONLY — it
+ * NEVER interpolates any env VALUE (so a user who mis-pastes a token into AGENTOS_GMAIL_OAUTH_KEY can
+ * never have it echoed). Logic (deny-by-default):
+ *   - any gate var unset/blank      => "skip"   (PREFLIGHT_REASON.skip)
+ *   - AGENTOS_GMAIL_OAUTH_KEY VALUE is not a valid env-var NAME (e.g. a `ya29.…` token) => "blocked"
+ *     (PREFLIGHT_REASON.blockedBadKey — the teaching reason pointing at the two-level setup)
+ *   - the token env NAMED by that value is unset/blank => "blocked" (PREFLIGHT_REASON.blockedTokenUnset)
+ *   - else => "ok" (PREFLIGHT_REASON.ok)
+ */
+export function liveGmailPreflight(env: Record<string, string | undefined>): LiveGmailPreflight {
+  // 1) All four opt-in gate vars must be set + non-blank, else SKIP (never echo any value).
+  for (const name of LIVE_GATE_VARS) {
+    const v = env[name];
+    if (v === undefined || v.trim().length === 0) {
+      return { status: "skip", reason: PREFLIGHT_REASON.skip };
+    }
+  }
+
+  // 2) AGENTOS_GMAIL_OAUTH_KEY must be the NAME of an env var (uppercase C-identifier), NOT a token.
+  //    A token-shaped value (e.g. `ya29.…`, containing `.`) fails this and BLOCKS — without echoing it.
+  const keyName = (env[GMAIL_OAUTH_KEY_ENV] ?? "").trim();
+  if (!SAFE_ENV_KEY_NAME.test(keyName)) {
+    return { status: "blocked", reason: PREFLIGHT_REASON.blockedBadKey };
+  }
+
+  // 3) The token env var NAMED by AGENTOS_GMAIL_OAUTH_KEY must itself be set + non-blank, else BLOCK
+  //    (never echo the name's value nor the absent token).
+  const token = env[keyName];
+  if (token === undefined || token.trim().length === 0) {
+    return { status: "blocked", reason: PREFLIGHT_REASON.blockedTokenUnset };
+  }
+
+  // 4) Fully configured (two-level, token present) => OK.
+  return { status: "ok", reason: PREFLIGHT_REASON.ok };
+}
+
 /** Re-export the captured-request shape for callers that want to inspect the egress. */
 export type { HttpActionRequest };

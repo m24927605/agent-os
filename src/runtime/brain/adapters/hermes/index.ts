@@ -124,8 +124,10 @@ export { createGoogleAccountResolver } from "./action-google-account-resolver.js
 // network); the operator runner injects globalThis.fetch (live egress). PURE ADDITION.
 export {
   type CapturedHttp,
+  type LiveGmailPreflight,
   type RunGmailSelfSendOptions,
   type RunGmailSelfSendResult,
+  liveGmailPreflight,
   runGmailSelfSend,
 } from "./action-live-gmail-runner.js";
 export { makeArgsCredentialScreen } from "./args-credential-screen.js";

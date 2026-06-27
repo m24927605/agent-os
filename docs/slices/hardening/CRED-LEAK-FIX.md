@@ -32,8 +32,9 @@ live drive 時 `scripts/e2e-live-gmail.sh:33`(`token KEY = ${AGENTOS_GMAIL_OAUTH
 - (script 層)`.test`:以 canary `AGENTOS_GMAIL_OAUTH_KEY` 跑 `.mjs`/`.sh`(fail-closed,不送)→ 擷取 stdout+stderr **不含 canary**。
 - byte-identical:既有 runner/transport/全測不變綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(`liveGmailPreflight` 固定-reason 零內插 + key-name 驗證 + `.sh`/`.mjs` 改用它;canary env 值絕不入輸出;misconfig→blocked-不印;byte-identical;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`liveGmailPreflight(env)→{status,reason}`(reason 固定字面常數 `PREFLIGHT_REASON`,零 env 值內插;驗 `AGENTOS_GMAIL_OAUTH_KEY` 須 `^[A-Z][A-Z0-9_]*$`,token-shape→blocked+教學 reason)+ `.mjs`/`.sh` 改用它、移除所有 env 值 echo。RED → verify **exit 0**(1677 passed + 29 skipped;runner 16 + script-spawn 1 測;**現行 .mjs 洩漏 canary 被 spawn 測抓到=RED**;interpolate-value mutation 翻 2)。獨立 Opus4.8 review **PASS,零 findings**:**comprehensive sweep 兩 script 所有 echo/console 路徑零 env 值**(成功路徑 trace/outcome 皆 redactSecrets、Authorization [REDACTED]、response body 不 echo)、preflight reason leak-proof(canary 各 slot 不入)、**真 .sh canary 實測 grep CANARY=0/ya29=0/無 ABOUT-TO-SEND/exit 2 blocked**、fail-closed + key-name 驗證、byte-identical 成功路徑、無新依賴。
+- **洩漏破口已封**。⚠️ **已洩漏的 token 仍須使用者撤銷**(本刀不能收回 transcript)。正確設法 = 兩層(`AGENTOS_GMAIL_OAUTH_KEY`=名字 如 `GMAIL_TOKEN`、`GMAIL_TOKEN`=真 token)。後續可考慮改名 `AGENTOS_GMAIL_OAUTH_KEY_ENV`。
 
 ## (5) Rollback / Depends-on / 誠實前提 / 後續
 - Rollback:`git revert`(script 訊息 + 一個 preflight 函式)。
