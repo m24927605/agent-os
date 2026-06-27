@@ -33,8 +33,9 @@
 - mutation:click manifest 可設 requiresApproval:false(若繞 superRefine)→ approval gate 失效測翻;type 略過 input guard → literal-secret 測翻;type 略過 egress 解析 → 真值不達 connector(功能翻)/或 placeholder 外洩測翻。
 - byte-identical:ACT5a/b + exec/CAP/ACT1-4 全測續綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(browser.click/type manifest+binding〔destructive→approval〕+ FakeBrowserConnector click/type + `resolveCredentialText` + 過 REAL pipeline join;approval 真 gate〔無 pre-auth→denied@approval〕;type credential-blind〔placeholder egress 解析、literal secret 擋、真值不入 sink〕;selector/text strict;destructive⇒requiresApproval superRefine;session 不外露;byte-identical;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`BrowserPrimitive += click/type` + `resolveCredentialText`(placeholder→env@egress,fail-closed)+ FakeBrowserConnector click/type(type 在 egress 解析、resolved 值只進 private lastTyped)+ `browser.click`/`browser.type` manifest(in-sandbox、destructive⇒requiresApproval)+binding(strict;type literal-secret→input guard deny)+ 條件註冊(需 approval wired)+ 過 REAL pipeline join。RED → verify **exit 0**(1748 passed + 29 skipped;26 測;**requiresApproval-off / skip-input-guard / leak-resolved-value 各翻**)。獨立 Opus4.8 review **PASS,零 findings**:**type credential-blind**(resolved canary 只在 peekLastTyped〔actor〕,不入 result/steps/WORM/projection/trace/response;literal secret 擋;missing-env fail-closed)、destructive→approval per-step(superRefine 強制;no-pre-auth→denied@approval connector 不呼叫)、selector/text strict 無注入、session 不外露、單一 edge、commit-before-effect、byte-identical(ACT5a/b + 677 sibling 綠)。
+- **in-repo 瀏覽器原語完成**(navigate/read/click/type + session)。**誠實**:fake browser;真執行 = ACT5d 沙盒 Chromium;click/type 效果不透明 → approval + session-allowlist + sandbox + WORM 層層,substrate PRIMARY;type 憑證 placeholder/egress credential-blind。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 click/type)。

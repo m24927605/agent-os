@@ -156,18 +156,25 @@ export {
   type BrowserStep,
   type BrowserStepResult,
   type FakeBrowserConnectorOptions,
+  type ResolveTextError,
+  type ResolvedText,
   type SanitizedContent,
   DEFAULT_READ_MAX_BYTES,
   FakeBrowserConnector,
   bindingWrappedBrowserEffect,
+  resolveCredentialText,
   returnContentSanitizer,
 } from "./browser-closed-loop.js";
 export { buildBrowserProjectionForCall } from "./browser-projection-for-call.js";
 export {
+  browserClickBinding,
+  browserClickManifest,
   browserNavigateBinding,
   browserNavigateManifest,
   browserReadBinding,
   browserReadManifest,
+  browserTypeBinding,
+  browserTypeManifest,
   seedBrowserBindings,
   seedBrowserRegistry,
 } from "./browser-seed-tools.js";
