@@ -39,9 +39,9 @@
 - byte-identical:既有全測綠。
 - **live(operator,非 verify)**:`e2e:live-gmail` 設好 env → 真寄一封 self-send → 印 message id。env 未設 → skip。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(真 HttpActionTransport〔resolveCredential fail-closed + request〕+ 真 GoogleAccountResolver〔userinfo parse〕+ runner wiring〔governed pipeline + guard + connector + fake transport/resolver〕;credential-blind 端到端〔canary 不入 sink〕;egress/approval/commit-before-effect/boundary/guard 全程;fail-closed;verify 不打網路;byte-identical;mutation 證;depcruise/secret-scan clean;無新依賴〔node fetch〕);獨立 Opus 4.8 review PASS。
-- [ ] **live drive(operator + 明確確認):** `e2e:live-gmail` 設 env(token 不入對話)→ 真寄 self-send → 收件確認。送前確認收件人/內容。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged,verify 部分)**:真 `createHttpActionTransport`(`resolveCredentialHeaders` egress 解析 placeholder + fail-closed,fetch 注入式)+ 真 `createGoogleAccountResolver`(userinfo→email)+ `runGmailSelfSend`(走真 governed pipeline)+ `scripts/act-live-gmail.mjs`/`e2e-live-gmail.sh` + `e2e:live-gmail`。RED → verify **exit 0**(1666 passed + 29 skipped;23 新測;skip-missing-env mutation 翻 4)。獨立 Opus4.8 review **PASS,零阻斷**:**verify 完全不打網路**、**credential-blind 端到端**(canary 不入 WORM/boundary/projection/trace、連 placeholder 都不入、error 靜態、.mjs REDACTED)、fail-closed(missing-env 不 fetch、env-unset SKIP、guard 拒→不送)、**runner 走真 runGovernedToolCall**(非弱化)、byte-identical、無新依賴。2 NIT(runtime-direct transport in-memory 持有 resolved token〔不入任何 sink,EXEC2 follow-up〕;placeholder 解任何 header 值〔連接器只用 Authorization〕)。
+- [ ] **live drive(operator + 明確確認,PENDING):** `source ~/.env`(token 不入對話)→ `e2e:live-gmail` → 真寄 self-send(mrfed1913→自己)→ 收件確認。**送前明確確認收件人/內容**。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 transport + resolver + runner)。
