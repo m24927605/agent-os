@@ -238,6 +238,18 @@ export interface ExecMcpServerDeps {
    */
   readonly actionDescriptors?: ReadonlyArray<McpToolDescriptor>;
   /**
+   * SLICE-ACT5e — OPTIONAL extra tool descriptors for the BROWSER family, MERGED into `tools/list` AFTER
+   * the exec bindings descriptors AND the action descriptors. The bin uses this to advertise the browser
+   * family (browser.navigate/read/click/type) when `AGENTOS_ADVERTISE_BROWSER` is on — each descriptor's
+   * `inputSchema` is DERIVED by the bin via `argSchemaToJsonSchema(binding.argSchema)` (the SAME no-drift
+   * converter the exec/action paths use), never hand-written. ABSENT or EMPTY => byte-identical (no browser
+   * tool in tools/list); the array is APPENDED after the action descriptors so the exec/action ordering is
+   * unchanged when it is absent. ADVERTISEMENT-ONLY: execution still flows through the SINGLE governed edge
+   * (`runGovernedToolCall` -> `deps.effect`'s 3-way dispatcher); an advertised name with no governed routing
+   * is denied there.
+   */
+  readonly browserDescriptors?: ReadonlyArray<McpToolDescriptor>;
+  /**
    * SLICE-ACT4 — OPTIONAL injected effect DISPATCHER (the SINGLE execution edge's effect). When PRESENT it
    * REPLACES the default `bindingWrappedExecEffect(substrate, sandboxId, bindings, ...)` the server builds
    * — the bin injects a dispatcher `(tc) => actionBindings.has(tc.tool) ? <action effect>(tc) : <exec
@@ -317,6 +329,15 @@ export function createExecMcpServer(deps: ExecMcpServerDeps): ExecMcpServer {
   // edge below, so an advertised tool with no governed routing is denied there (never a bypass).
   if (deps.actionDescriptors !== undefined) {
     for (const d of deps.actionDescriptors) descriptors.push(d);
+  }
+  // SLICE-ACT5e — MERGE the OPTIONAL browser descriptors AFTER the action descriptors (the THIRD family).
+  // Absent/empty => byte-identical (no browser tool advertised); present => the browser family is advertised
+  // ALONGSIDE exec + action. Each `inputSchema` is derived by the bin via the SAME `argSchemaToJsonSchema`
+  // converter (no hand-written drift). ADVERTISEMENT-ONLY: every tools/call still routes through the single
+  // governed edge below (the 3-way dispatcher), so an advertised browser tool with no governed routing is
+  // denied there (never a bypass).
+  if (deps.browserDescriptors !== undefined) {
+    for (const d of deps.browserDescriptors) descriptors.push(d);
   }
 
   return {

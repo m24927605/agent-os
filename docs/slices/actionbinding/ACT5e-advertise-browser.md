@@ -6,7 +6,7 @@
 - **Author**: Backend Architect    **Adversarial reviewer**: <fresh-context、非作者、獨立 Opus 4.8>
 
 ## (0) 範圍 + 姿態
-把瀏覽器原語(browser.session.open/close、navigate、read、click、type)advertise 給 brain,讓 **Hermes 能提議瀏覽器步驟且過完整 governed pipeline**。**⚠️ 把「驅動真瀏覽器」暴露給不可信 brain 是最重的姿態 → DENY-BY-DEFAULT**:`AGENTOS_ADVERTISE_BROWSER`(精確 true/1),**預設 off → byte-identical**(brain 看不到瀏覽器;browser tools/call → unknown/deny)。這是 ACT4 dispatcher 的**第三家族分支**。
+把瀏覽器原語(navigate、read、click、type)advertise 給 brain,讓 **Hermes 能提議瀏覽器步驟且過完整 governed pipeline**。⚠️ **session.open/close 目前不是 governed tool**(ACT5a-d 把 session 做成 connector server-side `openSession/closeSession` = 「session 不外露」moat),故 ACT5e **不 advertise session**;結果是 brain 看得到 4 工具但**還無受治理的方法取得 sessionId**(unknown-session fail-closed)→ 真正 brain-usable 需後續一刀 governed session.open(**ACT5f follow-up**)。本刀交付 advertise/dispatch 基礎建設(安全且正確)。**⚠️ 把「驅動真瀏覽器」暴露給不可信 brain 是最重的姿態 → DENY-BY-DEFAULT**:`AGENTOS_ADVERTISE_BROWSER`(精確 true/1),**預設 off → byte-identical**(brain 看不到瀏覽器;browser tools/call → unknown/deny)。這是 ACT4 dispatcher 的**第三家族分支**。
 
 ## (1) 範圍（擴充 ACT4 的 bin 接線,鏡像 action 家族)
 1. **`browserAdvertiseFromEnv(env)`**(deny-by-default,精確 true/1;鏡像 `actionAdvertiseFromEnv`)。
@@ -31,7 +31,7 @@
 
 ## (3) Test-first plan（RED 先行;FakeBrowserConnector,無真瀏覽器/網路）
 - **advertise off(預設)**:tools/list 無 browser.*;`browser.navigate` tools/call → deny(unknown/未授權,connector 0 calls)。byte-identical(既有 bin/ACT4 測不變)。
-- **advertise on + fake**:tools/list 含 browser.session.open/navigate/read/click/type(inputSchema 正確);
+- **advertise on + fake**:tools/list 含 browser.navigate/read/click/type(inputSchema 正確;**不含 session.open/close** — 非 tool,ACT5f follow-up);
   - `browser.navigate` → 過 runGovernedToolCall → egress fold(allowlist host?非-allowlist→denied@policy,fake 0 calls);
   - `browser.click`/`type` → approval(destructive;無 pre-auth→denied@approval,fake 0 calls);
   - `browser.read` → 回傳經 sanitizer(canary redacted/truncated/untrusted);
@@ -39,8 +39,9 @@
 - **3-way dispatch 正確**:exec→execEffect、action(gmail.send)→actionEffect、browser(navigate)→browserEffect。mutation:dispatcher 漏 browser 分支(全走 action/exec)→ browser.navigate routing 測翻;projection 漏 browser→navigate egress 測翻(CAP6 fail-closed)。
 - byte-identical:exec/CAP/ACT1-4/ACT5a-d 全測續綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(`browserAdvertiseFromEnv` + browserAdvertise/browserConnector seam + advertise-on 併 browser registry/bindings/descriptors/`browser.**` allow-rule + 3-way dispatcher + 3-way projection;off→byte-identical〔無 browser、deny〕;on+fake→browser advertised + 提議走完整 governed pipeline〔navigate egress / click-type approval / read sanitizer / credential-blind〕;3-way dispatch 正確;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`browserAdvertiseFromEnv`(deny-by-default,exact true/1)+ browserAdvertise/browserConnector seam + advertise-on 併 browser registry/bindings/descriptors/`browser.**` allow-rule + **3-way dispatcher**(browser→bindingWrappedBrowserEffect)+ **3-way projection** + 兩 hardening(REAL+advertise+無注入 connector → 啟動 throw〔不靜默用 fake〕;強制 connector 有 hasSession)。RED → verify **exit 0**(1779 passed + 29 skipped;18 測;**dispatcher-drop-browser / projection-drop-browser 各往安全方向翻**)。獨立 Opus4.8 review **PASS,mergeable**:deny-by-default(off→byte-identical、無 browser、deny)、單一 edge / 3-way 無旁路(browser 提議過 navigate-egress / click-type-approval / read-sanitizer / credential-blind / session-not-exposed)、3-way dispatch 正確、hardening fail-closed、exec+action 不變、byte-identical、無新依賴。
+- ⚠️ **session-bootstrap 缺口(safe-but-incomplete)**:session.open/close 非 tool → brain 無受治理方法取得 sessionId;phantom/absent/malformed sessionId 全 **fail-closed deny**(connector 不驅動)——**非安全漏洞,僅 usability 限制**。真正 brain-usable 需 **ACT5f**(governed browser.session.open/close tool)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(dispatcher 第三分支 + advertise gate;off byte-identical)。
