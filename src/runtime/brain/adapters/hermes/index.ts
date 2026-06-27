@@ -141,6 +141,36 @@ export {
   type ProjectableCall,
   buildProjectionForCall,
 } from "./governance-projection-for-call.js";
+// SLICE-ACT5a+b — the BROWSER sub-family: a DISTINCT, STATEFUL, screen-driven governed UI binding (sibling
+// to the stateless ActionBinding family; the exec/action seams are UNCHANGED). The brain holds ONLY an
+// opaque server-held sessionId (never a handle/cookie); browser.navigate is per-navigation egress-gated;
+// browser.read's page content is run through the returnContentSanitizer (data-OUT gate: redact + bound +
+// untrusted) BEFORE it reaches the brain. Fake-proven only (no real browser/network; real Chromium = ACT5d;
+// NOT advertised to the brain yet = ACT5e). The AgtScope/ManifestLookup/ProjectableCall types are already
+// surfaced above (family-agnostic) — NOT re-exported here to avoid a duplicate-name conflict on the barrel.
+export {
+  type BindingWrappedBrowserEffectOptions,
+  type BrowserBinding,
+  type BrowserConnector,
+  type BrowserPrimitive,
+  type BrowserStep,
+  type BrowserStepResult,
+  type FakeBrowserConnectorOptions,
+  type SanitizedContent,
+  DEFAULT_READ_MAX_BYTES,
+  FakeBrowserConnector,
+  bindingWrappedBrowserEffect,
+  returnContentSanitizer,
+} from "./browser-closed-loop.js";
+export { buildBrowserProjectionForCall } from "./browser-projection-for-call.js";
+export {
+  browserNavigateBinding,
+  browserNavigateManifest,
+  browserReadBinding,
+  browserReadManifest,
+  seedBrowserBindings,
+  seedBrowserRegistry,
+} from "./browser-seed-tools.js";
 export {
   type HermesMcpAddOptions,
   buildHermesMcpAddArgv,

@@ -41,8 +41,9 @@
 - mutation:read 不過 sanitizer(原樣回)→ canary 外洩測翻紅。
 - byte-identical:既有 exec/CAP/ACT1-4 全測續綠。
 
-## (4) Definition of Done（待實測填)
-- [ ] RED → verify exit 0(BrowserConnector port + FakeBrowserConnector + session(server-held sessionId)+ browser.navigate(egress per-navigation)+ browser.read(returnContentSanitizer:redact+bound+untrusted)+ 過 REAL runGovernedToolCall join;未知 sessionId/host deny;**read canary 不外洩(redacted/truncated/untrusted)**;session handle 不外露;credential-blind;byte-identical;mutation 證(skip-redact 翻、skip-egress 翻);depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`browser-closed-loop.ts`(BrowserConnector + FakeBrowserConnector〔server-held session〕+ `returnContentSanitizer`〔redact+bound+untrusted〕+ `bindingWrappedBrowserEffect`〔fail-closed gates + read 結果 sanitize〕)+ `browser-seed-tools.ts`(browser.navigate〔egress,複用 isAllowedFetchUrl + hostname projector〕/browser.read〔read〕)+ `browser-projection-for-call.ts` + join。`isAllowedFetchUrl` 改 export 共用(body byte-identical)。RED → verify **exit 0**(1722 passed + 29 skipped;25 browser 測;**skip-redact/skip-egress/drop-read-sanitization 各翻**)。獨立 Opus4.8 review **PASS,零 findings**:**read 資料-OUT gate**(canary redacted/truncated/untrusted、raw 不經 result/WORM/trace 任何旁路)、navigate per-navigation egress(deny-all、crafted-url〔userinfo〕無法繞、投影 host==實連 host)、session 不外露(opaque bsess_ id、handle/cookies/url 不漏、unknown-session deny)、單一 edge 無旁路、credential-blind IN、byte-identical(net.fetch 不變)、commit-before-effect + boundary。
+- **誠實**:fake browser 無真瀏覽器/網路(真沙盒 Chromium = ACT5d);read host-allowlist 靠 navigate egress-gate + substrate 真邊界(redirect/embed = substrate PRIMARY);redact best-effort(非形狀 PII 殘留)→ host-allowlist 為主防線。未 advertise 給 brain(ACT5e)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(純加 browser 模組 + join 測)。

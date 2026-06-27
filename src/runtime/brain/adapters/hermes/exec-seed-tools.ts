@@ -536,8 +536,12 @@ const PLAIN_DNS_HOST = /^(?:localhost|(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]*[A-Za-z][
  *  - userinfo (`user:pass@host`) -> denied (a credential never rides the URL — use the toEnv placeholder).
  * Requiring a plain DNS host means EVERY admitted url's projected token == its curl connect host AND is
  * subject to the egress decision. Pure; fail-closed on any throw.
+ *
+ * EXPORTED (SLICE-ACT5a) so the BROWSER sub-family (`browser.navigate`) REUSES the IDENTICAL url
+ * validator net.fetch / git.push use — one https-only / plain-DNS-host / no-userinfo / no-IP-literal
+ * contract, never a parallel re-implementation that could drift.
  */
-function isAllowedFetchUrl(raw: string): boolean {
+export function isAllowedFetchUrl(raw: string): boolean {
   let u: URL;
   try {
     u = new URL(raw);
