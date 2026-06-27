@@ -26,7 +26,8 @@
 - **APIs & Services → OAuth consent screen**
   - User Type:**External** → Create
   - App name / User support email / Developer contact:填測試帳號 email 即可
-  - **Scopes**:Add or Remove Scopes → 只加最小必要:
+  - **Scopes**:Add or Remove Scopes → 最小必要 + **identity(必加,guard 用 userinfo 驗證作用帳號 ∈ allowlist)**:
+    - **`openid`** + **`email`**(或 `https://www.googleapis.com/auth/userinfo.email`)— ⚠️ **必加**:`AccountResolver` 打 `oauth2/v3/userinfo` 取帳號 email 餵 guard 比對 `AGENTOS_ACTION_TEST_ACCOUNT`;少了它 userinfo 回 401 → 帳號驗證失敗 → fail-closed 拒送(實測踩過)。
     - `https://www.googleapis.com/auth/gmail.send`(寄信)
     - `https://www.googleapis.com/auth/drive.readonly`(讀檔;或更窄的 `drive.file`)
     - `https://www.googleapis.com/auth/calendar.events`(行事曆)
@@ -43,7 +44,8 @@
 ## 5. 取得 token(最快:OAuth Playground)
 - 開 `developers.google.com/oauthplayground`
 - 右上**齒輪** → 勾 **Use your own OAuth credentials** → 貼你的 Client ID + Client secret
-- 左側選 scopes(Gmail API v1 → `gmail.send`;Drive API v3 → 對應 readonly;Calendar API v3)→ **Authorize APIs**
+- 左側選 scopes → **必含 `openid` + `email`**(guard 驗證帳號用)+ Gmail API v1 `gmail.send`(+ 視需要 Drive/Calendar)→ **Authorize APIs**
+  - 在「Input your own scopes」框可直接貼:`openid email https://www.googleapis.com/auth/gmail.send`
 - 跳轉時**用 mrfed1913 登入並同意**
 - 回到 Playground → **Exchange authorization code for tokens** → 拿到:
   - **access_token**(`ya29.…`,約 1 小時有效)
