@@ -29,8 +29,9 @@
 - mutation:toCredentialEnv 又改回讀「值」當 key → 一層測翻紅。
 - byte-identical:既有 transport/connector/guard/ACT 全測續綠(必要處更新 key-name 期望)。
 
-## (4) Definition of Done（待實測填）
-- [ ] RED → verify exit 0(toCredentialEnv 一層〔常數名當 key〕+ preflight 改非空檢查〔不驗識別字、仍零 echo〕;`AGENTOS_GMAIL_OAUTH_KEY=<token>` 端到端解析;credential-blind 不變〔canary 不入 sink〕;fail-closed〔未設→blocked〕;byte-identical;mutation 證;depcruise/secret-scan clean;無新依賴);獨立 Opus 4.8 review PASS。
+## (4) Definition of Done（實測）
+- [x] **DONE（merged)**:`toCredentialEnv(GMAIL_OAUTH_KEY_ENV/GCAL_OAUTH_KEY_ENV)`(常數名當 placeholder key;gmail.send/gmail.search/calendar.events.create)+ `liveGmailPreflight` 改非空閘(移除識別字驗證 + 兩層 teaching 分支;仍零 echo)+ 移除 dead 兩層 process.env mutation。RED → verify **exit 0**(1681 passed + 29 skipped;RED 前 10 failed;**re-read-value-as-key mutation 翻 3**)。獨立 Opus4.8 review **PASS**:**一層下零-echo 仍成立**(真 .sh skip-config canary grep=0、preflight reason ok/skip 皆 value-free)、一層端到端(`AGENTOS_GMAIL_OAUTH_KEY=<token>`→egress Authorization)、credential-blind 不變(canary 只在 transport egress、不入 WORM/projection/trace)、fail-closed、byte-identical(transport/connector/guard/pipeline UNCHANGED)、無新依賴。footgun 移除。
+- **live 仍需有效 token**(ya29. ~1h,過期→Google 401,非 bug)。
 
 ## (5) Rollback / Depends-on / 誠實前提
 - Rollback:`git revert`(toCredentialEnv key 來源 + preflight 檢查)。

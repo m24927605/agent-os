@@ -83,9 +83,16 @@ export interface RunGmailSelfSendOptions {
   readonly testAccount: string;
   /** The egress host allowlist (the fold gates the gmail host). */
   readonly egressAllow: readonly string[];
-  /** The OAuth credential KEY the gmail.send binding resolves a placeholder for. */
+  /**
+   * SLICE-CRED-ONELEVEL: the OAuth TOKEN (a secret). It belongs in `env` under the constant key
+   * `AGENTOS_GMAIL_OAUTH_KEY`, where the transport resolves it at egress. (Retained for the operator
+   * driver's call shape; the binding keys its placeholder by the constant NAME, not by this value.)
+   */
   readonly oauthKey: string;
-  /** The env the REAL transport resolves the placeholder against at egress (carries the token). */
+  /**
+   * The env the REAL transport resolves the placeholder against at egress. ONE-LEVEL:
+   * `env["AGENTOS_GMAIL_OAUTH_KEY"]` DIRECTLY HOLDS the token.
+   */
   readonly env: Record<string, string>;
   /**
    * TEST override for the resolved acting account. When provided, the resolver is a fixed-answer fake (the
@@ -264,42 +271,41 @@ export async function runGmailSelfSend(
     },
   };
 
-  // The gmail.send binding reads `process.env[GMAIL_OAUTH_KEY_ENV]` to name the per-service credential KEY,
-  // so the descriptor carries the `openshell:resolve:env:<KEY>` placeholder for that KEY. Point it at
-  // `opts.oauthKey` for this run, then RESTORE (so the runner never mutates the ambient env globally).
-  const prevOauthKey = process.env[GMAIL_OAUTH_KEY_ENV];
-  process.env[GMAIL_OAUTH_KEY_ENV] = opts.oauthKey;
-  let outcome: GovernedOutcome<{ id: number }>;
-  try {
-    outcome = await runGovernedToolCall(deps, {
-      tool: "gmail.send",
-      context: RUN_CONTEXT,
-      args: {
-        to: opts.testAccount,
-        subject: "agent-os live test",
-        body: "agent-os governed live self-test",
-      },
-    });
-  } finally {
-    if (prevOauthKey === undefined) delete process.env[GMAIL_OAUTH_KEY_ENV];
-    else process.env[GMAIL_OAUTH_KEY_ENV] = prevOauthKey;
-  }
+  // SLICE-CRED-ONELEVEL: the gmail.send binding keys its placeholder by the CONSTANT NAME
+  // `GMAIL_OAUTH_KEY_ENV` (= "AGENTOS_GMAIL_OAUTH_KEY"), so the descriptor ALWAYS carries
+  // `openshell:resolve:env:AGENTOS_GMAIL_OAUTH_KEY` — independent of process.env. The transport resolves
+  // that placeholder against `opts.env` (where AGENTOS_GMAIL_OAUTH_KEY DIRECTLY HOLDS the token), the
+  // single last-mile resolution point. `opts.oauthKey` (the token) belongs in `opts.env` under that key;
+  // the runner no longer mutates the ambient process.env (the old two-level indirection is gone).
+  const outcome: GovernedOutcome<{ id: number }> = await runGovernedToolCall(deps, {
+    tool: "gmail.send",
+    context: RUN_CONTEXT,
+    args: {
+      to: opts.testAccount,
+      subject: "agent-os live test",
+      body: "agent-os governed live self-test",
+    },
+  });
   trace.push({ stage: "outcome", detail: outcome.status });
 
   return { outcome, appended, trace, http: captured };
 }
 
 // ================================================================================================
-// SLICE-CRED-LEAK-FIX — liveGmailPreflight: the credential-blind env gate for the operator scripts
-// (scripts/e2e-live-gmail.sh -> scripts/act-live-gmail.mjs). It replaces the inline env checks whose
-// diagnostics historically echoed an env VALUE (the user mis-pasted a token into AGENTOS_GMAIL_OAUTH_KEY,
-// the BLOCKED diagnostic printed `env[${oauthKey}]` -> token leak). EVERY reason here is assembled from
-// FIXED string literals ONLY — it NEVER concatenates any env VALUE — so the diagnostic itself can never
-// become a credential sink. The only env identifiers that ever appear in a reason are the fixed VARIABLE
-// NAMES (e.g. the literal "AGENTOS_GMAIL_OAUTH_KEY"), never their values.
+// SLICE-CRED-ONELEVEL — liveGmailPreflight: the credential-blind env gate for the operator scripts
+// (scripts/e2e-live-gmail.sh -> scripts/act-live-gmail.mjs). ONE-LEVEL: AGENTOS_GMAIL_OAUTH_KEY DIRECTLY
+// HOLDS the token (a secret), so the gate is a NON-BLANK check on it (NOT an identifier validation) — a
+// token-shaped value (with a `.`) is correct, not a footgun. The CRED-LEAK-FIX zero-echo invariant is
+// preserved and made stronger: EVERY reason here is assembled from FIXED string literals ONLY — it NEVER
+// concatenates any env VALUE — so the diagnostic can never become a credential sink. The only env
+// identifiers that ever appear in a reason are the fixed VARIABLE NAMES (e.g. the literal
+// "AGENTOS_GMAIL_OAUTH_KEY"), never their values.
 // ================================================================================================
 
-/** The four operator-opt-in gate vars (all must be set+non-blank to attempt a live send). */
+/**
+ * The four operator-opt-in gate vars (all must be set+non-blank to attempt a live send). Under ONE-LEVEL,
+ * AGENTOS_GMAIL_OAUTH_KEY is itself the token — so a blank token is caught here (fail-closed "skip").
+ */
 const LIVE_GATE_VARS = [
   "AGENTOS_ACTION_LIVE",
   "AGENTOS_ACTION_TEST_ACCOUNT",
@@ -307,24 +313,23 @@ const LIVE_GATE_VARS = [
   "AGENTOS_EGRESS_ALLOW",
 ] as const;
 
-/** A safe env-var NAME shape — must match `toCredentialEnv`'s SAFE_ACTION_ENV_KEY (an UPPERCASE C-id). */
-const SAFE_ENV_KEY_NAME = /^[A-Z][A-Z0-9_]*$/;
-
 /** The fixed, zero-interpolation reason strings. NONE of these embed any env VALUE. */
 const PREFLIGHT_REASON = {
   skip:
     "SKIP (env not set) — set AGENTOS_ACTION_LIVE + AGENTOS_ACTION_TEST_ACCOUNT + " +
-    "AGENTOS_GMAIL_OAUTH_KEY + AGENTOS_EGRESS_ALLOW to run a real self-send",
-  blockedBadKey:
-    "BLOCKED — AGENTOS_GMAIL_OAUTH_KEY must be the NAME of the env var holding the token " +
-    "(e.g. GMAIL_TOKEN), not the token itself (fail-closed; the value is intentionally not shown)",
-  blockedTokenUnset:
-    "BLOCKED — the token env var named by AGENTOS_GMAIL_OAUTH_KEY is not set (fail-closed; " +
-    "the name's value and the token are intentionally not shown)",
-  ok: "OK — live env present (token resolves at egress; the operator running the script is the confirmation)",
+    "AGENTOS_GMAIL_OAUTH_KEY (the OAuth token itself) + AGENTOS_EGRESS_ALLOW to run a real self-send",
+  ok:
+    "OK — live env present (AGENTOS_GMAIL_OAUTH_KEY holds the token; it resolves at egress; " +
+    "the operator running the script is the confirmation)",
 } as const;
 
-/** The result of {@link liveGmailPreflight} — a status + a FIXED-string reason (never an env value). */
+/**
+ * The result of {@link liveGmailPreflight} — a status + a FIXED-string reason (never an env value).
+ * ONE-LEVEL: the gate is deny-by-default fail-closed — it returns "ok" (all gate vars present, token in
+ * AGENTOS_GMAIL_OAUTH_KEY) or "skip" (any gate var unset/blank, including a blank token => no send). The
+ * "blocked" arm is retained in the union for callers/back-compat (the old two-level misconfig status); the
+ * one-level gate never returns it.
+ */
 export interface LiveGmailPreflight {
   readonly status: "ok" | "skip" | "blocked";
   /** A FIXED enum-like reason assembled from string literals ONLY — NEVER any env VALUE. */
@@ -332,18 +337,23 @@ export interface LiveGmailPreflight {
 }
 
 /**
- * Credential-blind preflight for the operator live-gmail scripts. PURE: reads only the supplied `env`,
- * returns a status + a FIXED-string reason. ⚠️ The reason is assembled from string literals ONLY — it
- * NEVER interpolates any env VALUE (so a user who mis-pastes a token into AGENTOS_GMAIL_OAUTH_KEY can
- * never have it echoed). Logic (deny-by-default):
- *   - any gate var unset/blank      => "skip"   (PREFLIGHT_REASON.skip)
- *   - AGENTOS_GMAIL_OAUTH_KEY VALUE is not a valid env-var NAME (e.g. a `ya29.…` token) => "blocked"
- *     (PREFLIGHT_REASON.blockedBadKey — the teaching reason pointing at the two-level setup)
- *   - the token env NAMED by that value is unset/blank => "blocked" (PREFLIGHT_REASON.blockedTokenUnset)
- *   - else => "ok" (PREFLIGHT_REASON.ok)
+ * SLICE-CRED-ONELEVEL — credential-blind preflight for the operator live-gmail scripts. PURE: reads only
+ * the supplied `env`, returns a status + a FIXED-string reason. ⚠️ The reason is assembled from string
+ * literals ONLY — it NEVER interpolates any env VALUE (so the OAuth token now held DIRECTLY in
+ * AGENTOS_GMAIL_OAUTH_KEY can never be echoed). ONE-LEVEL logic (deny-by-default):
+ *   - any gate var unset/blank (incl. AGENTOS_GMAIL_OAUTH_KEY, which DIRECTLY HOLDS the token) => "skip"
+ *     (PREFLIGHT_REASON.skip — fail-closed: a blank token means there is nothing to send with)
+ *   - else (all four gate vars non-blank; AGENTOS_GMAIL_OAUTH_KEY holds a non-blank token) => "ok"
+ *     (PREFLIGHT_REASON.ok)
+ *
+ * The token value is NOT validated as an identifier — it IS the token (a `ya29.…`-shaped secret), so a
+ * value containing a `.` is correct, NOT a footgun. (The old two-level "must be a NAME" / "named token
+ * unset" teaching branches are removed; the reason set stays value-free.)
  */
 export function liveGmailPreflight(env: Record<string, string | undefined>): LiveGmailPreflight {
-  // 1) All four opt-in gate vars must be set + non-blank, else SKIP (never echo any value).
+  // All four opt-in gate vars must be set + non-blank, else SKIP (never echo any value). Because
+  // AGENTOS_GMAIL_OAUTH_KEY (which DIRECTLY HOLDS the token) is one of the gate vars, an unset/blank token
+  // is caught here — fail-closed, no send. The token VALUE is never validated nor echoed.
   for (const name of LIVE_GATE_VARS) {
     const v = env[name];
     if (v === undefined || v.trim().length === 0) {
@@ -351,21 +361,7 @@ export function liveGmailPreflight(env: Record<string, string | undefined>): Liv
     }
   }
 
-  // 2) AGENTOS_GMAIL_OAUTH_KEY must be the NAME of an env var (uppercase C-identifier), NOT a token.
-  //    A token-shaped value (e.g. `ya29.…`, containing `.`) fails this and BLOCKS — without echoing it.
-  const keyName = (env[GMAIL_OAUTH_KEY_ENV] ?? "").trim();
-  if (!SAFE_ENV_KEY_NAME.test(keyName)) {
-    return { status: "blocked", reason: PREFLIGHT_REASON.blockedBadKey };
-  }
-
-  // 3) The token env var NAMED by AGENTOS_GMAIL_OAUTH_KEY must itself be set + non-blank, else BLOCK
-  //    (never echo the name's value nor the absent token).
-  const token = env[keyName];
-  if (token === undefined || token.trim().length === 0) {
-    return { status: "blocked", reason: PREFLIGHT_REASON.blockedTokenUnset };
-  }
-
-  // 4) Fully configured (two-level, token present) => OK.
+  // Fully configured (one-level: the token is present in AGENTOS_GMAIL_OAUTH_KEY) => OK.
   return { status: "ok", reason: PREFLIGHT_REASON.ok };
 }
 
