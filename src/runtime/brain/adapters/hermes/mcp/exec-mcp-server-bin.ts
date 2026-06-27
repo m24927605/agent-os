@@ -87,6 +87,19 @@ import { createHttpActionTransport } from "../action-http-transport.js";
 import { buildActionProjectionForCall } from "../action-projection-for-call.js";
 import { seedActionBindings, seedActionRegistry } from "../action-seed-tools.js";
 import { makeArgsCredentialScreen } from "../args-credential-screen.js";
+// SLICE-ACT5e — the BROWSER family (sibling modules; stateful, server-held-session UI primitives). The
+// connector port + the binding-wrapped browser effect + the in-repo FakeBrowserConnector + the seed
+// browser manifests/bindings/projector. NO real browser/network: the live bin's DEFAULT connector is the
+// in-repo Fake (the REAL sandboxed-Chromium page connector needs an injected page — ACT5d, operator-gated),
+// so advertising the browser family stays browser-free at the bin level until ACT5d wires a real page.
+import {
+  type BrowserBinding,
+  type BrowserConnector,
+  FakeBrowserConnector,
+  bindingWrappedBrowserEffect,
+} from "../browser-closed-loop.js";
+import { buildBrowserProjectionForCall } from "../browser-projection-for-call.js";
+import { seedBrowserBindings, seedBrowserRegistry } from "../browser-seed-tools.js";
 import { type ExecToolBinding, bindingWrappedExecEffect } from "../exec-closed-loop.js";
 import { seedBindings, seedRegistry } from "../exec-seed-tools.js";
 import { type AgtScope, buildProjectionForCall } from "../governance-projection-for-call.js";
@@ -238,6 +251,26 @@ export interface BuildBinOpts {
    * a valid token + the test-account allowlist (the ACT3a guard). verify NEVER touches the real network.
    */
   readonly actionConnector?: ActionConnector;
+  /**
+   * SLICE-ACT5e — a TEST seam to force the ADVERTISE-BROWSER master switch ON without setting env (a Fake
+   * `true` proves the advertise-on wiring). The LIVE bin omits this and the switch is derived from env via
+   * `browserAdvertiseFromEnv(process.env)` (`AGENTOS_ADVERTISE_BROWSER`; UNCONFIGURED => off => byte-
+   * identical). When OFF (default), NONE of the browser wiring happens (no manifests/bindings/descriptors/
+   * allow rule; the dispatcher/projection carry NO browser branch) and a browser tools/call is denied at
+   * authorize. Exposing a real browser to an autonomous brain is the HEAVIEST posture => deny-by-default.
+   */
+  readonly browserAdvertise?: boolean;
+  /**
+   * SLICE-ACT5e — inject the BROWSER connector the dispatcher routes a brain-proposed browser step to (a
+   * TEST seam: a `FakeBrowserConnector` proves the bin routes + governs a browser step WITHOUT a real
+   * browser / network). Used ONLY when advertise-browser is ON. FAIL-CLOSED in REAL mode: if advertise-
+   * browser is ON and this is OMITTED, the bin THROWS at startup (it will NOT back an advertised browser
+   * capability with a test double) — the operator must inject the ACT5d sandboxed-Chromium page connector.
+   * In FAKE mode an omitted connector defaults to a `FakeBrowserConnector` (the subprocess test stays
+   * browser-free). The injected connector MUST expose `hasSession` (the UNKNOWN-SESSION gate) for the
+   * advertised live path, or the bin throws (so a brain-supplied phantom sessionId cannot slip past the gate).
+   */
+  readonly browserConnector?: BrowserConnector;
 }
 
 /**
@@ -311,6 +344,27 @@ export function actionAdvertiseFromEnv(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * SLICE-ACT5e — the env var that is the MASTER SWITCH for ADVERTISING the BROWSER family to the brain.
+ * DENY-BY-DEFAULT (mirrors `actionAdvertiseFromEnv` / `actionLiveFromEnv`): driving a REAL browser as an
+ * untrusted/autonomous brain is the HEAVIEST security posture in the system, so the browser family is
+ * advertised + governed ONLY when this is EXACTLY a true-token. UNSET / blank / any other string (incl.
+ * "TRUE"/"yes"/"true ") => off.
+ */
+const ADVERTISE_BROWSER_ENV = "AGENTOS_ADVERTISE_BROWSER";
+
+/**
+ * Read the ADVERTISE-BROWSER master switch from env (FAIL-CLOSED, mirroring `actionAdvertiseFromEnv`).
+ * Returns `true` ONLY when `AGENTOS_ADVERTISE_BROWSER` is EXACTLY a true-token (`"true"` or `"1"`); unset /
+ * blank / any other string (e.g. `"false"`, `"TRUE"`, `"yes"`, `"true "`) => `false`. Pure over env —
+ * deny-by-default: the default-off bin is BYTE-IDENTICAL (no browser manifests/bindings/descriptors/allow
+ * rule; the dispatcher + projection carry NO browser branch; a browser tools/call is denied at authorize —
+ * neither registered nor allow-ruled).
+ */
+export function browserAdvertiseFromEnv(env: NodeJS.ProcessEnv): boolean {
+  return ADVERTISE_TRUE_TOKENS.has(env[ADVERTISE_BROWSER_ENV] ?? "");
+}
+
+/**
  * SLICE-CAP6 — the SINGLE source of the bin's per-sandbox egress allowlist: a TEST seam (`opts.egressAllow`)
  * else `egressAllowFromEnv(process.env)` (AGENTOS_EGRESS_ALLOW; UNCONFIGURED => EMPTY => deny-all). Hoisted
  * so the SAME allowlist drives BOTH (a) the substrate `SandboxSpec.egressAllow` (deploy-intent the REAL
@@ -353,6 +407,41 @@ function hostWriteAllowFromEnv(env: NodeJS.ProcessEnv): readonly string[] {
  */
 function resolveBinHostWriteAllow(opts: BuildBinOpts): readonly string[] {
   return opts.hostWriteAllow ?? hostWriteAllowFromEnv(process.env);
+}
+
+/**
+ * SLICE-ACT5e — resolve the BROWSER connector for the advertise-browser-ON path, FAIL-CLOSED on two fronts:
+ *   (1) PROVENANCE — an injected `opts.browserConnector` (the TEST seam / ACT5d operator connector) wins;
+ *       else FAKE mode gets a `FakeBrowserConnector` (the subprocess test path stays browser-free, and a
+ *       fake actor is honest in fake mode); else (REAL mode + no injected connector) THROW — the live bin
+ *       must NOT back an advertised browser capability with a test double.
+ *   (2) SESSION-CAPABILITY — the resolved connector MUST expose a `hasSession` method (the UNKNOWN-SESSION
+ *       gate `bindingWrappedBrowserEffect` consults). A connector lacking it would let the effect's
+ *       session gate fall open (a brain-supplied phantom `sessionId` could reach `perform`), so we THROW
+ *       before advertising rather than serve a session-blind browser. `FakeBrowserConnector` exposes it,
+ *       so the fake/test paths are unaffected.
+ * The bin fails closed at startup on either violation (main catches the throw -> fatal diag + exit 1).
+ */
+function resolveBrowserConnector(fake: boolean, opts: BuildBinOpts): BrowserConnector {
+  const connector =
+    opts.browserConnector ??
+    (fake
+      ? new FakeBrowserConnector()
+      : (() => {
+          throw new Error(
+            "advertise-browser is ON in REAL mode but no browser connector was injected — refusing to " +
+              "back an advertised browser capability with a test double (inject the ACT5d page connector; " +
+              "fail-closed)",
+          );
+        })());
+  // SESSION-CAPABILITY gate: the advertised path REQUIRES the UNKNOWN-SESSION gate to be enforceable.
+  if (typeof (connector as { hasSession?: unknown }).hasSession !== "function") {
+    throw new Error(
+      "advertise-browser is ON but the browser connector does not expose hasSession — refusing to " +
+        "advertise a session-blind browser (the UNKNOWN-SESSION gate must be enforceable; fail-closed)",
+    );
+  }
+  return connector;
 }
 
 /**
@@ -506,12 +595,44 @@ function buildDeps(
         .map((name) => actionRegistry?.lookup(name))
         .filter((m) => m !== undefined)
     : [];
+  // SLICE-ACT5e — the ADVERTISE-BROWSER master switch (the THIRD family). A TEST seam (opts.browserAdvertise)
+  // takes precedence; else FAKE mode is ALWAYS off (the EXEC4c-a subprocess test stays byte-identical), and
+  // REAL mode reads `browserAdvertiseFromEnv(process.env)` (AGENTOS_ADVERTISE_BROWSER; UNSET => off).
+  // DENY-BY-DEFAULT (heaviest posture): off => NONE of the browser wiring below (registry/bindings/allow
+  // rule/descriptors absent; the dispatcher + projection carry NO browser branch — byte-identical; a
+  // browser tools/call is denied at authorize — neither registered nor allow-ruled).
+  const advertiseBrowser =
+    opts.browserAdvertise ?? (fake ? false : browserAdvertiseFromEnv(process.env));
+  // The bin's `binWired` contains {approval, egress-allowlist, host-write-target}, so `seedBrowserRegistry`/
+  // `seedBrowserBindings` register the FULL browser family: navigate (network-egress => egress-allowlist) +
+  // read (in-sandbox) + click/type (destructive => approval). The server-held session lifecycle is NOT a
+  // tool (it is the connector's own openSession/closeSession — only the opaque sessionId flows to the brain).
+  // When advertise is OFF, we never call them — the browser family is fully absent (deny-by-default). The
+  // manifests are merged into the bin's SINGLE registry (so the authorize closure's `registry.lookup` sees
+  // their containment/requiresApproval -> the SAME egress fold / approval / external / boundary all apply,
+  // exactly as for net.fetch / gmail.send).
+  // INVARIANT: the seeders advertise EXACTLY {browser.navigate/read/click/type}. The session lifecycle is
+  // the connector's server-side openSession/closeSession (NOT a tools/list entry) — the "SESSION NOT
+  // EXPOSED" moat. ACT5e advertises what the seeders produce; governed session.open/close is a follow-up
+  // (see the slice doc for the honest live-boundary rationale).
+  const browserRegistry = advertiseBrowser ? seedBrowserRegistry(binWired) : undefined;
+  const browserBindings: ReadonlyMap<string, BrowserBinding> = advertiseBrowser
+    ? seedBrowserBindings(binWired)
+    : new Map<string, BrowserBinding>();
+  const browserManifests: readonly unknown[] = advertiseBrowser
+    ? [...browserBindings.keys()]
+        .map((name) => browserRegistry?.lookup(name))
+        .filter((m) => m !== undefined)
+    : [];
   const extraSeedTools = opts.extraSeedTools ?? [];
   const registry = seedRegistry(binWired, [
     ...extraSeedTools.map((t) => t.manifest),
     // SLICE-ACT4 — merge the action manifests so the authorize closure admits + governs them. Empty when
     // advertise is OFF => byte-identical.
     ...actionManifests,
+    // SLICE-ACT5e — merge the browser manifests the SAME way. Empty when advertise-browser is OFF =>
+    // byte-identical.
+    ...browserManifests,
   ]);
   const allowRules = [
     {
@@ -567,6 +688,24 @@ function buildDeps(
             id: "allow-calendar",
             action: "tool:invoke",
             resource: "calendar.**",
+            tenantId: BIN_CONTEXT.tenantId,
+          },
+        ]
+      : []),
+    // SLICE-ACT5e — the BROWSER family allow rule (`browser.**`), OR-combined alongside the
+    // exec.**/git.**/net.**/gmail.**/... rules, ONLY when advertise-browser is ON. PURE ADDITION: an allow
+    // rule admits the NAME, but the egress fold STILL gates the navigate host (a non-allowlisted host =>
+    // denied@policy) and the approval stage STILL gates a destructive step (browser.click/type =>
+    // denied@approval without pre-auth). When advertise-browser is OFF this rule is ABSENT, so a browser
+    // name is denied at authorize (no allow rule + not registered) — deny-by-default, byte-identical. The
+    // PDP still deny-by-defaults an UNREGISTERED name even with this rule present, so it only admits the
+    // browser manifests merged into the registry above.
+    ...(advertiseBrowser
+      ? [
+          {
+            id: "allow-browser",
+            action: "tool:invoke",
+            resource: "browser.**",
             tenantId: BIN_CONTEXT.tenantId,
           },
         ]
@@ -639,6 +778,8 @@ function buildDeps(
   // OFF, BOTH are `undefined` => the MCP server advertises the exec set only + builds the exec effect
   // exactly as today (byte-identical).
   let actionDescriptors: McpToolDescriptor[] | undefined;
+  // SLICE-ACT5e — the BROWSER descriptors for tools/list (derived the SAME no-drift way as the action ones).
+  let browserDescriptors: McpToolDescriptor[] | undefined;
   let effect:
     | ((toolCall: {
         tool: string;
@@ -652,26 +793,63 @@ function buildDeps(
       description: registry.lookup(name)?.description ?? name,
       inputSchema: argSchemaToJsonSchema(binding.argSchema),
     }));
-    // The ACTION connector the dispatcher routes to: a TEST seam (opts.actionConnector — a Fake, no
-    // network) takes precedence; the LIVE bin builds the REAL guarded connector. The guard is the live-
-    // safety ring: deny-all unless AGENTOS_ACTION_LIVE is on AND the resolved account ∈ the test allowlist.
-    // The transport/connector/resolver factories do NO network at construction — `fetch` fires ONLY on a
-    // real send, and ONLY when the guard has admitted the call (live + allowlisted). verify always injects
-    // the Fake, so no test path touches the network.
-    const actionConnector: ActionConnector =
-      opts.actionConnector ??
-      (() => {
-        const transport = createHttpActionTransport({ env: process.env });
-        return createGuardedActionConnector(createGoogleActionConnector(transport), {
-          live: actionLiveFromEnv(process.env),
-          testAccounts: testAccountsFromEnv(process.env),
-          resolveAccount: createGoogleAccountResolver(transport),
-        });
-      })();
+  }
+  // SLICE-ACT5e — when advertise-browser is ON, build the BROWSER descriptors (derived from each browser
+  // binding's STRICT argSchema via the SAME `argSchemaToJsonSchema` converter — no hand-written drift). The
+  // server-held session lifecycle is NOT a descriptor (only the opaque sessionId reference flows). OFF =>
+  // `undefined` => tools/list carries no browser tool (byte-identical).
+  if (advertiseBrowser) {
+    browserDescriptors = [...browserBindings].map(([name, binding]) => ({
+      name,
+      description: registry.lookup(name)?.description ?? name,
+      inputSchema: argSchemaToJsonSchema(binding.argSchema),
+    }));
+  }
+  // SLICE-ACT4 + ACT5e — when EITHER family is advertised, build the deps.effect DISPATCHER. The dispatcher
+  // routes a brain-proposed BROWSER step (`browserBindings.has(tc.tool)`) to the browser connector, an
+  // ACTION (`actionBindings.has(tc.tool)`) to the action connector, and an exec tool to the substrate — all
+  // three reached ONLY by `runGovernedToolCall` (the single execution edge; no gate bypass). The families
+  // are mutually exclusive by name, so the THREE-WAY order is unambiguous. When NEITHER is advertised,
+  // `effect` is `undefined` => the MCP server builds the exec effect exactly as today (byte-identical).
+  if (advertiseActions || advertiseBrowser) {
     const execEffect = bindingWrappedExecEffect(substrate, sandboxId, bindings);
-    const actionEffect = bindingWrappedActionEffect(actionConnector, actionBindings);
+    // The ACTION connector the dispatcher routes to (only relevant when advertise-actions is ON): a TEST
+    // seam (opts.actionConnector — a Fake, no network) takes precedence; the LIVE bin builds the REAL
+    // guarded connector. The guard is the live-safety ring: deny-all unless AGENTOS_ACTION_LIVE is on AND
+    // the resolved account ∈ the test allowlist. The transport/connector/resolver factories do NO network at
+    // construction — `fetch` fires ONLY on a real send, and ONLY when the guard has admitted the call (live
+    // + allowlisted). verify always injects the Fake, so no test path touches the network.
+    const actionEffect = advertiseActions
+      ? bindingWrappedActionEffect(
+          opts.actionConnector ??
+            (() => {
+              const transport = createHttpActionTransport({ env: process.env });
+              return createGuardedActionConnector(createGoogleActionConnector(transport), {
+                live: actionLiveFromEnv(process.env),
+                testAccounts: testAccountsFromEnv(process.env),
+                resolveAccount: createGoogleAccountResolver(transport),
+              });
+            })(),
+          actionBindings,
+        )
+      : undefined;
+    // The BROWSER connector the dispatcher routes to (only relevant when advertise-browser is ON). FAIL-
+    // CLOSED resolution: a TEST seam (opts.browserConnector) takes precedence; else in FAKE mode a
+    // FakeBrowserConnector (the subprocess test path stays browser-free; a fake actor is honest in fake
+    // mode); else (REAL mode + advertise-browser ON + NO injected connector) we THROW — the REAL sandboxed-
+    // Chromium page connector is ACT5d / operator-injected, so the live bin must NOT silently back an
+    // advertised browser capability with a test double (that would expose a fake/unusable browser to an
+    // autonomous brain). The operator turns AGENTOS_ADVERTISE_BROWSER on AND injects the ACT5d connector, or
+    // the bin fails closed at startup (main catches the throw -> fatal diag + non-zero exit).
+    const browserEffect = advertiseBrowser
+      ? bindingWrappedBrowserEffect(resolveBrowserConnector(fake, opts), browserBindings)
+      : undefined;
     effect = (toolCall) =>
-      actionBindings.has(toolCall.tool) ? actionEffect(toolCall) : execEffect(toolCall);
+      browserEffect !== undefined && browserBindings.has(toolCall.tool)
+        ? browserEffect(toolCall)
+        : actionEffect !== undefined && actionBindings.has(toolCall.tool)
+          ? actionEffect(toolCall)
+          : execEffect(toolCall);
   }
   return {
     substrate,
@@ -679,6 +857,7 @@ function buildDeps(
     bindings,
     registry,
     ...(actionDescriptors !== undefined ? { actionDescriptors } : {}),
+    ...(browserDescriptors !== undefined ? { browserDescriptors } : {}),
     ...(effect !== undefined ? { effect } : {}),
     screen: makeArgsCredentialScreen(),
     authorize: async (tc) => {
@@ -720,6 +899,18 @@ function buildDeps(
       // action branch never fires (byte-identical) — and an action tool is denied at the PDP anyway (no
       // allow rule + not registered). An exec tool never appears in `actionBindings`, so only ONE helper
       // ever produces a projection for a given call (no double-projection).
+      // SLICE-ACT5e — the projection source is now THREE-WAY (exec | action | browser). A BROWSER tool
+      // projects via the SIBLING browser helper (`buildBrowserProjectionForCall` over `browserBindings`).
+      // The browser helper emits the SAME credential-blind GovernanceProjection (host-only networkHosts for
+      // navigate = `new URL(url).hostname` + operationClass, NEVER the params), so the SAME egress fold /
+      // boundary summary below gate browser.navigate exactly as they gate net.fetch. When advertise-browser
+      // is OFF, `browserBindings` is EMPTY so the browser branch never fires (byte-identical) — and a browser
+      // tool is denied at the PDP anyway (no allow rule + not registered). The three families are mutually
+      // exclusive by name, so only ONE helper ever produces a projection for a given call (no double-projection).
+      // NON-VACUITY: dropping the browser branch here leaves browser.navigate with NO projectable host => the
+      // per-navigation egress gate cannot compare the host against the allowlist (it is keyed on
+      // `projection.networkHosts`), so an allowlisted-host navigate would erroneously skip the egress decision
+      // (CAP6 fail-closed catches the no-host case, but the per-navigation allow path breaks).
       const projection =
         buildProjectionForCall(
           { tool: tc.tool, ...(tc.args !== undefined ? { args: tc.args } : {}) },
@@ -730,6 +921,12 @@ function buildDeps(
         buildActionProjectionForCall(
           { tool: tc.tool, ...(tc.args !== undefined ? { args: tc.args } : {}) },
           actionBindings,
+          (name) => registry.lookup(name),
+          agtScope,
+        ) ??
+        buildBrowserProjectionForCall(
+          { tool: tc.tool, ...(tc.args !== undefined ? { args: tc.args } : {}) },
+          browserBindings,
           (name) => registry.lookup(name),
           agtScope,
         );
