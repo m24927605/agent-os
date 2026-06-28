@@ -38,7 +38,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NAME="${AGENTOS_MCP_NAME:-agentos-exec}"
 OPENSHELL_ENDPOINT="${AGENTOS_OPENSHELL_ENDPOINT:-127.0.0.1:17670}"
 OPENSHELL_MTLS="${AGENTOS_OPENSHELL_MTLS:-$HOME/.config/openshell/gateways/openshell/mtls}"
-KERNEL_ENDPOINT="${AGENTOS_KERNEL_INGEST_ENDPOINT:-127.0.0.1:50543}"
+# Default aligned with the runtime ingest client + doctor + setup (src/cli/doctor.ts, exec-mcp-server-bin.ts).
+# (NOTE: the Go kernel itself binds 127.0.0.1:7777 by default — operators set this env to their kernel's address.)
+KERNEL_ENDPOINT="${AGENTOS_KERNEL_INGEST_ENDPOINT:-127.0.0.1:50051}"
 # OpenShell image is optional (the bin has a pinned default); only thread it when explicitly provided.
 OPENSHELL_IMAGE="${AGENTOS_OPENSHELL_IMAGE:-}"
 

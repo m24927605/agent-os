@@ -36,7 +36,7 @@ import {
 const ENDPOINTS = {
   AGENTOS_OPENSHELL_ENDPOINT: "127.0.0.1:17670",
   AGENTOS_OPENSHELL_MTLS: "/home/u/.config/openshell/gateways/openshell/mtls",
-  AGENTOS_KERNEL_INGEST_ENDPOINT: "127.0.0.1:50543",
+  AGENTOS_KERNEL_INGEST_ENDPOINT: "127.0.0.1:50051",
 };
 const BIN = "/abs/path/to/dist/runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin.js";
 
@@ -56,7 +56,7 @@ describe("HDI1 — buildHermesMcpAddArgv builds the `hermes mcp add` argv (deleg
     expect(argv).toContain(
       "AGENTOS_OPENSHELL_MTLS=/home/u/.config/openshell/gateways/openshell/mtls",
     );
-    expect(argv).toContain("AGENTOS_KERNEL_INGEST_ENDPOINT=127.0.0.1:50543");
+    expect(argv).toContain("AGENTOS_KERNEL_INGEST_ENDPOINT=127.0.0.1:50051");
     // The bin path is the FINAL token (REMAINDER args vector for the spawned `node` process).
     expect(argv[argv.length - 1]).toBe(BIN);
   });
@@ -278,7 +278,7 @@ describe("HDI1-FIX — renderHermesMcpServersConfigYaml (the HEADLESS config.yam
     expect(server.env.AGENTOS_OPENSHELL_MTLS).toBe(
       "/home/u/.config/openshell/gateways/openshell/mtls",
     );
-    expect(server.env.AGENTOS_KERNEL_INGEST_ENDPOINT).toBe("127.0.0.1:50543");
+    expect(server.env.AGENTOS_KERNEL_INGEST_ENDPOINT).toBe("127.0.0.1:50051");
   });
 
   it("the bin path + each endpoint value appear verbatim in the rendered file body", () => {
@@ -286,7 +286,7 @@ describe("HDI1-FIX — renderHermesMcpServersConfigYaml (the HEADLESS config.yam
     expect(yaml).toContain("mcp_servers:");
     expect(yaml).toContain(BIN);
     expect(yaml).toContain("127.0.0.1:17670");
-    expect(yaml).toContain("127.0.0.1:50543");
+    expect(yaml).toContain("127.0.0.1:50051");
     expect(yaml).toContain("/home/u/.config/openshell/gateways/openshell/mtls");
   });
 
