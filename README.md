@@ -155,6 +155,8 @@ Start here, by who you are:
 - **Reference — [Environment & Configuration](./docs/configuration.md)** — every `AGENTOS_*` switch + `agent-os.config.json`, code-derived.
 - **See it — [Demo & Demo-Video Script](./docs/demo-video-script.md)** — recording-ready walkthrough built around the two real governed live demos (Gmail send + Chromium navigate+read).
 
+- **Contribute — [CONTRIBUTING.md](./CONTRIBUTING.md)** — the English on-ramp into the build playbook (the verify gate, test-first, the Pre-Commit Guard, mandatory adversarial review).
+
 These docs are honest about what is in-repo (runnable today, in-memory defaults) vs deployment-gated (real KMS trust-root, sandbox, multi-tenant). See also [`AGENTS.md`](./AGENTS.md) (the operating contract) and the internal build records in [`docs/slices/`](./docs/slices/).
 
 ## Quickstart
