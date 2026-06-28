@@ -122,6 +122,31 @@ describe("SpendGuardCostGate — commit (commit_session_delta mapping)", () => {
   });
 });
 
+describe("SpendGuardCostGate — cross-tenant isolation (the reserving-tenant commit guard)", () => {
+  // tenant-b, a DIFFERENT tenant than ctxA (which reserves below).
+  const ctxB = { ...ctxA, tenantId: "tenant-b", actorId: "agent:other", requestId: "req-b" };
+
+  it("committing tenant-a's reservation under tenant-b is DENIED, fail-closed, without hitting the ledger", async () => {
+    const ledger = new RecordingLedger();
+    const gate = new SpendGuardCostGate(ledger);
+    const reserved = await gate.reserve(ctxA, { estimatedTokens: 10, resource: "x" });
+    if (reserved.status !== "ok") throw new Error("reserve should succeed");
+
+    // tenant-b attempts to commit tenant-a's reservation -> cross-tenant deny (fail-closed).
+    const cross = await gate.commit(ctxB, reserved.reservationId, { actualTokens: 5 });
+    expect(cross.status).toBe("denied");
+    if (cross.status === "denied")
+      expect(cross.reason.toLowerCase()).toMatch(/cross-tenant|tenant/);
+    // the guard denies BEFORE the ledger transport — no commit dispatched, no foreign-tenant budget effect.
+    expect(ledger.commitReqs).toHaveLength(0);
+
+    // and the cross-tenant attempt did NOT consume/erase the reservation: the OWNER can still commit it.
+    const own = await gate.commit(ctxA, reserved.reservationId, { actualTokens: 5 });
+    expect(own.status).toBe("committed");
+    expect(ledger.commitReqs).toHaveLength(1);
+  });
+});
+
 describe("SpendGuardCostGate — credential-blind dispatched ledger req", () => {
   it("the reserve req carries only token count + route, no secret-shape field/value", async () => {
     const ledger = new RecordingLedger();
