@@ -366,18 +366,95 @@ AGENT OS — TECHNICAL / ARCHITECTURE FILM · PRODUCTION BRIEF  (cut 3 of 3)
        governs, and a separate signer makes it all provable. Pointers: security model, auditor
        guide, composition-root guide, the SDK.
 
-4 · VOICEOVER — narration INTENT + a key line per chapter (write full VO to these; do not
-   pad; let diagrams breathe). Examples of the register:
-   C0: "Give an agent the ability to act, and you inherit its worst day: a poisoned page, a
-        leaked key, an irreversible action no one can account for. Guardrails it can argue
-        with won't save you. You need a control plane it cannot bypass."
-   C3: "Deny-by-default isn't a policy you write; it's the shape of the code. Unknown,
-        malformed, error — all of them fall through to refuse. And the record commits before
-        the effect runs: if the ledger doesn't seal, the action never happens."
-   C5: "The part that acts and the part that signs the record are different processes. That's
-        the whole game. An actor that cannot reach the signer cannot forge, rewrite, or even
-        restore its own history."
-   (Provide full VO for C0–C8 in this voice; ~6–7 min total.)
+4 · VOICEOVER  (full copy — read verbatim; calm, exact, security-keynote register; let
+   diagrams breathe between chapters; ~7–8 min total)
+  C0 · THREAT MODEL
+   "Give an AI agent the power to act — to send, to pay, to run commands, to browse — and
+    you inherit its worst day. A single poisoned web page can turn it against you. It can
+    leak a credential you handed it. It can do something that cannot be undone, and leave no
+    trustworthy record of what happened, or who allowed it. In a multi-tenant system, one
+    tenant's agent must never reach another's. Guardrails an agent can argue its way around
+    are not a control plane. You need a layer it cannot bypass. That is the whole design of
+    Agent OS."
+  C1 · ARCHITECTURE
+   "Agent OS separates the thinker from the doer. The brain — an LLM, here Hermes — only
+    proposes a tool call; it is treated as untrusted. Between the brain and the real world
+    sits the spine: agent-os, the one governed edge every action must pass through. The body
+    is where effects run — a sandboxed substrate, or a real browser. And in its own process
+    sits the WORM kernel: an append-only, hash-chained, signed ledger — the attester.
+    Everything except the spine and the ledger is a vendor behind a neutral port: Hermes the
+    brain, OpenShell the execution substrate, NemoClaw the hosting, SpendGuard the cost gate,
+    AGT an advisory governor that can only narrow a decision, never grant one. The
+    composition root wires them. The core imports no vendor — and a dependency check enforces
+    it. Swap any vendor by config, not a rewrite."
+  C2 · THE GOVERNED PIPELINE
+   "Here is the path every tool call takes — one function, the same for every kind of action.
+    Screen: check the call for secrets and shape. Authorize: the policy decision point
+    evaluates it, deny by default, folding in the egress allow-list, the approval requirement,
+    and any host filesystem write. Reserve the budget. Then the pivot — commit: append a
+    record to the WORM ledger and wait for the receipt. Only after the record is sealed does
+    the effect run, through a guarded connector. Then commit the cost, and record the boundary
+    crossing. Every stage is an injected, vendor-neutral seam. The same pipeline governs an
+    exec command, a Gmail send, and a browser navigation. There is no second path, no fast
+    lane, no exception."
+  C3 · DENY-BY-DEFAULT & COMMIT-BEFORE-EFFECT
+   "The first two invariants live in the shape of the code, not in a setting. Deny by default:
+    an unknown tool, a malformed request, an error anywhere in the decision — all fall through
+    to refuse. No path lets uncertainty resolve to 'allow.' And the decision lives in the
+    request path itself, in the gate — never in a background poller that could lag or fail
+    open. Commit before effect: the record is written first. The pipeline appends to the
+    tamper-proof ledger and waits for the receipt before the connector is ever touched. If the
+    ledger does not seal, the effect never runs. Watch a real trace. Allowed: commit, then
+    effect, in that order, every time. Denied — a send that wasn't approved — the trace stops
+    at the gate. No commit, no effect; the connector is never reached. Nothing to catch after
+    the fact, because nothing happened. And nothing to undo, because the effect, by design,
+    has none."
+  C4 · CREDENTIAL-BLIND
+   "The third invariant: the agent never touches a secret. When the brain proposes a call that
+    needs a credential, all it holds is a placeholder — resolve, env, key-name. That
+    placeholder is what flows through the brain, into the record, into any projection of state.
+    The real token is resolved at the last moment, at the network egress, and nowhere else.
+    See the same call three ways: in the agent's request, a placeholder; in the audit log, a
+    placeholder, redacted; only on the wire, at egress, the real value — then gone. Data coming
+    back is governed too: whatever a page returns is scrubbed of secrets, length-capped, and
+    marked untrusted before the agent is ever allowed to read it."
+  C5 · ATTESTER ≠ ACTOR
+   "This is the heart of it. The thing that acts and the thing that signs the record are
+    different processes. The WORM kernel runs on its own — an append-only chain, each entry
+    hashed onto the last and signed with a key the actor never holds. Records are redacted on
+    ingest, before they're hashed, so a secret cannot slip into the chain. Because the actor
+    cannot reach the signer, it cannot forge a record, it cannot rewrite history, and — this
+    matters — it cannot restore its own past. A compromised agent cannot quietly erase what it
+    did, because the evidence is produced by a process it does not control and cannot
+    impersonate. Attestation is structurally separated from action. That separation is what
+    makes the record trustworthy to an auditor who trusts neither the agent nor the operator."
+  C6 · RECOVERY WITHOUT UNDO
+   "A fair question: with no undo, how do you recover? Forward-only. Effects are real — an
+    email sent cannot be unsent — so Agent OS refuses to pretend otherwise. Recovery is a
+    signed, forward operation. A snapshot is a cut of state, anchored to a point in the WORM
+    sequence, holding references and hashes, never raw credentials. A restore is a forward-only
+    state machine, run by a separate authority — attester is not actor here either — with a
+    verifying phase that cross-validates the ledger head and the memory version, and fails
+    closed if they disagree. When live state and a snapshot diverge, you get a divergence
+    report, not a silent overwrite. Recovery is something an operator proves and signs — never
+    a rollback the agent could trigger to cover its tracks."
+  C7 · MULTI-TENANCY & ASSURANCE
+   "Two more guarantees. Isolation: a budget reserved by one tenant can never be committed
+    under another — the cost path checks it and fails closed — and each tenant gets its own
+    gateway. And assurance — how you know any of this holds. Every build runs one gate:
+    type-check, lint, build, the full test suite, the protocol checks, the Go and Python
+    planes, a cross-tenant isolation check, and a secret scan. Its exit code is the only
+    accepted proof that it works. On top, an independent verifier re-runs everything with fresh
+    context and adversarially probes the invariants before a change is called done. Around
+    eighteen hundred tests, green. And the rule that the core imports no vendor isn't a
+    guideline — a dependency boundary check fails the build if it's broken."
+  C8 · CLOSE
+   "So the trust argument, in one line. The agent proposes. A vendor-neutral core governs
+    every action through one gate it cannot bypass. A separate process signs the record, so
+    everything is provable — even against the agent itself. Deny by default. Commit before
+    effect. Credential-blind. The recorder is never the actor. To verify it yourself, start
+    with the security model, the auditor guide, and the SDK. Agent OS — autonomy you can
+    actually leave running."
 
 5 · VISUAL  (claim → evidence)
   Each chapter pairs a clean architecture/motion-graphic with the real artifact that proves
