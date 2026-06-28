@@ -9,6 +9,8 @@
 > lines from the live scripts) and the read-aloud [`demo-recording-cut-sheet.md`](./demo-recording-cut-sheet.md).
 > Ground truth for every trace on screen = the real cast logs (`scripts/act-live-gmail.mjs`,
 > `scripts/act5-live-browser.mjs`, and the deny runners).
+>
+> **繁體中文版 (zh-TW):** [`demo-video-briefs.zh-TW.md`](./demo-video-briefs.zh-TW.md).
 
 ## The three-cut strategy
 
