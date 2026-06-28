@@ -56,6 +56,7 @@
     "e2e:live-gmail": "bash scripts/e2e-live-gmail.sh",
     "e2e:live-browser": "bash scripts/e2e-live-browser.sh",
     "e2e:deny-demo": "pnpm run build && node scripts/act5-deny-demo.mjs",
+    "e2e:gmail-deny-demo": "pnpm run build && node scripts/act-gmail-deny-demo.mjs",
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run deps:check && pnpm run proto:check && pnpm run openshell:proto:check && pnpm run spendguard:proto:check && pnpm run agt:proto:check && pnpm run verify:go && pnpm run verify:py && pnpm run verify:cross-tenant && pnpm run launcher:check && pnpm run secret-scan"
   },
   "dependencies": {
