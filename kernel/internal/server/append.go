@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/agent-os/kernel/internal/canonical"
 	"github.com/agent-os/kernel/internal/chain"
 	"github.com/agent-os/kernel/internal/ingestpb"
 	"github.com/agent-os/kernel/internal/signer"
@@ -107,13 +108,21 @@ func (s *IngestServer) Append(_ context.Context, req *ingestpb.AppendRequest) (*
 		return s.deny(req, ingestpb.AppendError_SEQUENCE_REPLAY, "sequence already settled; append-only refuses rewrite")
 	}
 
-	// accept: hashes are computed from the canonical bytes; the client cannot set them.
+	// DEFENSE-IN-DEPTH INGEST BACKSTOP: credential-blindness in the immutable WORM bytes must NOT be
+	// producer-trust alone. Before ANYTHING is hashed or persisted, scrub credential-VALUE shapes from
+	// the (validated) canonical bytes. RedactCanonicalBytes is canonical-preserving + idempotent: on the
+	// honest path (producer already redacted) there is no secret-shaped substring => no-op => the bytes
+	// are byte-identical and the hash chain does NOT drift; on the threat path a leaked credential value
+	// is replaced with [REDACTED] BEFORE it can ever reach the chain hash or the durable WORM record.
+	canonicalEvent := canonical.RedactCanonicalBytes(req.GetCanonicalEvent())
+
+	// accept: hashes are computed from the (redacted) canonical bytes; the client cannot set them.
 	prevHash := s.head
-	entryHash := chain.EntryHashFromCanonical(req.GetCanonicalEvent(), prevHash, int(req.GetSequence()))
-	contentHash := chain.ContentAddress(req.GetCanonicalEvent())
+	entryHash := chain.EntryHashFromCanonical(canonicalEvent, prevHash, int(req.GetSequence()))
+	contentHash := chain.ContentAddress(canonicalEvent)
 
 	var ev any
-	_ = json.Unmarshal(req.GetCanonicalEvent(), &ev) // persist the already-redacted event object
+	_ = json.Unmarshal(canonicalEvent, &ev) // persist the redacted event object (backstop + producer redaction)
 	if _, err := s.store.Append(store.LogRecord{
 		Sequence: int(req.GetSequence()), Event: ev, PrevHash: prevHash, EntryHash: entryHash,
 		SourceID: req.GetSourceId(), SourceSeq: req.GetSequence(),
