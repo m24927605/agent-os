@@ -71,6 +71,10 @@ function deps(
   return {
     acquireCheckpoint: async () => undefined,
     authorize: () => ({ effect: "allow" as const, reason: "admin approved" }),
+    // Default = the live chain agrees with the snapshot's recorded anchor, so the existing flows
+    // (which do not exercise anchor mismatch) keep proceeding past `verifying-anchor`. The dedicated
+    // anchor cross-validation tests live in restore.anchor.test.ts.
+    readLiveChainAnchor: async () => ({ wormHeadHash: HEAD, memoryVersion: 7 }),
     rebuildProjection: async () => undefined,
     ...over,
     appender,

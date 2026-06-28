@@ -191,6 +191,14 @@ d("LR1 — snapshot restore-to-S, LIVE against the real Go kernel", () => {
         acquireCheckpoint: async () => undefined,
         // admin/approver-signed: the operator approval seam (PDP). allow -> proceed.
         authorize: () => ({ effect: "allow" as const, reason: "admin approved restore" }),
+        // Anchor cross-validation: read the LIVE chain's anchor AT the snapshot's sequence and return
+        // exactly the snapshot's recorded anchor so this consistent snapshot proceeds past
+        // `verifying-anchor` (it IS consistent with the chain at S). A stale/forged anchor is covered
+        // by the hermetic restore.anchor.test.ts.
+        readLiveChainAnchor: async () => ({
+          wormHeadHash: snap.wormHeadHash,
+          memoryVersion: snap.memoryVersion,
+        }),
         appender: restoreAppender,
         rebuildProjection: async (s: SnapshotRecord) => {
           const live = mine(await reader(), sourceId);
@@ -264,6 +272,11 @@ d("LR1 — snapshot restore-to-S, LIVE against the real Go kernel", () => {
       {
         acquireCheckpoint: async () => undefined,
         authorize: () => ({ effect: "deny" as const, reason: "actor is not an approver" }),
+        // Never reached: authorize denies at `validating`, before lock / anchor-verify. Present for
+        // type completeness; throws to prove the FSM aborts BEFORE any live-chain read on a denial.
+        readLiveChainAnchor: async () => {
+          throw new Error("readLiveChainAnchor must NEVER run on a denied restore");
+        },
         appender: restoreAppender,
         rebuildProjection: async () => {
           throw new Error("rebuildProjection must NEVER run on a denied restore");
@@ -309,6 +322,12 @@ d("LR1 — snapshot restore-to-S, LIVE against the real Go kernel", () => {
       {
         acquireCheckpoint: async () => undefined,
         authorize: () => ({ effect: "allow" as const, reason: "admin approved restore" }),
+        // Anchor matches (the failure under test here is the out-of-range fold at `rebuilding`, not a
+        // stale anchor) so the FSM passes `verifying-anchor` and reaches `rebuilding` as intended.
+        readLiveChainAnchor: async () => ({
+          wormHeadHash: snap.wormHeadHash,
+          memoryVersion: snap.memoryVersion,
+        }),
         appender: restoreAppender,
         rebuildProjection: async (s: SnapshotRecord) => {
           const live = mine(await reader(), sourceId);

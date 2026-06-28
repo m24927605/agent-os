@@ -10,7 +10,7 @@
  * only emit seam is the injected `RestoreAppender`, whose sole capability is `append`.
  *
  * Phases (mirroring the R5 Task FSM style — explicit, deny-by-default):
- *   idle -> validating -> locked -> initiated -> rebuilding -> completed | aborted
+ *   idle -> validating -> locked -> verifying-anchor -> initiated -> rebuilding -> completed | aborted
  * Every phase is fail-closed: any failed guard / rejected dependency aborts AT that phase and is NOT
  * partially applied. Critically, a failure during `rebuilding` aborts WITHOUT emitting
  * RestoreCompleted — no half-completed illusion is ever left on the chain.
@@ -19,6 +19,13 @@
  *  - FORWARD-ONLY (design §44/§49): the FSM only ever `append`s. There is no truncate/rewrite API.
  *  - attester != actor (design §44): `sourceId` being a brain source -> deny-by-default at
  *    `validating`. The brain can NEVER self-restore; restore is admin/approver-signed.
+ *  - ANCHOR CROSS-VALIDATION (design §40 unified anchor): a SnapshotRecord records the WORM head
+ *    content address (`wormHeadHash`) and brain `memoryVersion` AT its `sequence` SPECIFICALLY so a
+ *    restore can PROVE the snapshot is consistent with the live chain before rebuilding to it. The
+ *    `verifying-anchor` phase reads the LIVE chain's anchor AT `snapshot.sequence` (under the global
+ *    lock, so it is a consistent read) and refuses — fail-closed, pre-`initiated`, no append — to
+ *    rebuild to a STALE or FORGED anchor (a sequence that still exists but whose recorded head hash
+ *    or memory version no longer matches the live chain there).
  *  - fail-closed: an unknown/rejected step aborts; it never silently advances.
  *
  * Low coupling / high cohesion: this module ONLY sequences the phases + emits the two forward events.
@@ -72,12 +79,30 @@ export interface RestoreAppender {
   append(event: RestoreEvent): Promise<AppendReceipt>;
 }
 
+/**
+ * The LIVE-chain anchor read back AT a sequence — the WORM head content address + brain memory
+ * version the kernel currently records there. The FSM compares this against the SnapshotRecord's
+ * recorded anchor to detect a stale/forged snapshot before rebuilding. The CONCRETE read (R2 read-
+ * transport / kernel `ListEntries` + memory version lookup) is injected at the composition root; a
+ * Fake supplies it in tests. The COMPARISON + fail-closed decision lives in the reviewed FSM below.
+ */
+export interface LiveChainAnchor {
+  readonly wormHeadHash: string;
+  readonly memoryVersion: number;
+}
+
 /** Everything mutating/external the FSM needs — ALL injected (composition root owns the concretes). */
 export interface RestoreDeps {
   /** Acquire the GLOBAL cross-ingest checkpoint/lock (R10-S4). Rejecting aborts at `locked`. */
   acquireCheckpoint(): Promise<unknown>;
   /** Authorize the actor for this snapshot (PDP, Build-list #8). Deny aborts at `validating`. */
   authorize(actor: string, snapshot: SnapshotRecord): RestoreAuthorization;
+  /**
+   * Read the LIVE chain's anchor (WORM head content address + brain memory version) AT `sequence`.
+   * Called under the global lock so the read is consistent. A throw fails closed (deny-by-default).
+   * The FSM cross-validates the result against the snapshot's recorded anchor at `verifying-anchor`.
+   */
+  readLiveChainAnchor(sequence: number): Promise<LiveChainAnchor>;
   /** The narrow forward-append seam (R2 ingest client). */
   readonly appender: RestoreAppender;
   /** Rebuild the state-layer projection (DB txn / PITR / brain import / sandbox reprovision). */
@@ -89,6 +114,7 @@ export type RestorePhase =
   | "idle"
   | "validating"
   | "locked"
+  | "verifying-anchor"
   | "initiated"
   | "rebuilding"
   | "completed"
@@ -151,6 +177,29 @@ export async function runRestore(
     await deps.acquireCheckpoint();
   } catch (cause) {
     return aborted("locked", `acquireCheckpoint failed closed: ${errMessage(cause)}`);
+  }
+
+  // Phase: verifying-anchor — cross-validate the snapshot's recorded anchor against the LIVE chain.
+  // Read AFTER the lock (so it is a consistent read) and BEFORE `initiated` (so a bad anchor records
+  // NO forward event — no append on this failure path, same as the other pre-initiated aborts). The
+  // comparison + fail-closed decision is made HERE, in the reviewed FSM, never delegated.
+  let live: LiveChainAnchor;
+  try {
+    live = await deps.readLiveChainAnchor(snapshot.sequence);
+  } catch (cause) {
+    return aborted("verifying-anchor", `anchor read failed closed: ${errMessage(cause)}`);
+  }
+  if (
+    live.wormHeadHash !== snapshot.wormHeadHash ||
+    live.memoryVersion !== snapshot.memoryVersion
+  ) {
+    // The sequence still exists but its recorded head hash / memory version no longer matches the
+    // live chain there — a stale or forged anchor. Refuse to rebuild to it. Static reason shape:
+    // the sequence and hashes are not secret, but we keep it concise and interpolate no payload.
+    return aborted(
+      "verifying-anchor",
+      `snapshot anchor does not match live chain @ sequence ${snapshot.sequence} — refusing to restore to a stale/forged anchor`,
+    );
   }
 
   // Phase: initiated — emit the FIRST forward event (RestoreInitiated), carrying the DivergenceReport.
