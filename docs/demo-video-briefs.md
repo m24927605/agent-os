@@ -12,17 +12,18 @@
 >
 > **繁體中文版 (zh-TW):** [`demo-video-briefs.zh-TW.md`](./demo-video-briefs.zh-TW.md).
 
-## The three-cut strategy
+## The cuts
 
-One product, three audiences, three jobs. Do **not** make one film do all three.
+One product, several audiences, several jobs. Do **not** make one film do them all.
 
 | Cut | Length | Audience | Job |
 |-----|--------|----------|-----|
 | **Hero** | 60–75s | Top-of-funnel: CISO / Head of AI / exec | Earn attention; one feeling: *"autonomy I could actually leave running."* The **refusal** is the hero moment. No architecture. |
 | **Product Demo** | 2–3 min | Hands-on evaluators (eng / platform / security) | Show the governed pipeline end-to-end, **the same gate across every tool family**; make them want to clone it. |
 | **Technical / Architecture** | 5–8 min | Security architects, auditors, deep diligence | Prove each invariant is **structural** (process boundaries, fail-closed control flow, a signed append-only chain) — defensible to a security team. |
+| **Architecture & Flow** | ~2.5 min | Onboarding / technical intro | Introduce the architecture and the governed pipeline, **labeling each vendor component** (Hermes / NemoClaw / OpenShell / SpendGuard / AGT) with its **code-verified** role. A focused, shorter subset of the Technical cut (Cut 4 below). |
 
-The through-line is shared across all three: **"Hermes proposes. Agent OS governs."** Tagline:
+The through-line is shared across all cuts: **"Hermes proposes. Agent OS governs."** Tagline:
 **"Autonomy you can actually leave running."**
 
 ## Shared specification (inheritance)
@@ -512,6 +513,119 @@ AGENT OS — TECHNICAL / ARCHITECTURE FILM · PRODUCTION BRIEF  (cut 3 of 3)
   enablement); editable project. Done when: a security architect can map each invariant to a
   structural mechanism (a process boundary, a fail-closed branch, a signed chain) — not a
   promise; nothing on screen is technically wrong; each chapter stands alone as a clip.
+=====================================================================
+```
+
+---
+
+## Cut 4 — Architecture & Flow film (~2:30)
+
+```
+=====================================================================
+AGENT OS — ARCHITECTURE & FLOW FILM · PRODUCTION BRIEF  (cut 4)
+=====================================================================
+
+0 · PROJECT
+  A ~2.5 min introduction to the architecture and the governed pipeline, for onboarding / a
+  technical first-look. One feeling: "I get the shape of the system, and I can see exactly what
+  each named component does and where." Master 16:9. Inherits the HERO BRIEF v2 visual system,
+  motion, sound, captions, constraints (§4, §7–11) and Cut 2's production learnings (no
+  cold-open, no per-item highlight, titles echo the VO, breathing-gap dissolves, reveals timed
+  to a word-level transcript). A focused, shorter subset of the Technical cut.
+
+1 · STRATEGY
+  Audience: new engineers, partners, technical evaluators who want the mental model fast.
+  Goal: ORIENT first, THEN walk the architecture and the flow — and crucially, LABEL each vendor
+    component with its real role and show WHERE it acts in the pipeline.
+  Through-line: "Separate the thinker from the doer — and make the separation enforceable."
+
+2 · PRODUCT TRUTH — COMPONENT ROLES  (CODE-VERIFIED against real source; do not relabel without
+   re-checking the source — these were confirmed by reading the adapters + pipeline)
+    Hermes Agent       = Brain — proposes the action; UNTRUSTED. Never executes / denies /
+                         governs / writes the WORM. (src/runtime/brain/adapters/hermes; port.ts)
+    NemoClaw           = Agent Hosting — hosts / launches the agent process; OUTSIDE the
+                         pipeline (lifecycle layer). (src/hosting/adapters/nemoclaw)
+    OpenShell          = Execution Substrate — the sandbox where the effect runs; resolves the
+                         real secret at EGRESS. Holds NO policy / credential-decision / audit.
+                         (src/runtime/openshell; src/runtime/substrate/port.ts)
+    Agentic SpendGuard = Cost Gate — reserves the budget BEFORE the effect (hard-cap; over-budget
+                         = denied) and settles the REAL cost AFTER. Commit cannot erase an
+                         already-incurred spend. (src/cost/adapters/spendguard)
+    AGT                = Advisory governor (SecondaryPolicy) — folds into authorize; can only
+                         NARROW (any-deny-wins); never grants. The PDP stays the sole grant
+                         authority. (src/policy/adapters/agt; src/policy/dedup.ts)
+    agent-os (Spine)   = the one governed edge (runGovernedToolCall).
+    WORM kernel        = Attester — a SEPARATE process; append-only, server-computed hash chain,
+                         Ed25519-signed; the actor holds no key (can only append). NOTE:
+                         unforgeable at the PROCESS BOUNDARY today; operator-proof (HSM/KMS) is
+                         TR2/deployment — do NOT imply it is live.
+  Verified pipeline order (commit STRICTLY before effect):
+    screen → authorize (PDP, deny by default; AGT advisory folds in here) → approval (only if
+    requiresApproval) → cost.reserve (SpendGuard) → commit (WORM: append + await receipt) →
+    effect (OpenShell / connector, only after the receipt) → cost.commit (SpendGuard) → boundary.
+
+3 · SEQUENCE  (9 scenes incl. an opening title card; ~2:32)
+  A0 · TITLE CARD (~7s) — "Agent OS · Architecture & Flow" fades up from black (~0.8s); VO
+       orients (what Agent OS is + that we'll show how it's built and how an action flows). This
+       fixes the abrupt cold-open.
+  A1 · ONE PRINCIPLE (~8s) — separate the thinker from the doer; one governed edge.
+  A2 · THE ARCHITECTURE (~22s) — four parts build in: Brain (untrusted) · Spine (the one gate) ·
+       Body (sandbox/browser) · WORM kernel (a separate, dashed box — the attester).
+  A3 · VENDOR-NEUTRAL PORTS (~12s) — every part is a vendor behind a neutral port; governance
+       lives in the spine + ledger, not the vendor; swap by config.
+  A4 · WHAT FILLS EACH ROLE (~23s) — the labeled mapping (Hermes / NemoClaw / OpenShell /
+       SpendGuard / AGT → roles, revealed one per name). THE component-labeling scene.
+  A5 · THE PATH EVERY ACTION TAKES (~30s) — the 8 stages reveal in order, each annotated with its
+       owner (screen=spine · authorize ← AGT advises · approval · cost.reserve ← SpendGuard ·
+       commit = WORM · effect ← OpenShell · cost.commit ← SpendGuard · boundary = spine).
+  A6 · ALLOW vs DENY (~16s) — allowed → commit, then effect; denied (policy/approval/budget) →
+       trace stops, no commit, no effect.
+  A7 · ATTESTER ≠ ACTOR (~16s) — agent holds no key, can only append → can't forge / rewrite /
+       restore its history; honest footnote: process boundary today, operator-proof = deployment.
+  A8 · CLOSE (~16s) — one governed core, vendor-neutral, separately attested; commit before
+       effect, deny by default; pointers (concepts.md, security-model.md); "the thinker proposes,
+       the OS governs."
+
+4 · VOICEOVER  (final copy — read verbatim)
+  A0 "This is Agent OS, a governance layer for AI agents. Here's how it's built, and how a
+      single action flows through it."
+  A1 "The principle is simple. Separate the thinker from the doer, and force every action through
+      one governed edge. Here's the architecture."
+  A2 "Four parts. The brain proposes, and it's untrusted. The spine is the one governed edge every
+      action must pass. The body is where effects actually run, a sandbox, or a browser. And a
+      separate process, the tamper-proof kernel, signs the record. The brain can't act, the body
+      can't govern, and the signer stands on its own."
+  A3 "Every part is a vendor, plugged in behind a neutral port. The governance doesn't live in any
+      vendor. It lives in the spine and the ledger. Swap any piece by configuration, not a rewrite."
+  A4 "Here's what fills each role. Hermes is the brain, it proposes. NemoClaw hosts and launches
+      that agent. OpenShell is the execution substrate, the sandbox where a command actually runs.
+      Agentic SpendGuard is the cost gate, it reserves the budget before, and settles the real cost
+      after. And AGT is an advisory governor, it can only narrow a decision, never grant one."
+  A5 "Now the path every action takes. The brain proposes a call. The spine screens it for secrets.
+      The policy decision point authorizes it, deny by default, and that's where AGT's advice folds
+      in. If it's destructive, it needs approval. SpendGuard reserves the budget. Then the kernel
+      commits the record, and waits for the receipt. Only then does OpenShell run the effect.
+      SpendGuard settles the real cost, and the boundary crossing is recorded."
+  A6 "Watch the order. When it's allowed, the record commits, then the effect runs. When it's
+      denied, at policy, at approval, or at budget, the trace just stops. No commit. No effect.
+      Nothing happened."
+  A7 "And the part that acts is never the part that signs the record. They're separate processes.
+      The brain and the body hold no signing key, they can only append. So a compromised agent
+      cannot forge its own history, rewrite it, or restore it."
+  A8 "That's the shape of Agent OS. One governed core, vendor-neutral, separately attested. Commit
+      before effect. Deny by default. To go deeper, read the concepts and the security model. The
+      thinker proposes. The OS governs."
+
+5 · MOTION · SOUND · CAPTIONS · CONSTRAINTS — inherit HERO §7–11 and Cut 2 §6–7. Open on the title
+  card with a slower (~0.8s) fade-up. The component labels (A4) and flow-stage owners (A5) MUST
+  match the code-verified roles in §2 (a wrong arrow loses a technical viewer). Keep the
+  attester≠actor honesty (process boundary, not HSM). If the TTS glitches on a word (a "破音" was
+  caught on "spine"), regenerate that scene's VO and re-check.
+
+6 · DELIVERABLES & DEFINITION OF DONE
+  Deliver: ~2.5 min master 16:9; SRT; editable project. Done when: a newcomer can name each
+  component's role and point to where it acts in the pipeline; commit-before-effect is unmistakable;
+  nothing on screen is technically wrong or overclaimed; the open doesn't feel abrupt.
 =====================================================================
 ```
 
