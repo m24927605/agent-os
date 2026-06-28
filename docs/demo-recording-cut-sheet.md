@@ -1,4 +1,4 @@
-# Agent OS — Demo Recording Cut-Sheet (read-aloud, v2 polished)
+# Agent OS — Demo Recording Cut-Sheet (read-aloud, v3 — with problem-framing intro)
 
 > **One file to record from.** For each scene: run the **COMMAND**, show the **ON SCREEN** lines (they
 > are the *real* captured output — see the cast files), and read the **🎙 NARRATION** aloud. Calm,
@@ -17,6 +17,20 @@ Have a real inbox open (the throwaway test mailbox) for the "email lands" shot. 
 (not fake) if env is missing — confirm a real run first. Nothing prints a credential (`[REDACTED]`).
 
 ---
+
+## SCENE 0a — The problem (≈23s)
+**ON SCREEN:** dark card. Heading *"Agents can act now."* + the line *"Sending mail · running commands · browsing · moving money — on their own. Powerful. And dangerous."* Then four red ✗ risks reveal one by one:
+```
+✗ a poisoned web page can hijack it
+✗ it leaks the credentials you hand it
+✗ irreversible actions — and no undo
+✗ no trustworthy record of what happened, or who allowed it
+```
+🎙 **"AI agents are starting to act in the real world. They send email. Run commands. Browse the web. Even move money. That's powerful. And it's dangerous. A single poisoned web page can hijack one. It can leak the credentials you hand it. It can do something irreversible, and leave no trustworthy record of what happened, or who allowed it. So today you have two bad options: approve every action by hand, or let it run, and hope."**
+
+## SCENE 0b — The idea (≈11s)
+**ON SCREEN:** centered. *"What if every action had to pass one gate?"* → flow: `Agent (proposes) → one governance gate (it cannot bypass) → effect (in the real world)` · *no exceptions · no side doors* · *deny by default · record before effect · credential-blind · attester ≠ actor* · *— here's what that looks like, live —*
+🎙 **"Agent OS takes a different path. Let the agent act freely. But force every single action through one governance gate it cannot bypass. No exceptions. No side doors. Here is what that looks like, live."**
 
 ## SCENE 1 — Cold open: the real send (≈16s)
 **COMMAND:** `pnpm run e2e:live-gmail`  ·  **ON SCREEN (split):** terminal scrolling + the inbox; an email lands.
@@ -101,8 +115,10 @@ then the thesis card; four lines fade in: *Deny by default · Commit before effe
 
 ---
 
-## Narration-only (teleprompter — matches the chosen VO: OpenAI `gpt-4o-mini-tts`, voice **nova**, ~2:00)
+## Narration-only (teleprompter — matches the chosen VO: OpenAI `gpt-4o-mini-tts`, voice **nova**, ~2:50 with intro)
 
+0a. AI agents are starting to act in the real world. They send email. Run commands. Browse the web. Even move money. That's powerful. And it's dangerous. A single poisoned web page can hijack one. It can leak the credentials you hand it. It can do something irreversible, and leave no trustworthy record of what happened, or who allowed it. So today you have two bad options: approve every action by hand, or let it run, and hope.
+0b. Agent OS takes a different path. Let the agent act freely. But force every single action through one governance gate it cannot bypass. No exceptions. No side doors. Here is what that looks like, live.
 1. An agent just sent this email. For real. To a real inbox. The interesting part isn't that it sent it. It's everything that had to happen first.
 2. This is Agent OS. It lets an agent act in the real world. Send mail. Browse. Run tools. But every action it takes is forced through one gate. Let's rewind that email, and watch the gate.
 3. The agent only proposes a tool. Agent OS screens it for secrets. Checks policy — deny by default. Requires approval for anything destructive. Reserves the budget. And only then, commits. Watch the order.
