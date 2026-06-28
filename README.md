@@ -18,10 +18,13 @@ The autonomous loop is live end to end (infra-gated); what's left is deployment,
 
 ## Watch
 
-| Video | What |
-|---|---|
-| ▶ [Introduction & demo](./docs/videos/agent-os-intro-and-demo.mp4) (~3 min) | What it is, then the governed pipeline in action: a real action allowed, the same one refused, and the evidence. |
-| ▶ [Architecture & flow](./docs/videos/agent-os-architecture-and-flow.mp4) (~2.5 min) | The parts, the components, and the path every action takes. |
+**Introduction & demo** (~3 min) — what it is, then the governed pipeline in action: a real action allowed, the same one refused, and the evidence. ([download](./docs/videos/agent-os-intro-and-demo.mp4))
+
+https://github.com/user-attachments/assets/384b5241-0932-42a3-a6d3-538aaf8a54cd
+
+**Architecture & flow** (~2.5 min) — the parts, the components, and the path every action takes. ([download](./docs/videos/agent-os-architecture-and-flow.mp4))
+
+https://github.com/user-attachments/assets/1451830c-9b2e-47a1-b959-584fd67c6169
 
 ## Quick start
 
