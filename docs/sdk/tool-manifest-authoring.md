@@ -14,7 +14,7 @@ credential and you never bypass governance.
 
 1. Copy the template [`src/sdk/templates/tool-manifest.example.json`](../../src/sdk/templates/tool-manifest.example.json)
    to your tool's directory.
-2. Change the values (keep all nine fields; unknown fields are rejected — the schema is `.strict()`).
+2. Change the values (keep all ten fields; unknown fields are rejected — the schema is `.strict()`).
 3. Lint it:
    ```
    agentos manifest lint path/to/your-tool-manifest.json
@@ -31,7 +31,7 @@ import { exampleToolManifest, loadExampleToolManifest } from "agent-os/sdk/templ
 const manifest = loadExampleToolManifest(); // validated via R3 parseToolManifest, throws on violation
 ```
 
-## The nine fields (see R3 design §2.1 and `src/tools/manifest.ts`)
+## The ten fields (see R3 design §2.1 and `src/tools/manifest.ts`)
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -44,6 +44,7 @@ const manifest = loadExampleToolManifest(); // validated via R3 parseToolManifes
 | `idempotent` | boolean | `true` if re-running the action is safe (no duplicate effect). |
 | `requiresApproval` | boolean | `true` if a human must approve before the effect commits. |
 | `bundleRefOnly` | boolean | `true` if the tool references credentials **only** by bundleRef (never inline). Keep this `true` — the SDK is credential-blind by construction; a bundleRef such as `"github:PAT:prod"` is a *reference*, never a secret. |
+| `containment` | `"in-sandbox" \| "network-egress" \| "host-fs-write"` | Where the tool's effect is allowed to reach. `in-sandbox` = no external reach; `network-egress` = reaches the network (gated by the egress allowlist + folded into the authorize decision as `external`); `host-fs-write` = writes the host filesystem (gated by the host-write allowlist). The capability-containment registration gate (`capability-containment.ts`) **refuses to register** a tool whose required primitive is not wired, and the pipeline folds this into the egress/host-write decisions. |
 
 All string fields are trimmed and must be non-empty. Any field not in this list causes a parse
 failure (`.strict()`) — unknown fields are an attack surface, not a convenience.

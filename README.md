@@ -22,7 +22,7 @@ meant to dissolve into "telling a computer what you want."
   your computer — or your company. It is load-bearing support, never the headline.
 
 > **Status:** the **spine + three surfaces + seatbelt** are built and pass a 13-leg `verify` gate
-> (1125 tests). **The autonomous loop is LIVE, end-to-end:** a real Hermes Desktop **autonomously
+> (1808 tests). **The autonomous loop is LIVE, end-to-end:** a real Hermes Desktop **autonomously
 > discovers + calls** Agent OS's governed tools (incl. a general `exec.run`) → **real OpenShell exec** →
 > unified, independently-verifiable WORM — proven by opt-in, infra-gated live e2e over **both** the ACP
 > and the Desktop `config.yaml` paths. The experience surface **is Hermes Desktop** (no separate UI).
@@ -144,6 +144,18 @@ const agt = new AgtSecondaryPolicy(myAgtEvaluate);   // myAgtEvaluate = your liv
 const shell = createPersonalShell(integrationsFromEnv(process.env, { secondaries: [agt] }));
 ```
 
+## Documentation
+
+Start here, by who you are:
+
+- **Everyone — [Agent OS in 5 Minutes](./docs/concepts.md)** — the concepts + mental model (brain / body / spine, the four SEATBELT invariants, the one governed edge). Read this first.
+- **Individual — [Personal Quickstart](./docs/personal-quickstart.md)** — run the self-operating computer (`pnpm run example:personal`) and watch a governed intent flow end-to-end.
+- **Developer — [Developer Quickstart](./docs/sdk/developer-quickstart.md)** — lint a manifest, run a governed tool, verify the chain (<15 min). Then: [Composition Root Guide](./docs/sdk/composition-root-guide.md) (how to actually run a surface in your process), [Tool Manifest Authoring](./docs/sdk/tool-manifest-authoring.md), [Verifier Release](./docs/sdk/verifier-release.md).
+- **Enterprise — [Security, Trust & Compliance Whitepaper](./docs/security-model.md)** — the SEATBELT threat model + invariants for your security reviewer. Then the [Enterprise Deployment & Provisioning Checklist](./docs/enterprise-deployment.md) (what you must stand up).
+- **Reference — [Environment & Configuration](./docs/configuration.md)** — every `AGENTOS_*` switch + `agent-os.config.json`, code-derived.
+
+These docs are honest about what is in-repo (runnable today, in-memory defaults) vs deployment-gated (real KMS trust-root, sandbox, multi-tenant). See also [`AGENTS.md`](./AGENTS.md) (the operating contract) and the internal build records in [`docs/slices/`](./docs/slices/).
+
 ## Quickstart
 
 ```bash
@@ -186,7 +198,7 @@ pnpm run verifier:release           # builds the standalone + WASM verifier, wit
 - **Built & proven hermetically.** All three surfaces are runnable composition roots; the spine, the
   vendor-neutral ports (each with ≥2 implementations + a contract test), the 3 monopolies (deny-by-default
   PDP / credential-blind secret model / Go WORM kernel), the offline verifier, and the
-  no-vendor-in-core + cross-tenant gates all pass `pnpm run verify` (**1125 tests**).
+  no-vendor-in-core + cross-tenant gates all pass `pnpm run verify` (**1808 tests**).
 - **The autonomous loop is LIVE (infra-gated).** A real Hermes Desktop, handed our governed MCP server,
   **autonomously discovers (`tools/list`) + calls (`tools/call`)** Agent OS's tools — including the
   maximum-utility `exec.run` (an explicit argv vector, never a shell string) — over a **real OpenShell**
