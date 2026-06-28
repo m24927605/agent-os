@@ -101,7 +101,7 @@ then the thesis card; four lines fade in: *Deny by default · Commit before effe
 
 ---
 
-## Narration-only (teleprompter — matches `vo/full.m4a`, ~2:08 at a calm pace)
+## Narration-only (teleprompter — matches the chosen VO: OpenAI `gpt-4o-mini-tts`, voice **nova**, ~2:00)
 
 1. An agent just sent this email. For real. To a real inbox. The interesting part isn't that it sent it. It's everything that had to happen first.
 2. This is Agent OS. It lets an agent act in the real world. Send mail. Browse. Run tools. But every action it takes is forced through one gate. Let's rewind that email, and watch the gate.
@@ -115,4 +115,4 @@ then the thesis card; four lines fade in: *Deny by default · Commit before effe
 10. Deny by default. Commit before effect. Credential-blind. The recorder is never the actor. That's Agent OS. Autonomy you can actually leave running. Try it yourself.
 
 ---
-Companion: `docs/demo-video-script.md` (asset list + the three demo formats). Casts: `cast-A-gmail` / `cast-D-deny-gmail` / `cast-B-browser` / `cast-C-deny-browser` / `cast-verify-summary`. VO: `vo/full.m4a` + `vo/scene-01..10.m4a`.
+Companion: `docs/demo-video-script.md` (asset list + the three demo formats). Casts: `cast-A-gmail` / `cast-D-deny-gmail` / `cast-B-browser` / `cast-C-deny-browser` / `cast-verify-summary`. **Chosen VO:** OpenAI `gpt-4o-mini-tts`, voice **nova** (warm female), generated from this narration with a calm/founder-credible instruction — full track + per-scene `.mp3` (kept as demo artifacts, not committed). Regenerate by re-running the narration through the same TTS call with `voice: "nova"`.
