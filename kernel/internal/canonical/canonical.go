@@ -24,8 +24,11 @@ const Redacted = "[REDACTED]"
 var (
 	secretKeyRe = regexp.MustCompile(
 		`(?i)(secret|password|passwd|token|api[_-]?key|apikey|authorization|bearer|credential|private[_-]?key|x-api-key)`)
+	// Patterns must match src/audit/redact.ts SECRET_VALUE literally (single source of truth for the
+	// credential-VALUE shapes the kernel scrubs). CRED-HARDENING-GOOGLE adds the three Google/Bearer
+	// shapes (ya29. OAuth token, AIza API key, Bearer <token>) — keep this in lockstep with the TS side.
 	secretValueRe = regexp.MustCompile(
-		`sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+`)
+		`sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+|ya29\.[0-9A-Za-z._-]{20,}|AIza[0-9A-Za-z._-]{35}|\bBearer\s+[A-Za-z0-9._-]{20,}`)
 )
 
 // CanonicalBytes redacts then deterministically serializes an event to UTF-8 bytes. It fails closed
@@ -43,6 +46,22 @@ func CanonicalBytes(event any) ([]byte, error) {
 // kernel can persist the REDACTED event in the chain while a verifier that redacts again recomputes
 // the identical canonical bytes / entryHash. Credentials never reach a persisted entry.
 func RedactEvent(event any) any { return redact(event) }
+
+// RedactCanonicalBytes is the kernel's defense-in-depth INGEST BACKSTOP for the Credential Non-Leak
+// invariant. It applies ONLY the by-VALUE secret-shape scrub (secretValueRe) as a STRING/BYTE
+// replacement over ALREADY-canonical JSON bytes — it does NOT unmarshal / re-marshal (that risks
+// reordering keys or whitespace and would drift the hash chain on the honest path). It is therefore
+// CANONICAL-PRESERVING + IDEMPOTENT:
+//   - Honest path (producer already redacted): no secret-shaped substring => ReplaceAll is a no-op =>
+//     bytes are byte-IDENTICAL => entryHash is identical => chain continuity is intact.
+//   - Threat path (a buggy/compromised producer leaked a credential-shaped value): the matched
+//     substring is replaced with [REDACTED] BEFORE the bytes are ever hashed or persisted, so a raw
+//     credential never lands in the WORM bytes or the chain hash.
+//
+// By-KEY structural redaction is intentionally NOT done here (it would require unmarshal/re-marshal
+// and risk canonical drift) — the producer performs the full by-key+by-value redaction; the kernel
+// backstops credential-VALUE shapes. Callers MUST pass canonical JSON (e.g. validated via json.Valid).
+func RedactCanonicalBytes(b []byte) []byte { return secretValueRe.ReplaceAll(b, []byte(Redacted)) }
 
 // redact: by-KEY (value under a secret-like key -> REDACTED) + by-VALUE (secret-shape substrings
 // scrubbed). Mirrors src/audit/redact.ts.
