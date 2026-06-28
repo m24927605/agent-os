@@ -199,14 +199,18 @@ AGENT OS — HERO PRODUCT FILM · PRODUCTION BRIEF v2
 
 ```
 =====================================================================
-AGENT OS — PRODUCT DEMO FILM · PRODUCTION BRIEF  (cut 2 of 3)
+AGENT OS — INTRODUCTION & DEMO FILM · PRODUCTION BRIEF  (cut 2 of 3)
 =====================================================================
 
 0 · PROJECT
-  A 2–3 min product demo for hands-on evaluators. One feeling: "I see exactly how it
-  works, the same gate governs every tool, and I want to run it myself." Master 16:9
-  + 9:16 chapters. Inherits the visual system, motion, sound, and constraints of the
-  HERO BRIEF v2 (§4, §7–11). This is a walkthrough — heavier on REAL footage than the hero.
+  A ~3 min INTRODUCTION-and-demo for hands-on evaluators. One feeling: "I understand what this
+  is and why it matters — and I've now seen it actually work. I want to run it." Master 16:9
+  + 9:16. Inherits the visual system, motion, sound, and constraints of the HERO BRIEF v2
+  (§4, §7–11). REAL footage for the demo half.
+  IMPORTANT — it is an INTRODUCTION *then* a DEMO, in that order. Do NOT cold-open into a
+  terminal. PART 1 (~60s) orients the viewer (what world, what problem, what Agent OS IS, the
+  promise); only then does PART 2 show it working. A teaser/hero cold-open is a different cut
+  (Cut 1). This was the key correction: an "intro & demo" must introduce before it demonstrates.
 
 1 · STRATEGY & POSITIONING
   Audience: eng leads, platform/security engineers running an evaluation.
@@ -221,72 +225,101 @@ AGENT OS — PRODUCT DEMO FILM · PRODUCTION BRIEF  (cut 2 of 3)
   tool family — API actions (gmail/drive/calendar), browser (navigate/read/click/type),
   and exec (argv in a sandbox). The point of the demo is that the gate is family-agnostic.
 
-3 · SEQUENCE  (chaptered; ~2:30; chapter cards with a quiet lower-third label)
-  D1 · THESIS (~12s) — recap: an agent acts in the real world; Agent OS governs every move.
-  D2 · THE PATH (~22s) — the pipeline on a real send: screen → authorize (policy · egress ·
-       approval; deny by default) → reserve budget → commit (sealed) → effect → boundary.
-       Highlight each stage on the real trace as it's named.
-  D3 · ALLOW: send (~18s) — real gmail send; [commit] seals BEFORE [effect]; the inbox
-       receives it. The seal moment gets the §8 sound treatment.
-  D4 · CREDENTIAL-BLIND (~16s) — the agent's arg is a placeholder; resolved to [REDACTED]
-       only at egress. Show the agent's view vs the egress view side by side.
-  D5 · ALLOW: browser + data-out (~22s) — same gate, different family: it navigates only
-       allow-listed hosts; the read-back is scrubbed of secrets, length-capped, marked
-       untrusted before the agent reads it.
-  D6 · DENY across families — THE PROOF (~24s) — remove approval: same send → denied@approval,
-       no commit/effect/email. Then a browser call to a non-allow-listed host → denied@policy
-       at the network, before the browser moves. "Deny by default isn't a setting; it's the
-       default." (This is the demo's headline; give it the §8 near-silence beat.)
-  D7 · ATTESTER ≠ ACTOR (~16s) — the record is signed by a SEPARATE process, not the agent,
-       not even the part that acts. Cross the process boundary on screen. Nothing that runs
-       can forge, rewrite, or restore its own history.
-  D8 · ASSURANCE + CTA (~18s) — every build runs the same gate (typecheck · tests ·
-       cross-tenant checks · secret-scan) and an independent verifier re-runs it with fresh
-       context; ~1,800 tests green. CTA: "Clone it. Run the demo. Then point it at your own
-       agent." End on wordmark + repo/quickstart.
+3 · SEQUENCE  (11 scenes, INTRODUCTION-first; ~3:10 + breathing gaps ≈ 3:14)
+  PART 1 · INTRODUCTION (orient — ~58s; do NOT cold-open into the demo)
+    S1 · THE WORLD (~12s) — agents now ACT, not just chat: send / run / browse / move money,
+         increasingly on their own.
+    S2 · THE PROBLEM (~18s) — acting unattended is dangerous: hijack, leaked keys, irreversible,
+         no record of who allowed it. Today: babysit every action, or run-and-hope.
+    S3 · WHAT AGENT OS IS (~17s) — the one-line definition + the shape (Brain proposes →
+         Agent OS governs/records/executes → effect); "one control plane it cannot bypass —
+         the thinker separated from the doer." (The orientation a cold-open skips.)
+    S4 · THE PROMISE (~11s) — the four rules → "autonomy you can actually leave running" →
+         "let's watch it work."
+  PART 2 · DEMO (show — ~110s)
+    S5 · THE GOVERNED PATH (~23s) — a real send; reveal each trace stage as it is named:
+         screen → authorize (deny by default) → approval → cost → commit (sealed) → effect.
+    S6 · COMMIT BEFORE EFFECT (~13s) — record written first; the email can't leave until it's
+         sealed; no log-it-later, no undo. (§8 SEAL beat.)
+    S7 · CREDENTIAL-BLIND (~13s) — the agent's arg is a placeholder; resolved to [REDACTED]
+         only at egress; never in the agent, never in the log.
+    S8 · SAME GATE, THE BROWSER (~17s) — same gate, different family: only allow-listed hosts;
+         the read-back is scrubbed, capped, marked untrusted before the agent reads it.
+    S9 · THE REFUSAL — THE CLIMAX (~23s) — same send, not approved → denied@approval, no
+         commit/effect/email; then a browser call to a non-allow-listed host → denied@policy
+         at the network. "Deny by default isn't a setting; it's the default." (§8 DENY beat.)
+    S10 · ATTESTER ≠ ACTOR (~13s) — a separate process signs the record; the agent can't
+         forge, rewrite, or restore its own history.
+  PART 3 · CLOSE (~24s)
+    S11 · RECAP + CTA — ~1,800 tests green + an independent verifier; the four rules; wordmark
+         + tagline + "clone it · run the demo · point it at your own agent."
 
-4 · VOICEOVER  (near-final; read verbatim; calm, brisk-but-unhurried)
-  D1 "An AI agent can act in the real world now — send, browse, run, pay. Agent OS is the
-      layer that governs every move it makes. Let's watch it work, across real tools."
-  D2 "Every tool call takes the same path. The agent only proposes. Agent OS screens it for
-      secrets, checks policy — deny by default — folds in egress and approval, reserves the
-      budget, commits a tamper-proof record, and only then runs the effect. Watch the order."
-  D3 "Here, it sends an email. The record commits first. The email can't leave until that
-      record is sealed."
-  D4 "And look at what the agent actually held — a placeholder. The real token is resolved
-      at the network egress. Never in the agent. Never in the log."
-  D5 "Same gate, a different tool. Now it browses — but only the hosts it's allowed to. And
-      whatever it reads back is scrubbed of secrets, length-capped, and marked untrusted,
-      before the agent ever sees it."
-  D6 "Now take approval away. The same send — stopped at the approval gate. No commit. No
-      effect. No email. And a browser call to a host that isn't allow-listed — stopped at
-      the network, before the browser even moves. Deny by default isn't a setting. It's the
-      default."
-  D7 "The record isn't written by the agent — or even by the part of Agent OS that acts. A
-      separate process signs it. So nothing that runs can forge its own history, rewrite it,
-      or restore it."
-  D8 "Every build runs that same gate — types, tests, cross-tenant checks, a secret scan —
-      and an independent reviewer re-runs all of it with fresh eyes. Eighteen hundred checks,
-      green. Agent OS. Clone it, run the demo, watch the gate — then point it at your own agent."
+4 · VOICEOVER  (final copy — read verbatim; calm, founder-credible. Each on-screen title
+   must echo the line it plays under — no title/narration mismatch.)
+  S1  "AI agents used to just talk. Now they act — they send email, run commands, browse the
+       web, even move money. And increasingly, they do it on their own."
+  S2  "That's powerful. It's also dangerous. A single poisoned web page can hijack an agent.
+       It can leak the keys you hand it. It can take an action that can't be undone, and leave
+       no record of who allowed it. So today, you have two bad options: approve every action
+       by hand, or let it run, and hope."
+  S3  "Agent OS is a governance layer for AI agents. The agent, the brain, only proposes what
+       it wants to do. Agent OS decides, records, and executes, forcing every single action
+       through one control plane the agent cannot bypass. The thinker is separated from the doer."
+  S4  "Four rules make that safe to trust. Deny by default. Commit before effect.
+       Credential-blind. And the recorder is never the actor. The result is autonomy you can
+       actually leave running. Let's watch it work."
+  S5  "Here, an agent sends a real email. But watch the path it takes. The agent only proposes
+       the call. Agent OS screens it for secrets. Checks policy, deny by default. Requires
+       approval for anything destructive. Reserves the budget. Commits a tamper-proof record.
+       And only then, sends. Every action takes this same path."
+  S6  "Look at the order. The record is written first. The email cannot leave until that record
+       is sealed. If the record fails, the effect never happens. No log-it-later, and by design,
+       no undo."
+  S7  "And the credential? The agent never touches it. In its request, the key is just a
+       placeholder. The real token is resolved at the last moment, on the way out. Never in the
+       agent. Never in the log."
+  S8  "It's the same gate for every tool. Now the agent browses, but only the hosts it's allowed
+       to reach. And whatever the page returns is scrubbed of secrets, length-capped, and marked
+       untrusted, before the agent is ever allowed to read it."
+  S9  "Now, the same email, but this time, not approved. The gate stops it. No commit. No effect.
+       No email. The connector is never even reached. And a browser call to a host that isn't
+       allow-listed dies at the network, before the browser moves. Deny by default isn't a
+       setting. It's the default. There's nothing to undo, because nothing happened."
+  S10 "And here's the heart of it. The thing that acts is never the thing that signs the record.
+       They're separate processes. So a compromised agent cannot forge its own history, rewrite
+       it, or even restore it."
+  S11 "Every build re-runs the same gate, and an independent verifier checks it with fresh eyes.
+       Around eighteen hundred tests, green. Deny by default. Commit before effect.
+       Credential-blind. The recorder is never the actor. That's Agent OS. Autonomy you can
+       actually leave running. Clone it, run the demo, then point it at your own agent."
 
-5 · FOOTAGE  (real-capture priority)
-  Use a clean split or picture-in-picture: terminal/trace on one side, the real RESULT on
-  the other (inbox for D3, Chromium window for D5, the deny "nothing happened" stillness for
-  D6). Real cast logs are the ground truth for every trace line. Chapter cards are the only
-  pure motion-graphics moments besides the pipeline diagram in D2.
+5 · FOOTAGE  (PART 1 = clean motion-graphics cards; PART 2 = real-capture priority)
+  PART 1 (intro) is motion-graphics: the world, the risks, the definition + the shape diagram,
+  the four rules. PART 2 (demo) is REAL capture — split / picture-in-picture with the trace on
+  one side and the real RESULT on the other (inbox for S5–S6, Chromium for S8, the "nothing
+  happened" stillness for S9). Real cast logs are the ground truth for every trace line.
 
-6 · MOTION · SOUND · CAPTIONS — inherit HERO BRIEF v2 §7, §8, §9. Two near-silence beats:
-  the SEAL in D3 and the DENY in D6. Same reveal discipline (each line ~0.2s before its word).
+6 · MOTION · SOUND · CAPTIONS — inherit HERO BRIEF v2 §7, §8, §9. Two near-silence beats: the
+  SEAL in S6 and the DENY in S9. Reveal discipline: each item appears ~0.2s before its word,
+  timed to a word-level transcript. Production learnings (validated on the built cut):
+  (a) NO per-item highlight box — the timed reveal alone marks the current line; a background
+      highlight reads as redundant.
+  (b) Scenes join with a breathing gap (~0.4s) + a dissolve through the dark background — never
+      a hard cut (hard cuts read as "abrupt").
+  (c) Every on-screen title must echo the VO it plays under (e.g. S1 title "AI agents don't just
+      talk. They act." matches the S1 line; S2 "Powerful. And dangerous." matches the S2 line).
 
-7 · CONSTRAINTS / AVOID — inherit HERO §10–11. Demo-specific: never show two tool families
-  with different-looking gates (the whole point is ONE gate); never skip the commit→effect
-  order to save time; keep every trace faithful to the real run.
+7 · CONSTRAINTS / AVOID — inherit HERO §10–11. Intro&demo-specific: never cold-open into the
+  demo (orient first — PART 1 before PART 2); never show two tool families with different-looking
+  gates (the whole point is ONE gate); never skip the commit→effect order; keep every trace
+  faithful; no title/narration mismatch.
 
 8 · DELIVERABLES & DEFINITION OF DONE
-  Deliver: 2–3 min master 16:9; 9:16 chaptered cut for mobile; SRT; chapter markers; an
-  editable project. Done when: every chapter earns its place; the "same gate, every tool"
-  idea is unmistakable; both DENY shots read as "nothing happened, and it's provable";
-  an evaluator finishes wanting to clone the repo.
+  Deliver: ~3 min master 16:9; 9:16 cut; SRT; chapter markers; an editable project. Done when:
+  a first-time viewer is ORIENTED (knows what Agent OS is and why) BEFORE the demo; the "same
+  gate, every tool" idea is unmistakable; the DENY is the peak; every title matches its
+  narration; A/V stays in sync (< ~1 frame at every reveal); an evaluator finishes wanting to
+  clone the repo.
 =====================================================================
 ```
 
