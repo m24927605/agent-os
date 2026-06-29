@@ -64,7 +64,7 @@ build 出 163 個 `.map`、0 test → PKG1 關 source map。root `.` = `src/inde
 | Slice | 範圍 | 狀態 |
 |---|---|---|
 | **PKG1** | `package.json`:上表 9 入口的明確 `exports`(`types`+`import`)、`files:["dist","README.md","LICENSE"]`、`"prepack":"pnpm run build"`、`"license":"MIT"`、`@types/node` optional peer;`tsconfig.build` 關 `sourceMap`/`declarationMap`(不打包 163 個 map);`pkg:check`(build-first)測試。**完全釘死、可直接實作。** spec:`PKG1-exports-and-public-surface.md` | ⬜ **READY** |
-| **PKG2** | 第三方 tarball 消費煙霧證明(import 每入口 + tsc + 跑一次治理呼叫〔鏡射 reference root 的 allow 規則〕+ 深路徑被擋的 `ERR_PACKAGE_PATH_NOT_EXPORTED`)。 | 📝 **設計草圖**(開工 pin) |
+| **PKG2** | 第三方 tarball 消費煙霧證明(import 每入口 + tsc + 跑一次治理呼叫〔鏡射 reference root 的 allow 規則〕+ 深路徑被擋的 `ERR_PACKAGE_PATH_NOT_EXPORTED`)。 | ✅ **DONE**(`pkg:consumer-smoke` 實跑綠:8 子路徑解析 + executed + 深路徑被擋) |
 | **PKG3** | `docs/sdk/third-party-integration.md` + `examples/external-consumer/`;修 README/docs 的 factory import 為子路徑(Personal 帶 allow、工具 authoring 走 Developer)。 | 📝 **設計草圖**(開工 pin) |
 | **PKG4** | 生產級 WORM 接線的公開 exports(`createIngestAppender`/`createRpcAppendTransport`/`createEntriesReader`/`createPartitionedIngestSink`)。 | 📝 **設計草圖**(MVP 外) |
 | **PKG-final** | 翻 `private:false` + `npm publish`(org/scope/2FA/供應鏈)。 | ⛔ gated |

@@ -33,6 +33,7 @@
     "prepack": "pnpm run build",
     "pkg:check": "pnpm run build && vitest run src/__tests__/package-exports.test.ts",
     "pkg:pack-check": "bash scripts/pkg-pack-check.sh",
+    "pkg:consumer-smoke": "bash scripts/pkg-consumer-smoke.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "example:personal": "pnpm run build && node examples/surfaces/run-personal-shell.ts",

@@ -1,7 +1,10 @@
 # PKG2 — 第三方解析證明(consumer smoke,RED-first)
 
-> **狀態:設計草圖(design sketch),非本批實作契約。** 確切 fixture 檔、消費者 `tsconfig`、命令、斷言、
-> 自清與 online-CI/快取細節於**本片開工時**才 pin;下方是方向。本批(PKG1)只交付 `package.json` 契約。
+> **狀態:✅ 已實作。** `scripts/pkg-consumer-smoke.sh`(`pkg:consumer-smoke`)= build → `npm pack` → 在
+> throwaway `npm i --prefer-offline <tarball>` → consumer.mjs:(a) 8 個公開子路徑以**套件名**解析 + 曝露
+> factory、(b) 鏡射 `run-personal-shell.ts` 跑治理呼叫斷言 **`executed`**(in-memory)、(c) 負向:
+> `import "agent-os/runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin.js"` 被擋(`ERR_PACKAGE_PATH_NOT_EXPORTED`)。
+> 自清;publish-time gate(需 registry/cache 解 tarball 的 deps),不在 14-leg verify。下方為原始設計。
 
 > 父系列:[`INDEX.md`](./INDEX.md)。證明「從套件外部」每個公開子路徑都能**解析 + 型別檢查 + 實跑**,且
 > 內部深路徑被 `exports` 擋。這是 PKG1 的對外端到端驗收。
