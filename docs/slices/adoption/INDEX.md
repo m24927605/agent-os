@@ -43,7 +43,7 @@ Agent OS 把治理工具暴露成一個 **standard MCP stdio server**
 | Host | config 位置 / 格式 | transport | 啟動 | 狀態 |
 |---|---|---|---|---|
 | Hermes Desktop | `~/.hermes/config.yaml` `mcp_servers` | stdio | `hermes mcp add` 或直寫 | ✅ **已驗證**(`e2e:live-desktop-hermes`) |
-| Hermes TUI | 待測(是否同 `config.yaml`) | stdio | 待測 | 📝 **未驗證**(ADO-B2) |
+| Hermes TUI | 同 `config.yaml` `mcp_servers`(與 CLI/Desktop 共用) | stdio | 共用 | ✅ **發現層已驗(live `hermes mcp test`)**(ADO-B2) |
 | Claude Desktop / Cursor / 通用 MCP client | 各 host 自有(範本) | stdio | `node …/exec-mcp-server-bin.js` | 📝 **文件範例、未驗證**(社群/best-effort) |
 
 → **ADO-B1 必須以此矩陣呈現**:**只有 Hermes Desktop 標「已驗證」**;其餘標「範例/未驗證」,並列各 host 的
@@ -84,7 +84,7 @@ GREEN)。
 | 子切片 | 範圍 | 狀態 |
 |---|---|---|
 | **ADO-B1**(統一「導入 Agent OS」文件) | 一份 user-facing 文件,涵蓋三條路徑的**導入步驟**;B 段把現有 install 腳本步驟文件化,並**泛化成「任何 MCP host」**(不只 Hermes:給 Claude Desktop/Cursor/通用 MCP client 的 config 範本)。這就是本系列的 **docs-first 第一交付**。spec:`ADOPT1-adoption-guide.md` | ⬜ **READY**(純文件) |
-| **ADO-B2**(Hermes TUI 確認) | 確認/補上 Hermes **TUI** 版的 MCP 接入(是否同走 config.yaml `mcp_servers`;不同就補腳本/文件)。 | 📝 草圖(需對 TUI 實測) |
+| **ADO-B2**(Hermes 接入確認) | 確認 Hermes 的 MCP 接入(CLI/TUI/Desktop 共用 `config.yaml` `mcp_servers`)。 | ✅ **發現層已驗(live)** — 真 Hermes v0.17.0 `hermes mcp test agentos-exec` 連上(299ms)+ 發現全 16 治理工具;TUI 共用同份 config。**真實 effect 待 infra(OpenShell+kernel)**。 |
 
 ## 4. 路徑 C — 其他大腦(#3)
 

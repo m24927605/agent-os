@@ -110,9 +110,14 @@ Minimum assumptions: **stdio** transport · Node on PATH · quote paths containi
 
 | Host | Config | Transport | Launch | Status |
 |---|---|---|---|---|
-| **Hermes Desktop** | `~/.hermes/config.yaml` → `mcp_servers` | stdio | `hermes mcp add` or direct-write | ✅ **verified** (`e2e:live-desktop-hermes`) |
-| Hermes TUI | TBD (likely same `config.yaml`) | stdio | TBD | ⚠️ unverified |
+| **Hermes** (CLI / Desktop), v0.17.0 | `~/.hermes/config.yaml` → `mcp_servers` | stdio | `hermes mcp add` or direct-write | ✅ **verified** — `e2e:live-desktop-hermes`; and a live `hermes mcp test` connected (299 ms) and discovered all 16 governed tools |
+| Hermes TUI | same `~/.hermes/config.yaml` → `mcp_servers` | stdio | (shared with CLI/Desktop) | ✅ **discovery verified** — TUI reads the same `mcp_servers`, proven live via `hermes mcp test`; a TUI-driven tool call wasn't separately exercised |
 | Claude Desktop / Cursor / custom MCP client | host-specific | stdio | `node …/runtime/mcp/server-bin.js` (bin `agent-os-mcp`) | ⚠️ example, unverified |
+
+> **Live verification (Hermes v0.17.0):** the `agent-os-mcp` entry was added to a real Hermes, `hermes mcp
+> test` connected and discovered all 16 governed tools (exec.* / git.* / net.fetch), then the entry was
+> removed. This proves the registration + discovery layer. Driving a tool through to a real effect
+> additionally needs the OpenShell sandbox and the WORM kernel running.
 
 ---
 
