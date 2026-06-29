@@ -1,12 +1,11 @@
 # Tool approve/deny test matrix (REAL)
 
-A deterministic, **real** approve/deny test flow for the governed exec MCP tools — the ~16 tools a Hermes
-brain discovers and calls. It drives the **single governed edge** directly
+A deterministic, **real**, **exhaustive** approve/deny test flow for the governed exec MCP tools — **every
+one of the 16 tools** a Hermes brain discovers and calls gets **BOTH a real ALLOW and a real DENY**. It
+drives the **single governed edge** directly
 (`createExecMcpServer(buildBinDeps(false, …)).handle({tools/call})`) with **no LLM and no model credits**,
-against a **real OpenShell sandbox** and a **fresh real Go kernel WORM partition** (`tenant-bin`). For each
-tool it proves an **approve** path (real effect runs, exit 0, committed before the effect) and the matrix
-as a whole proves every **deny mode**, then reads the kernel chain back to confirm it is append-only,
-hash-chained, and credential-blind.
+against a **real OpenShell sandbox** and a **fresh real Go kernel WORM partition** (`tenant-bin`), then reads
+the kernel chain back to confirm it is append-only, hash-chained, and credential-blind.
 
 - Spec: `src/runtime/brain/adapters/hermes/mcp/exec-mcp-matrix.live.test.ts`
 - Runner: `scripts/e2e-live-tool-matrix.sh` (`pnpm run e2e:live-tool-matrix`)
@@ -46,26 +45,29 @@ per `(tool × scenario)` — the exact production code path, with full control a
 An `onEffect` hook tracks effect firing: **approve** ⇒ `isError:false` + `onEffect` fired once; **deny** ⇒
 `isError:true` + `"DENIED: <stage> — <reason>"` + `onEffect` **never** fired (commit-before-effect).
 
-## The matrix
+## The matrix — every tool, ALLOW + DENY
 
-**APPROVE — real OpenShell exec, exit 0, committed before effect** (one shared sandbox, seeded in order):
+**ALLOW** (governance permits → the real effect; one shared sandbox, seeded in order):
 
-| tool | args | proves |
+| tools | how | proves |
 |---|---|---|
-| `exec.pwd` `exec.echo` `exec.ls` `exec.run` | benign | read + arbitrary-argv exec |
-| `exec.write_file` → `exec.cat` `exec.head` `exec.wc` `exec.grep` | seed `seed.txt`, then read it | write (content via stdin, never argv) + reads |
-| `net.fetch` | `https://example.com/` (`egressAllow: ["example.com"]`) | a **real** network fetch from inside the sandbox |
-| `exec.run git init/config` → `git.status` `git.add` `git.commit` `git.diff` `git.log` | a real in-sandbox git work-tree | git read + staged mutation + local commit (never a push) |
+| `exec.pwd/echo/ls/run`, `exec.write_file`→`cat/head/wc/grep` | benign args; `write_file` seeds the file the reads use | real OpenShell exec, exit 0, effect fires **after** commit |
+| `git.status/add/commit/diff/log` | a real in-sandbox git work-tree | git read + staged mutation + local commit (never a push) |
+| `net.fetch` | `https://example.com/`, `egressAllow:["example.com"]` | a **real** network fetch from inside the sandbox |
+| `git.push` | `egressAllow` + `approve→approved`; `https://example.com/x.git` | governance permits it **all the way to the real effect** (the `git push` runs in the sandbox, `onEffect` fires, NOT denied). A *successful* push additionally needs an anon-push **https** remote (the url validator is https-only; the push is unauthenticated until EXEC2) — an honest real-remote gap, **not** a governance deny. |
 
-**DENY — each mode, with no effect run:**
+**DENY** (every tool refused for real, `onEffect` **never** fires):
 
-| mode | tool | how | expected |
-|---|---|---|---|
-| `denied@screen` | `exec.echo` | a secret-**shaped** synthetic canary (`sk-` + 20 synthetic chars, built at runtime, account-invalid) | `DENIED: screen — credential-blind…` |
-| `denied@cost` | `exec.echo` | inject `new NullCostGate()` (denies at reserve) | `DENIED: cost …` |
-| `denied@policy` (egress) | `net.fetch` | `egressAllow: []` (deny-all) | `DENIED: policy … egress-allowlist` — host **not** leaked |
-| `denied@approval` | `git.push` | `approve` returns `{status:"denied"}` | `DENIED: approval …` |
-| `denied@policy` (deny-by-default) | `gmail.send` | `actionAdvertise` off ⇒ unregistered | `DENIED: policy …` |
+| tools | mode | how |
+|---|---|---|
+| all 14 in-sandbox `exec.*` + `git.status/add/commit/diff/log` | `denied@cost` | inject `new NullCostGate()` → each refused at reserve, before commit/effect |
+| `net.fetch` | `denied@policy` (egress) | `egressAllow:[]` (deny-all) → host **not** leaked |
+| `git.push` | `denied@approval` | `approve` returns `{status:"denied"}` |
+| `exec.echo` (extra mode) | `denied@screen` | a secret-**shaped** synthetic canary (`sk-` + 20 chars, built at runtime) |
+| `gmail.send` (extra mode) | `denied@policy` (deny-by-default) | `actionAdvertise` off ⇒ unregistered |
+
+→ **All 16 tools get a real ALLOW *and* a real DENY**; the screen + deny-by-default rows add extra mode
+coverage.
 
 **KERNEL READBACK** (`createSignedChainReader({partitionId:"tenant-bin"})`): the partition has ≥ the
 approved-effect count of entries; every entry's `prevHash` equals the previous entry's `entryHash`
@@ -78,10 +80,10 @@ approved-effect count of entries; every entry's `prevHash` equals the previous e
 - **attester ≠ actor holds to the PROCESS boundary (TR1)** — the kernel signs/hash-chains in a separate
   process, but the key is in-process/operator-held. Operator-unforgeable HSM/KMS/remote-attestation is
   **TR2/deployment**, not proven here.
-- **`net.fetch`** runs a **real** fetch from inside the sandbox to an allowlisted host (verified green).
-  **`git.push`** executed needs a real remote + push credential, so the harness proves its **deny** path
-  (approval) deterministically; the executed push is left to an operator with a real remote — real-or-skip,
-  never faked.
+- **`net.fetch`** runs a **real** fetch from inside the sandbox to an allowlisted host. **`git.push`** is
+  governance-**allowed all the way to the real effect** (the push command runs in the sandbox) and has a
+  real **deny** (approval); a *successful* push additionally needs an anon-push **https** remote (the url
+  validator is https-only and the push is unauthenticated until EXEC2) — a real-remote gap, never faked.
 - **Action / browser families are tested REAL, not faked.** The runner also runs `e2e:live-gmail`
   (`gmail.send` → a **real** Google API call; real OAuth resolved at egress) and `e2e:live-browser`
   (`browser.navigate` + `browser.read` → a **real** Chromium driving a real page). Verified live: the
