@@ -69,6 +69,7 @@
     "e2e:live-capstone": "bash scripts/e2e-live-capstone.sh",
     "e2e:live-exec-mcp": "bash scripts/e2e-live-exec-mcp.sh",
     "e2e:live-exec-mcp-stdio": "bash scripts/e2e-live-exec-mcp-stdio.sh",
+    "e2e:live-tool-matrix": "bash scripts/e2e-live-tool-matrix.sh",
     "e2e:live-hermes-desktop": "bash scripts/e2e-live-hermes-desktop.sh",
     "e2e:live-gmail": "bash scripts/e2e-live-gmail.sh",
     "e2e:live-browser": "bash scripts/e2e-live-browser.sh",
