@@ -1,0 +1,37 @@
+# net.fetch egress policy (EXAMPLE) — authorize a sandbox to let `curl` reach specific hosts.
+#
+# WHY: Agent OS pins net.fetch's curl to the OpenShell egress proxy (`-x`, default
+# http://10.200.0.1:3128 via AGENTOS_OPENSHELL_EGRESS_PROXY). OpenShell egress is DENY-BY-DEFAULT,
+# so net.fetch gets `curl (56) CONNECT tunnel failed, response 403` until an OPERATOR authorizes a
+# host here. This is the operator-authorization surface: deny-by-default, you open only what you choose.
+#
+# APPLY (per-sandbox — the proven, safe path; verified live: deny-403 -> apply -> HTTP 200):
+#   openshell policy set <sandbox-name> --policy deploy/personal/netfetch-egress-policy.example.yaml --yes
+#   (the <sandbox-name> is the gateway NAME from `openshell sandbox list -o json`, NOT an internal id.)
+#
+# ⚠️ `openshell policy set` REPLACES THE ENTIRE policy (filesystem_policy + process + network_policies),
+# so the static filesystem/process blocks below MUST match what the sandbox image needs. For a GLOBAL /
+# default policy (`openshell policy set --global --yes`) you MUST first merge the running image's existing
+# policy (`openshell policy get <sandbox> --full -o json`) so you do not strip the image's baked allows
+# (e.g. openclaw's Claude->api.anthropic.com) or restrict its filesystem. Do NOT set a global blind.
+#
+# Recommended starter hosts: read-only GET to public GitHub (no credentials, least-privilege). Add more
+# hosts as you authorize them — one entry per host, deny-by-default keeps everything else closed.
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
+  read_write: [/sandbox, /tmp, /dev/null]
+landlock:
+  compatibility: best_effort
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+network_policies:
+  netfetch_github:
+    name: netfetch-github-readonly
+    endpoints:
+      - { host: api.github.com, port: 443, protocol: rest, enforcement: enforce, access: read-only }
+      - { host: raw.githubusercontent.com, port: 443, protocol: rest, enforcement: enforce, access: read-only }
+    binaries:
+      - { path: /usr/bin/curl }
