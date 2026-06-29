@@ -113,6 +113,7 @@ optional ones on is config-driven — see [Configuration](./docs/configuration.m
 
 Start with the one that fits you:
 
+- **Adopt** — [Adopting Agent OS](./docs/adoption.md): which path fits you — turnkey, connect an existing agent (MCP), or embed as a library.
 - **Everyone** — [Agent OS in 5 Minutes](./docs/concepts.md): the mental model (brain / body / spine, the four invariants, the one governed edge).
 - **Individual** — [Personal Quickstart](./docs/personal-quickstart.md): run the self-operating computer and watch a governed intent flow end to end.
 - **Developer** — [Developer Quickstart](./docs/sdk/developer-quickstart.md), then [Composition Root Guide](./docs/sdk/composition-root-guide.md), [Build a Tool Family](./docs/sdk/build-a-tool-family.md), [Tool Manifest Authoring](./docs/sdk/tool-manifest-authoring.md), [Verifier Release](./docs/sdk/verifier-release.md).
