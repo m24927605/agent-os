@@ -1109,8 +1109,12 @@ export async function buildBinDeps(
   return { deps, substrate, sandboxId };
 }
 
-/** The bin's entry point: provision an ephemeral sandbox, run the stdio loop, destroy on exit. */
-async function main(): Promise<void> {
+/**
+ * The bin's entry point: provision an ephemeral sandbox, run the stdio loop, destroy on exit.
+ * Exported so the vendor-neutral wrapper (`src/mcp/server-bin.ts`, bin `agent-os-mcp`) can delegate to
+ * it (ADO-B3). The entry-point guard below still only auto-runs `main` when THIS file is the entry.
+ */
+export async function main(): Promise<void> {
   const fake = process.env.AGENTOS_EXEC_MCP_FAKE === "1";
 
   // ── Provision the EPHEMERAL sandbox + assemble deps (REAL: OpenShell substrate + shared-kernel WORM). ──

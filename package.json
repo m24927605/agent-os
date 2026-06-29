@@ -23,7 +23,7 @@
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md", "LICENSE"],
-  "bin": { "agentos": "./dist/cli/main.js" },
+  "bin": { "agentos": "./dist/cli/main.js", "agent-os-mcp": "./dist/runtime/mcp/server-bin.js" },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "biome check src",

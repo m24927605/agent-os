@@ -95,15 +95,16 @@ that host's MCP-servers config:
 // generic MCP host config (shape varies by host) — UNTESTED EXAMPLE
 {
   "command": "node",
-  "args": ["<AGENT_OS_DIR>/dist/runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin.js"],
+  "args": ["<AGENT_OS_DIR>/dist/runtime/mcp/server-bin.js"],
   "env": { "AGENTOS_OPENSHELL_ENDPOINT": "127.0.0.1:17670", "AGENTOS_KERNEL_INGEST_ENDPOINT": "127.0.0.1:50051" }
 }
 ```
 
 Minimum assumptions: **stdio** transport · Node on PATH · quote paths containing spaces · the env above.
 
-> **Note (path debt):** the bin currently lives under a `…/hermes/…` path for historical reasons, but it
-> is a host-agnostic MCP server. A vendor-neutral path/alias is a known follow-up (ADO-B3).
+> **Vendor-neutral entry:** the governed MCP server is exposed at `dist/runtime/mcp/server-bin.js` (bin
+> `agent-os-mcp`) — a host-agnostic entry, so a non-Hermes host doesn't point at a `hermes`-named path.
+> (The Hermes Desktop installer above still uses its own historical path internally; same server.)
 
 ### Host support matrix
 
