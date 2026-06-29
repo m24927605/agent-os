@@ -80,7 +80,7 @@ d("exec MCP tools — REAL approve/deny matrix (OpenShell + Go kernel WORM)", ()
   it(
     "APPROVE: in-sandbox exec/git tools execute (real OpenShell, exit 0) and fire the effect after commit",
     async () => {
-      const kit = await makeKit(); // default allow-exec/git/net + budget cost gate
+      const kit = await makeKit({ egressAllow: ["example.com"] }); // allow one real egress host for net.fetch
       // Readiness warmup: a freshly-created sandbox may not accept the FIRST exec immediately (the live
       // capstone got readiness "for free" via the LLM's latency). Retry a benign exec until the stream is
       // ready. These warmup calls append to the SAME (primary) kit, so sequence numbering stays monotonic.
@@ -106,6 +106,10 @@ d("exec MCP tools — REAL approve/deny matrix (OpenShell + Go kernel WORM)", ()
         expect(o.effects, `${name} effect must fire after commit`).toBe(1);
         approveCount += 1;
       }
+      // net.fetch: a REAL fetch from INSIDE the sandbox to an allowlisted host (real network egress).
+      const nf = await kit.drive("net.fetch", { url: "https://example.com/" });
+      expect(nf.isError, `net.fetch should execute a real fetch: ${nf.text}`).toBe(false);
+      approveCount += 1;
       // git: init a work-tree in the sandbox, then exercise the git.* read/mutation tools
       await kit.drive("exec.run", { argv: ["git", "init"] });
       await kit.drive("exec.run", { argv: ["git", "config", "user.email", "t@t"] });

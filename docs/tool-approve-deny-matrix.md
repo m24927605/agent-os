@@ -14,16 +14,24 @@ hash-chained, and credential-blind.
 ## Run it
 
 ```bash
-# Needs a running OpenShell gateway (openshell CLI on PATH). The runner builds + spawns its OWN fresh
-# Go kernel, so you don't provide one. No Hermes, no model credits.
+# Needs a running OpenShell gateway (openshell CLI on PATH). The runner builds + spawns its OWN fresh Go
+# kernel, sources ~/.env for your action creds, and runs the COMPLETE real flow. No Hermes, no model credits.
 AGENTOS_LIVE_OPENSHELL=1 pnpm run e2e:live-tool-matrix
 ```
 
-Missing `AGENTOS_LIVE_OPENSHELL=1` or `openshell` ⇒ a **clean block** (exit 0). Not part of `pnpm run
-verify` (it spawns a kernel + needs the live gateway); the spec is `describe.skip` without the gates so the
-offline suite stays green.
+It runs three real stages, **nothing faked**: (1) the in-sandbox + network matrix below; (2) a **real**
+Gmail send (`e2e:live-gmail` — `gmail.send` → real Google API egress); (3) a **real** Chromium browser
+drive (`e2e:live-browser` — `browser.navigate` + `browser.read` on a real page). Stages 2–3 cleanly
+**skip** when their creds / playwright are absent — never a fake stand-in.
 
-**Verified green** on a real OpenShell gateway + a real Go kernel (2026-06-29): 7/7.
+Missing `AGENTOS_LIVE_OPENSHELL=1` or `openshell` ⇒ a **clean block** (exit 0). Not part of `pnpm run
+verify` (it spawns a kernel + drives real external effects); the matrix spec is `describe.skip` without the
+gates so the offline suite stays green.
+
+**Verified live (2026-06-29):** matrix 7/7 green (real exec/git/net.fetch + every deny mode + readback);
+real Chromium navigate+read EXECUTED on a real page (read back real content); the real Gmail send made a
+real Google egress call (real OAuth) and was governed-**denied** by the account allowlist — align the OAuth
+token's account with `AGENTOS_ACTION_TEST_ACCOUNT` for a green send (a real config gate, not a fake).
 
 ## Driving mechanism — `composition-root-real`
 
@@ -45,6 +53,7 @@ An `onEffect` hook tracks effect firing: **approve** ⇒ `isError:false` + `onEf
 |---|---|---|
 | `exec.pwd` `exec.echo` `exec.ls` `exec.run` | benign | read + arbitrary-argv exec |
 | `exec.write_file` → `exec.cat` `exec.head` `exec.wc` `exec.grep` | seed `seed.txt`, then read it | write (content via stdin, never argv) + reads |
+| `net.fetch` | `https://example.com/` (`egressAllow: ["example.com"]`) | a **real** network fetch from inside the sandbox |
 | `exec.run git init/config` → `git.status` `git.add` `git.commit` `git.diff` `git.log` | a real in-sandbox git work-tree | git read + staged mutation + local commit (never a push) |
 
 **DENY — each mode, with no effect run:**
@@ -52,7 +61,7 @@ An `onEffect` hook tracks effect firing: **approve** ⇒ `isError:false` + `onEf
 | mode | tool | how | expected |
 |---|---|---|---|
 | `denied@screen` | `exec.echo` | a secret-**shaped** synthetic canary (`sk-` + 20 synthetic chars, built at runtime, account-invalid) | `DENIED: screen — credential-blind…` |
-| `denied@cost` | `exec.echo` | inject `failClosedCostGate()` | `DENIED: cost …` |
+| `denied@cost` | `exec.echo` | inject `new NullCostGate()` (denies at reserve) | `DENIED: cost …` |
 | `denied@policy` (egress) | `net.fetch` | `egressAllow: []` (deny-all) | `DENIED: policy … egress-allowlist` — host **not** leaked |
 | `denied@approval` | `git.push` | `approve` returns `{status:"denied"}` | `DENIED: approval …` |
 | `denied@policy` (deny-by-default) | `gmail.send` | `actionAdvertise` off ⇒ unregistered | `DENIED: policy …` |
@@ -68,14 +77,17 @@ approved-effect count of entries; every entry's `prevHash` equals the previous e
 - **attester ≠ actor holds to the PROCESS boundary (TR1)** — the kernel signs/hash-chains in a separate
   process, but the key is in-process/operator-held. Operator-unforgeable HSM/KMS/remote-attestation is
   **TR2/deployment**, not proven here.
-- **`net.fetch` / `git.push` approve (executed) paths** need a real reachable allowlisted endpoint / git
-  remote + a credential resolved at the sandbox egress (placeholder only). The harness proves their **deny**
-  paths (egress / approval) deterministically; the executed path is left to an operator run (it touches a
-  real external system).
-- **Action / browser families** (`gmail.*` / `drive.*` / `calendar.*` / `browser.*`, ~12 more tools) are
-  designed in the full matrix but route their external effect through a **FakeConnector** — that proves
-  **real governance + real WORM** with a *simulated* external effect, never a real Google/Chromium action.
-  They are a separate, clearly-labeled extension, not part of this real-sandbox harness.
+- **`net.fetch`** runs a **real** fetch from inside the sandbox to an allowlisted host (verified green).
+  **`git.push`** executed needs a real remote + push credential, so the harness proves its **deny** path
+  (approval) deterministically; the executed push is left to an operator with a real remote — real-or-skip,
+  never faked.
+- **Action / browser families are tested REAL, not faked.** The runner also runs `e2e:live-gmail`
+  (`gmail.send` → a **real** Google API call; real OAuth resolved at egress) and `e2e:live-browser`
+  (`browser.navigate` + `browser.read` → a **real** Chromium driving a real page). Verified live: the
+  browser drive navigated + read a real page; the Gmail send made a real Google egress call and was
+  governed-**denied** by the account allowlist (the OAuth token's account must equal
+  `AGENTOS_ACTION_TEST_ACCOUNT` for a green send — a real config gate, not a fake). `drive.*` / `calendar.*`
+  need their own OAuth tokens; absent those they cleanly **skip** — never faked.
 
 ## Notes from building it (gotchas the harness encodes)
 
