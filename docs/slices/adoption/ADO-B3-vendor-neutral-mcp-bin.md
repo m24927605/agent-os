@@ -17,7 +17,7 @@
 2. **新增 vendor-neutral wrapper** `src/runtime/mcp/server-bin.ts`(shebang + 委派):
    ```ts
    #!/usr/bin/env node
-   import { main } from "../runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin.js";
+   import { main } from "../brain/adapters/hermes/mcp/exec-mcp-server-bin.js"; // src/runtime/mcp → src/runtime/brain
    main().catch((e) => { process.stderr.write(`agent-os-mcp: fatal: ${e}\n`); process.exitCode = 1; });
    ```
    它只當 bin 用(無人 import)→ 直接呼叫 main。spawn 為 entry 時,bin 模組的 guard 看到 entry 是 wrapper
@@ -42,3 +42,10 @@ build 後該檔存在且首行為 `#!/usr/bin/env node`。先紅(bin/wrapper 未
 - `pnpm run verify`(14-leg)全綠;`pnpm run pkg:pack-check` 仍乾淨(新 bin 進 tarball、有 shebang)。
 - neutral bin 存在、有 shebang、`bin` 映射不含 `hermes`;adoption 文件 generic 段用 neutral 路徑。
 - 既有行為 byte-identical(export main 不改 guard;Hermes 安裝器未動)。
+
+## Follow-up(ADO-B3b,未納本片)
+
+review 指出更徹底的做法:把 **host-agnostic 的 MCP server composition 抽到 `src/runtime/mcp/` 的 neutral
+模組**,讓 **Hermes-specific bin 與 `agent-os-mcp` 都委派到該 neutral 模組**(目前 neutral 入口仍 deep-import
+hermes adapter 的 bin)。本片先交付**vendor-neutral 路徑/入口**(使用者面目標已達:generic 敘事不再指向
+`hermes` 路徑);完整解耦留 ADO-B3b。

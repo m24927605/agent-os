@@ -112,7 +112,7 @@ Minimum assumptions: **stdio** transport · Node on PATH · quote paths containi
 |---|---|---|---|---|
 | **Hermes Desktop** | `~/.hermes/config.yaml` → `mcp_servers` | stdio | `hermes mcp add` or direct-write | ✅ **verified** (`e2e:live-desktop-hermes`) |
 | Hermes TUI | TBD (likely same `config.yaml`) | stdio | TBD | ⚠️ unverified |
-| Claude Desktop / Cursor / custom MCP client | host-specific | stdio | `node …/exec-mcp-server-bin.js` | ⚠️ example, unverified |
+| Claude Desktop / Cursor / custom MCP client | host-specific | stdio | `node …/runtime/mcp/server-bin.js` (bin `agent-os-mcp`) | ⚠️ example, unverified |
 
 ---
 

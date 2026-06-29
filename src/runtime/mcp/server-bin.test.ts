@@ -22,4 +22,13 @@ describe("vendor-neutral MCP bin (ADO-B3)", () => {
     expect(existsSync(target), `${target} missing (run \`pnpm run build\`)`).toBe(true);
     expect(readFileSync(target, "utf8").split("\n")[0]).toBe("#!/usr/bin/env node");
   });
+
+  it("delegates to the real exec MCP server (imports the bin + calls main — not a no-op)", () => {
+    const built = readFileSync(resolve(ROOT, "dist/runtime/mcp/server-bin.js"), "utf8");
+    // a no-op stub would pass the existence+shebang checks; assert it actually wires the server.
+    expect(built, "neutral entry must import the exec MCP server bin").toMatch(
+      /exec-mcp-server-bin/,
+    );
+    expect(built, "neutral entry must call main()").toMatch(/\bmain\(/);
+  });
 });
