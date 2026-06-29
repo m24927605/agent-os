@@ -191,6 +191,70 @@ function extractHost(token: string): string | undefined {
   return undefined;
 }
 
+/** curl/wget proxy-setting flags whose VALUE is an egress destination the caller chose. */
+const PROXY_FLAGS: ReadonlySet<string> = new Set([
+  "-x",
+  "--proxy",
+  "--preproxy",
+  "--socks4",
+  "--socks4a",
+  "--socks5",
+  "--socks5-hostname",
+]);
+
+/**
+ * LOOSE host extraction for a PROXY value: strip scheme + userinfo, keep the authority up to the first
+ * path/query/fragment — WITHOUT the dotted-host requirement `extractHost` enforces. A proxy value the caller
+ * supplies (e.g. `-x attacker` or `-xhttp://evil:3128`) is a destination the caller PICKED, so even a bare
+ * `attacker` must surface as a host so the deny-by-default egress fold can gate it. Returns undefined for empty.
+ */
+function looseProxyHost(value: string): string | undefined {
+  const noScheme = value.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, "");
+  const at = noScheme.lastIndexOf("@");
+  const authority = (at >= 0 ? noScheme.slice(at + 1) : noScheme).split(/[/?#]/, 1)[0] ?? "";
+  return authority.length > 0 ? authority : undefined;
+}
+
+/**
+ * EGRESS-INTEGRITY for `exec.run` (SLICE-CAP6d): the brain can hand exec.run a RAW argv, so it could try to
+ * REDIRECT a network binary's egress to a proxy the host-token `extractHost` does not see — via a glued
+ * `-xhttp://evil:3128`, a bare `-x evil` (no dot), or an `env HTTPS_PROXY=http://evil curl …` wrapper. Those
+ * forms slip past `extractHost` (it rejects `-`-leading + non-dotted tokens). When a NETWORK binary is invoked
+ * (directly OR via an `env`-style wrapper), surface EVERY proxy destination (flag VALUE or `*_PROXY=` env
+ * assignment) as a host so the deny-by-default egress fold gates it — the proxy host is not on the allowlist
+ * => DENY. net.fetch/git.push are unaffected: their bindings OVERRIDE networkHosts to the bare URL host (the
+ * Agent-OS-owned pinned proxy is never a gated destination). Pure; returns the extra proxy hosts.
+ */
+function proxyRedirectHosts(argv: readonly string[]): string[] {
+  if (!argv.some((t) => NETWORK_CMDS.has(basename(t)))) return [];
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const t = argv[i] ?? "";
+    if (PROXY_FLAGS.has(t)) {
+      const h = looseProxyHost(argv[i + 1] ?? ""); // separated: `-x VALUE`
+      if (h !== undefined) out.push(h);
+      continue;
+    }
+    if (t.startsWith("-x") && t.length > 2) {
+      const h = looseProxyHost(t.slice(2)); // glued: `-xVALUE`
+      if (h !== undefined) out.push(h);
+      continue;
+    }
+    const eq = /^(--proxy|--preproxy|--socks4a?|--socks5(?:-hostname)?)=(.+)$/.exec(t); // `--proxy=VALUE`
+    if (eq) {
+      const h = looseProxyHost(eq[2] ?? "");
+      if (h !== undefined) out.push(h);
+      continue;
+    }
+    const env = /^(?:HTTP|HTTPS|ALL|FTP|NO)_PROXY=(.+)$/i.exec(t); // `env HTTPS_PROXY=VALUE …` wrapper
+    if (env) {
+      const h = looseProxyHost(env[1] ?? "");
+      if (h !== undefined) out.push(h);
+    }
+  }
+  return out;
+}
+
 /**
  * Build the credential-blind projection from validated `exec.run` args (`{ argv }`). PURE: no I/O,
  * no throw on normal input. Defensive on empty argv (exec.run schema's `.min(1)` should prevent it,
@@ -239,6 +303,9 @@ export function buildExecRunProjection(validated: {
     const host = extractHost(token);
     if (host !== undefined) hosts.add(redactSecrets(host));
   }
+  // EGRESS-INTEGRITY (exec.run): also surface proxy-redirect destinations (glued `-xhost`, bare `-x host`,
+  // `env *_PROXY=…`) a network binary would route through, so the deny-by-default egress fold gates them.
+  for (const h of proxyRedirectHosts(argv)) hosts.add(redactSecrets(h));
   const networkHosts = [...hosts];
 
   // destructiveFlags: best-effort intersection with the known set (a hint, not exhaustive). De-duped.

@@ -140,7 +140,7 @@ describe("CAP6-(b) the net.fetch manifest declares the network-egress read postu
 //          url that starts with `-`); a metachar/flag-shaped url is a SINGLE literal token AFTER `--` (no
 //          flag injection, no shell). NON-VACUITY: dropping `--`, or splitting the url, flips these RED.
 // ==================================================================================================
-describe("CAP6-(c) net.fetch builds its EXACT argv from the binding (config/proxy-disabled, `--` guard, no shell)", () => {
+describe("CAP6-(c) net.fetch builds its EXACT argv from the binding (config-disabled, proxy-PINNED, `--` guard, no shell)", () => {
   it("net.fetch {url} -> argv EXACTLY [curl,-q,--globoff,-x,<proxy>,-sS,--,<url>] (config-disabled, proxy-PINNED)", () => {
     const parsed = netFetchBinding.argSchema.safeParse({ url: "https://api.allowed.example/x" });
     expect(parsed.success).toBe(true);

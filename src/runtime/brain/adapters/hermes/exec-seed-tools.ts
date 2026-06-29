@@ -455,7 +455,8 @@ export const gitCommitBinding: ExecToolBinding = {
 export const netFetchManifest = {
   name: "net.fetch",
   version: "1.0.0",
-  description: "fetch a URL over the network (curl -sS -- <url>) — gated by the egress allowlist",
+  description:
+    "fetch a URL via curl PINNED to the OpenShell egress proxy — reachable only for a host on the egress allowlist AND authorized in the sandbox network policy (deny-by-default)",
   action: "tool:invoke",
   resourcePattern: "net/fetch",
   sideEffect: "read" as const,
@@ -729,8 +730,24 @@ const SAFE_BRANCH_NAME = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
  * raw token), so the gated token is host-only and equals git's real connect host. NON-VACUITY: remove this
  * projector => no networkHosts => the network-egress fail-closed gate denies (the destination is unknown).
  */
+/**
+ * git.push argv prefix PINNED to the Agent-OS-owned OpenShell egress proxy (SLICE-CAP6d, mirroring net.fetch).
+ * git's HTTP(S) transport honors ambient `*_PROXY` env + a `.gitconfig` `http.proxy` — both brain-writable in
+ * the sandbox. A command-line `-c http.proxy=<proxy>` OVERRIDES the env AND the config files, so the route is
+ * decided by Agent OS, not the brain. `http.proxy` covers https remotes. (OpenShell's nftables also REJECTs any
+ * non-proxy egress, but the pin makes git.push's route Agent-OS-controlled on every substrate tier.)
+ */
+export function buildGitPushArgvPrefix(proxy: string): readonly string[] {
+  return ["git", "-c", `http.proxy=${proxy}`, "push", "--"];
+}
+
 export const gitPushBinding: ExecToolBinding = {
-  argvPrefix: ["git", "push", "--"],
+  get argvPrefix(): readonly string[] {
+    const proxy = resolveEgressProxy(process.env[AGENTOS_EGRESS_PROXY_ENV]);
+    if (proxy === undefined)
+      throw new Error("git.push: AGENTOS_OPENSHELL_EGRESS_PROXY is set but invalid (fail-closed)");
+    return buildGitPushArgvPrefix(proxy);
+  },
   argSchema: z
     .object({
       // SLICE-EXEC-HARDENING (CAP6b MINOR) — `.max(2048)` is a reasonable upper bound on a git remote URL
@@ -751,9 +768,12 @@ export const gitPushBinding: ExecToolBinding = {
   governanceProjector: (a) => {
     const url = (a as { url: string }).url;
     const branch = (a as { branch: string }).branch;
-    const base = buildExecRunProjection({ argv: ["git", "push", "--", url, branch] });
-    // Override networkHosts to the BARE hostname (no port): the egress allowlist is host-based. The url is
-    // already validated (http/https + plain DNS host), so `new URL` cannot throw here.
+    const proxy = resolveEgressProxy(process.env[AGENTOS_EGRESS_PROXY_ENV]);
+    if (proxy === undefined)
+      throw new Error("git.push: AGENTOS_OPENSHELL_EGRESS_PROXY is set but invalid (fail-closed)");
+    const base = buildExecRunProjection({ argv: [...buildGitPushArgvPrefix(proxy), url, branch] });
+    // Override networkHosts to the BARE url hostname (no port; the Agent-OS-owned proxy is never gated). The
+    // url is already validated (http/https + plain DNS host), so `new URL` cannot throw here.
     return { ...base, networkHosts: [new URL(url).hostname] };
   },
 };

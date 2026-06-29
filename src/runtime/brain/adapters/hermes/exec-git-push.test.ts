@@ -46,7 +46,13 @@ import {
   type SandboxSpec,
   makeExecEffect,
 } from "../../../substrate/index.js";
-import { gitPushBinding, gitPushManifest, seedBindings, seedRegistry } from "./exec-seed-tools.js";
+import {
+  AGENTOS_EGRESS_PROXY_ENV,
+  gitPushBinding,
+  gitPushManifest,
+  seedBindings,
+  seedRegistry,
+} from "./exec-seed-tools.js";
 import { type AgtScope, buildProjectionForCall } from "./governance-projection-for-call.js";
 
 const validCtx = {
@@ -175,7 +181,7 @@ describe("CAP6b-(b) the git.push manifest declares the network-egress DESTRUCTIV
 //   tokens (no flag injection, no shell). NON-VACUITY: dropping `--`, or splitting/reordering, flips RED.
 // ==================================================================================================
 describe("CAP6b-(c) git.push builds its EXACT argv from the binding (`--` guard, no shell)", () => {
-  it("git.push {url,branch} -> argv EXACTLY [git,push,--,<url>,<branch>]", () => {
+  it("git.push {url,branch} -> argv EXACTLY [git,-c,http.proxy=<proxy>,push,--,<url>,<branch>] (proxy PINNED)", () => {
     const parsed = gitPushBinding.argSchema.safeParse({
       url: "https://github.com/o/r.git",
       branch: "main",
@@ -183,13 +189,24 @@ describe("CAP6b-(c) git.push builds its EXACT argv from the binding (`--` guard,
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
     const argv = [...gitPushBinding.argvPrefix, ...gitPushBinding.toArgv(parsed.data)];
-    expect(argv).toEqual(["git", "push", "--", "https://github.com/o/r.git", "main"]);
+    expect(argv).toEqual([
+      "git",
+      "-c",
+      "http.proxy=http://10.200.0.1:3128",
+      "push",
+      "--",
+      "https://github.com/o/r.git",
+      "main",
+    ]);
     expect(argv[0]).toBe("git");
-    expect(argv[1]).toBe("push");
-    expect(argv[2]).toBe("--"); // the `--` guard immediately precedes the repo arg
-    // No shell wrapper, ever.
+    // PROXY PINNED: `git -c http.proxy=<proxy>` overrides ambient *_PROXY env + a brain-written .gitconfig,
+    // so the egress route is decided by Agent OS (mirrors net.fetch's curl `-x` pin).
+    expect(argv.slice(1, 3)).toEqual(["-c", "http.proxy=http://10.200.0.1:3128"]);
+    const dd = argv.indexOf("--");
+    expect(argv[dd - 1]).toBe("push"); // `push` immediately precedes the `--` guard
+    expect(argv[dd + 1]).toBe("https://github.com/o/r.git"); // the repo arg is the single token after `--`
+    // No SHELL wrapper, ever (git's own `-c` config flag is legitimate; a shell `sh -c` is not).
     expect(argv).not.toContain("sh");
-    expect(argv).not.toContain("-c");
     expect(argv).not.toContain("bash");
   });
 
@@ -290,9 +307,18 @@ describe("CAP6b-(d) git.push projects networkHosts = the URL host (bare, no port
     const projection = gitPushBinding.governanceProjector(parsed.data);
     // The BARE host — so a host-only allowlist entry `git.allowed.example` matches the ported URL.
     expect(projection.networkHosts).toEqual(["git.allowed.example"]);
-    // Apart from the host-only networkHosts override, it matches the canonical builder over the argv.
+    // Apart from the host-only networkHosts override, it matches the canonical builder over the PINNED argv
+    // (the proxy `-c http.proxy=<proxy>` is part of the argv now; the override still strips it from the host).
     const base = buildExecRunProjection({
-      argv: ["git", "push", "--", "https://git.allowed.example:8443/team/repo.git", "main"],
+      argv: [
+        "git",
+        "-c",
+        "http.proxy=http://10.200.0.1:3128",
+        "push",
+        "--",
+        "https://git.allowed.example:8443/team/repo.git",
+        "main",
+      ],
     });
     expect(projection).toEqual({ ...base, networkHosts: ["git.allowed.example"] });
   });
@@ -378,9 +404,17 @@ describe("SLICE-EXEC-HARDENING — git.push branch + url length caps (.max(), pu
     });
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-    // The argv is unchanged by the caps.
+    // The argv is unchanged by the caps (proxy-pinned prefix; env unset => default OpenShell proxy).
     const argv = [...gitPushBinding.argvPrefix, ...gitPushBinding.toArgv(parsed.data)];
-    expect(argv).toEqual(["git", "push", "--", "https://github.com/o/r.git", "main"]);
+    expect(argv).toEqual([
+      "git",
+      "-c",
+      "http.proxy=http://10.200.0.1:3128",
+      "push",
+      "--",
+      "https://github.com/o/r.git",
+      "main",
+    ]);
   });
 });
 
@@ -454,5 +488,56 @@ describe("CAP6b-(f) git.push's toEnv emits a credential PLACEHOLDER (never a lit
     // Fail-closed: the literal secret never reached the substrate.
     expect(spy.execCalls.length).toBe(0);
     expect(JSON.stringify(res)).not.toContain(canary);
+  });
+});
+
+// ==================================================================================================
+// CAP6d — git.push egress route is PINNED from the Agent-OS control-plane proxy (`-c http.proxy=<proxy>`),
+//   the git twin of net.fetch's curl `-x` pin. Provenance from the process env ONLY; an INVALID explicit
+//   proxy FAILS CLOSED (argvPrefix getter + governanceProjector throw — never a bare/unpinned git push).
+// ==================================================================================================
+describe("CAP6d git.push egress proxy is PINNED from Agent-OS control-plane config (provenance + fail-closed)", () => {
+  const save = process.env[AGENTOS_EGRESS_PROXY_ENV];
+  const restore = () => {
+    if (save === undefined) delete process.env[AGENTOS_EGRESS_PROXY_ENV];
+    else process.env[AGENTOS_EGRESS_PROXY_ENV] = save;
+  };
+
+  it("UNSET env => the default OpenShell proxy is pinned via -c http.proxy", () => {
+    delete process.env[AGENTOS_EGRESS_PROXY_ENV];
+    try {
+      expect([...gitPushBinding.argvPrefix].slice(0, 3)).toEqual([
+        "git",
+        "-c",
+        "http.proxy=http://10.200.0.1:3128",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("a VALID explicit proxy is pinned (operator override)", () => {
+    process.env[AGENTOS_EGRESS_PROXY_ENV] = "http://egress.corp:3128";
+    try {
+      expect([...gitPushBinding.argvPrefix].slice(0, 3)).toEqual([
+        "git",
+        "-c",
+        "http.proxy=http://egress.corp:3128",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("FAIL-CLOSED: an INVALID explicit proxy => argvPrefix + projector THROW (no bare/unpinned fallback)", () => {
+    process.env[AGENTOS_EGRESS_PROXY_ENV] = "attacker.evil"; // no scheme/port => invalid
+    try {
+      expect(() => gitPushBinding.argvPrefix).toThrow();
+      const proj = gitPushBinding.governanceProjector;
+      if (proj === undefined) throw new Error("git.push must define governanceProjector");
+      expect(() => proj({ url: "https://github.com/o/r.git", branch: "main" })).toThrow();
+    } finally {
+      restore();
+    }
   });
 });

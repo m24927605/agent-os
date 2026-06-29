@@ -192,9 +192,11 @@ describe("CAP6b — the bin RUNS git.push when egress-allowlisted AND pre-author
     );
     expect(result.isError).toBe(false);
     expect(spy.execCalls.length).toBe(1);
-    // The argv built FROM the binding — git push -- <url> <branch>.
+    // The argv built FROM the binding — git PINNED to the OpenShell egress proxy (-c http.proxy) + push -- <url> <branch>.
     expect(spy.execCalls[0]?.argv).toEqual([
       "git",
+      "-c",
+      "http.proxy=http://10.200.0.1:3128",
       "push",
       "--",
       "https://github.com/o/r.git",

@@ -5,11 +5,13 @@
 //
 //   ALLOW: the 14 in-sandbox exec.*/git.* tools run for REAL and SUCCEED (exit 0, effect fires AFTER
 //          commit). net.fetch + git.push are governance-ALLOWED all the way to the REAL effect (the command
-//          runs in the sandbox, effect fires, NOT denied) — but the actual network op is then independently
-//          contained by the SANDBOX EGRESS PROXY (no arbitrary external host is reachable: curl exits 6,
-//          git CONNECT gets 403), so they do not reach the internet. That egress containment is defence in
-//          depth, NOT a governance deny (a successful external op would also need EXEC2 auth + the host on
-//          the sandbox's egress allowlist).
+//          runs in the sandbox, effect fires, NOT denied) — the actual network op is then gated by the
+//          OpenShell egress proxy, DENY-BY-DEFAULT. Option D PINS curl/git to that proxy (`-x` / `-c
+//          http.proxy`), so with NO sandbox network-policy the CONNECT is refused (curl `(56) 403`); once an
+//          operator `openshell policy set` authorizes the host (+ /usr/bin/curl + method) the SAME pinned op
+//          reaches it (proven by net-fetch-egress.live.test.ts: 403 -> policy -> HTTP 200). This matrix sets
+//          NO per-sandbox policy, so net.fetch/git.push here stay at deny-by-default 403 (governance-allowed
+//          to the effect, proxy-denied at egress) — NOT blanket containment.
 //   DENY:  every tool is denied for real with NO effect — the 14 in-sandbox tools via a fail-closed cost
 //          gate (denied@cost), net.fetch via the egress allowlist (denied@policy), git.push via approval
 //          (denied@approval). Plus screen (credential-blind) + deny-by-default (unregistered) mode coverage.

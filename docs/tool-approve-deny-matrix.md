@@ -53,7 +53,7 @@ An `onEffect` hook tracks effect firing: **approve** ⇒ `isError:false` + `onEf
 |---|---|---|
 | `exec.pwd/echo/ls/run`, `exec.write_file`→`cat/head/wc/grep` | benign args; `write_file` seeds the file the reads use | real OpenShell exec, exit 0, effect fires **after** commit |
 | `git.status/add/commit/diff/log` | a real in-sandbox git work-tree | git read + staged mutation + local commit (never a push) |
-| `net.fetch` + `git.push` (network-egress) | `egressAllow` + (push) `approve→approved` | governance permits each **all the way to the real effect** (the `curl` / `git push` runs in the sandbox, `onEffect` fires, NOT denied). The actual network op is then independently **contained by the sandbox egress proxy** — no arbitrary external host is reachable (curl exits `6`, git CONNECT gets `403`), so neither reaches the internet. Egress containment (defence in depth), **not** a governance deny; a successful external op would also need EXEC2 auth + the host on the sandbox's egress allowlist. |
+| `net.fetch` + `git.push` (network-egress) | `egressAllow` + (push) `approve→approved` | governance permits each **all the way to the real effect** (the `curl` / `git push` runs in the sandbox, `onEffect` fires, NOT denied). The actual network op is then gated by the **OpenShell egress proxy, deny-by-default**: curl/git are **PINNED** to that proxy (`-x` / `-c http.proxy`, Option D), so with **no** sandbox network-policy the CONNECT is refused (curl `(56) 403`). Once an operator authorizes the host (`openshell policy set` — host + `/usr/bin/curl` + method), the **same** net.fetch reaches it — **live-proven HTTP 200** to `api.github.com`. So this is **deny-by-default + operator-authorized**, NOT blanket containment; see `deploy/personal/netfetch-egress-policy.example.yaml`. (Authenticated APIs still need EXEC2 SecretResolver-at-egress; until then net.fetch is unauthenticated-to-allowlisted.) |
 
 **DENY** (every tool refused for real, `onEffect` **never** fires):
 
@@ -67,8 +67,9 @@ An `onEffect` hook tracks effect firing: **approve** ⇒ `isError:false` + `onEf
 
 → **All 16 tools get a real ALLOW *and* a real DENY.** For the **14 in-sandbox tools** the ALLOW is a real
 success (`exit 0`); for the **2 network tools** (net.fetch / git.push) the ALLOW is
-governance-permitted-to-the-effect, with the actual external op held back by the sandbox egress proxy. The
-screen + deny-by-default rows add extra mode coverage.
+governance-permitted-to-the-effect, then the external op is **deny-by-default at the OpenShell egress proxy**
+(curl/git PINNED to it via Option D) — `403` until an operator `openshell policy set` authorizes the host,
+after which it reaches (live-proven `200`). The screen + deny-by-default rows add extra mode coverage.
 
 **KERNEL READBACK** (`createSignedChainReader({partitionId:"tenant-bin"})`): the partition has ≥ the
 approved-effect count of entries; every entry's `prevHash` equals the previous entry's `entryHash`
@@ -82,13 +83,16 @@ approved-effect count of entries; every entry's `prevHash` equals the previous e
   process, but the key is in-process/operator-held. Operator-unforgeable HSM/KMS/remote-attestation is
   **TR2/deployment**, not proven here.
 - **`net.fetch` / `git.push` (network-egress):** governance ALLOWS each to the real effect (the command
-  runs in the sandbox, effect fires, not denied) and each has a real **deny** (egress / approval). But the
-  actual external network op is independently **contained by the sandbox egress proxy** — verified live, the
-  sandbox cannot reach an arbitrary external host (curl exits `6`, git CONNECT returns `403`). That is the
-  egress containment doing its job (defence in depth), not a governance deny; a successful external op would
-  additionally need EXEC2 credentials + the target host on the sandbox's own egress allowlist. The rigorous
-  `exit=0` assertion is exactly what surfaced that these network ops are contained (an `isError`-only check
-  would have passed vacuously) — verified, never faked.
+  runs in the sandbox, effect fires, not denied) and each has a real **deny** (egress / approval). The actual
+  external op is then gated by the **OpenShell egress proxy, deny-by-default** — and **Option D** PINS curl/git
+  to that proxy (`-x http://…` / `-c http.proxy=…`, sourced from `AGENTOS_OPENSHELL_EGRESS_PROXY`, fail-closed),
+  so a hostile brain cannot reroute it. With **no** sandbox network-policy the CONNECT is refused (curl `(56)
+  403`) — deny-by-default, not blanket containment. Once an **operator** authorizes a host (`openshell policy
+  set` — host + `/usr/bin/curl` + method), the **same** net.fetch reaches it: **verified live, HTTP 200** to
+  `api.github.com` (deny-403 → `policy set` → 200). So egress is **deny-by-default + operator-authorized** at
+  BOTH layers (the in-repo PDP host fold AND the OpenShell proxy policy). Authenticated APIs additionally need
+  the EXEC2 SecretResolver-at-egress (not landed) — until then net.fetch is unauthenticated-to-allowlisted. See
+  `deploy/personal/netfetch-egress-policy.example.yaml`.
 - **Action / browser families are tested REAL, not faked.** The runner also runs `e2e:live-gmail`
   (`gmail.send` → a **real** Google API call; real OAuth resolved at egress) and `e2e:live-browser`
   (`browser.navigate` + `browser.read` → a **real** Chromium driving a real page). Verified live: the

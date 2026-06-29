@@ -191,7 +191,7 @@ describe("CAP6 — the bin ALLOWS net.fetch to an allowlisted host (the egress f
     );
     expect(result.isError).toBe(false);
     expect(spy.execCalls.length).toBe(1);
-    // The argv reached the substrate built FROM THE BINDING — config/proxy-disabled curl + `--` + <url>.
+    // The argv reached the substrate built FROM THE BINDING — config-disabled, proxy-PINNED curl + `--` + <url>.
     expect(spy.execCalls[0]?.argv).toEqual([
       ...NET_FETCH_ARGV_PREFIX,
       "https://api.allowed.example/x",
