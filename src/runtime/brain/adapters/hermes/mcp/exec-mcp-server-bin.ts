@@ -159,6 +159,14 @@ interface BinSandboxSpec {
 interface SubstrateKit {
   readonly substrate: ExecCapableSandboxAdapter;
   readonly sandboxSpec: BinSandboxSpec;
+  /**
+   * SLICE-CAP6e — REAL OpenShell path ONLY: auto-provision the just-created sandbox's egress network-policy
+   * (merge-aware) from the operator allowlists, so net.fetch/git.push egress works without a manual per-sandbox
+   * `openshell policy set`. `netFetchHosts` is the bin's single-source egress allowlist; the hook resolves the
+   * SEPARATE git.push allowlist (`AGENTOS_GIT_EGRESS_ALLOW`) itself. Undefined on the fake/injected paths
+   * (no real gateway). Throws (fail-closed) on any provisioning failure => the bin destroys + does not serve.
+   */
+  readonly egressProvision?: (sandboxId: string, netFetchHosts: readonly string[]) => Promise<void>;
 }
 
 /** Injectable seams so the in-repo test builds the bin's REAL deps with NO real kernel + NO real OpenShell. */
@@ -475,11 +483,29 @@ async function buildSubstrate(
     clientKeyPath: `${mtlsDir}/tls.key`,
     deadlineMs: 30_000,
   });
-  const substrate = makeOpenShellExecCapable(new OpenShellSandboxAdapter(transport));
+  const rawAdapter = new OpenShellSandboxAdapter(transport);
+  const substrate = makeOpenShellExecCapable(rawAdapter);
   const image =
     process.env.AGENTOS_OPENSHELL_IMAGE ??
     "ghcr.io/nvidia/openshell-community/sandboxes/openclaw@sha256:c116946b3f9e84791630f21f115ac35c9c9f669af70ec0eef3035d79833a9550";
-  return { substrate, sandboxSpec: { image } };
+  // SLICE-CAP6e — REAL-only egress auto-provisioning: resolve the gateway NAME for our sandboxId via the
+  // adapter, resolve the SEPARATE git.push allowlist, then merge-aware set the OpenShell network-policy.
+  const {
+    provisionEgressPolicy,
+    parseEgressHosts,
+    realPolicyExec,
+    realWriteTmp,
+    AGENTOS_GIT_EGRESS_ALLOW_ENV,
+  } = await import("../../../../openshell/egress-provisioner.js");
+  const egressProvision = (sandboxId: string, netFetchHosts: readonly string[]): Promise<void> =>
+    provisionEgressPolicy({
+      sandboxName: rawAdapter.openShellNameOf(sandboxId) ?? "",
+      netFetchHosts,
+      gitPushHosts: parseEgressHosts(process.env[AGENTOS_GIT_EGRESS_ALLOW_ENV]),
+      exec: realPolicyExec,
+      writeTmp: realWriteTmp,
+    });
+  return { substrate, sandboxSpec: { image }, egressProvision };
 }
 
 /**
@@ -1080,7 +1106,8 @@ export async function buildBinDeps(
   fake: boolean,
   opts: BuildBinOpts = {},
 ): Promise<{ deps: ExecMcpServerDeps; substrate: ExecCapableSandboxAdapter; sandboxId: string }> {
-  const { substrate, sandboxSpec } = await buildSubstrate(fake, opts.substrate);
+  const kit = await buildSubstrate(fake, opts.substrate);
+  const { substrate, sandboxSpec } = kit;
   // SLICE-CAP6 — thread the bin's egress allowlist INTO the sandbox spec (deny-all default), so the
   // substrate (the PRIMARY no-egress enforcement) gets the SAME policy the PDP egress fold uses. The REAL
   // OpenShell adapter carries it toward its network policy; the Fake records it. One source, no skew.
@@ -1103,6 +1130,20 @@ export async function buildBinDeps(
   if (started.status !== "ok") {
     await safeDestroy(substrate, sandboxId);
     throw new Error(`buildBinDeps: sandbox start denied — ${started.reason}`);
+  }
+  // SLICE-CAP6e — REAL OpenShell path: auto-provision the egress network-policy (merge-aware) from the
+  // operator allowlist BEFORE serving any tool. net.fetch/git.push therefore egress to allowlisted hosts
+  // without a manual per-sandbox `openshell policy set`. Fail-closed: destroy + throw on any failure (so the
+  // bin never serves with egress un-provisioned). No-op when the allowlist is empty (deny-all stays).
+  if (kit.egressProvision !== undefined) {
+    try {
+      await kit.egressProvision(sandboxId, binEgressAllow);
+    } catch (e) {
+      await safeDestroy(substrate, sandboxId);
+      throw new Error(
+        `buildBinDeps: egress policy provision failed — ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
   const appender = buildBinAppender(fake, opts);
   const deps = buildDeps(fake, substrate, sandboxId, appender, opts);

@@ -279,6 +279,16 @@ export class OpenShellSandboxAdapter implements SandboxAdapter {
   }
 
   /**
+   * SLICE-CAP6e — the gateway-assigned NAME for one of OUR `sandboxId`s (the `openshell policy set` / `sandbox`
+   * CLI lookup key, DISTINCT from the synthetic `sbx-os-…` id). Returns undefined for an unknown id (=> the
+   * egress provisioner fails closed). Read-only over `refById`; NEVER throws. NOT one of the four frozen
+   * `SandboxAdapter` port methods — an adapter-internal accessor the bin's egress provisioner consumes.
+   */
+  openShellNameOf(sandboxId: string): string | undefined {
+    return this.refById.get(sandboxId)?.name;
+  }
+
+  /**
    * Adopt an EXTERNALLY-created sandbox (slice SLICE-HERMES-S1) — NOT one of the four frozen
    * `SandboxAdapter` port methods (the P2-A shape is unchanged); it is an adapter-internal capability
    * consumed by the layer above so the SAME adapter can then status/exec a sandbox it did NOT create.
