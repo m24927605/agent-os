@@ -3,10 +3,13 @@
 // createExecMcpServer(buildBinDeps(false, …)).handle({tools/call}) DIRECTLY (no LLM, no model credits)
 // against a REAL OpenShell sandbox + a FRESH real Go kernel WORM partition ('tenant-bin').
 //
-//   ALLOW: 15 in-sandbox/network tools run for real (real OpenShell exec / real fetch, exit 0, effect fires
-//          AFTER commit). git.push is governance-ALLOWED all the way to the REAL effect (screen→authorize→
-//          approval→commit→effect); a *successful* push additionally needs an anon-push https remote
-//          (its url validator is https-only and the push is unauthenticated until EXEC2) — honest gap.
+//   ALLOW: the 14 in-sandbox exec.*/git.* tools run for REAL and SUCCEED (exit 0, effect fires AFTER
+//          commit). net.fetch + git.push are governance-ALLOWED all the way to the REAL effect (the command
+//          runs in the sandbox, effect fires, NOT denied) — but the actual network op is then independently
+//          contained by the SANDBOX EGRESS PROXY (no arbitrary external host is reachable: curl exits 6,
+//          git CONNECT gets 403), so they do not reach the internet. That egress containment is defence in
+//          depth, NOT a governance deny (a successful external op would also need EXEC2 auth + the host on
+//          the sandbox's egress allowlist).
 //   DENY:  every tool is denied for real with NO effect — the 14 in-sandbox tools via a fail-closed cost
 //          gate (denied@cost), net.fetch via the egress allowlist (denied@policy), git.push via approval
 //          (denied@approval). Plus screen (credential-blind) + deny-by-default (unregistered) mode coverage.
@@ -114,28 +117,37 @@ d("exec MCP tools — EXHAUSTIVE real approve/deny matrix (OpenShell + Go kernel
       // exec.* (9) — real exec, exit 0, effect after commit.
       for (const [name, args] of IN_SANDBOX.slice(0, 9)) {
         const o = await kit.drive(name, args);
-        expect(o.isError, `${name} should be executed: ${o.text}`).toBe(false);
+        expect(o.isError, `${name} should run: ${o.text}`).toBe(false);
+        expect(o.text, `${name} must exit 0 (real success): ${o.text}`).toMatch(/exit=0/);
         expect(o.effects, `${name} effect must fire after commit`).toBe(1);
         approveCount += 1;
       }
-      // net.fetch — a REAL fetch from inside the sandbox to an allowlisted host.
+      // net.fetch — governance ALLOWS it; the curl runs in the sandbox (effect fires). The actual fetch is
+      // then contained by the SANDBOX EGRESS proxy — no arbitrary external host is reachable from the
+      // sandbox, so curl exits non-zero. That is egress containment (defence in depth), NOT a governance deny.
       const nf = await kit.drive("net.fetch", { url: "https://example.com/" });
-      expect(nf.isError, `net.fetch should execute a real fetch: ${nf.text}`).toBe(false);
+      expect(nf.text, `net.fetch must NOT be denied by governance: ${nf.text}`).not.toContain(
+        "DENIED:",
+      );
+      expect(nf.effects, "net.fetch must reach the real effect (governance allowed)").toBe(1);
       approveCount += 1;
-      // git.* (5) — real in-sandbox git work-tree.
+      // git.* (5) — real in-sandbox git work-tree on branch `main`.
       await kit.drive("exec.run", { argv: ["git", "init"] });
+      await kit.drive("exec.run", { argv: ["git", "checkout", "-b", "main"] });
       await kit.drive("exec.run", { argv: ["git", "config", "user.email", "t@t"] });
       await kit.drive("exec.run", { argv: ["git", "config", "user.name", "t"] });
-      approveCount += 3;
+      approveCount += 4;
       for (const [name, args] of IN_SANDBOX.slice(9)) {
         const o = await kit.drive(name, args);
-        expect(o.isError, `${name} should be executed: ${o.text}`).toBe(false);
+        expect(o.isError, `${name} should run: ${o.text}`).toBe(false);
+        expect(o.text, `${name} must exit 0 (real success): ${o.text}`).toMatch(/exit=0/);
         approveCount += 1;
       }
-      // git.push — governance ALLOWS it all the way to the REAL effect (the push command runs in the
-      // sandbox). It is NOT denied at any gate and the effect fires; a *successful* push needs an anon-push
-      // https remote (https-only validator + unauthenticated-until-EXEC2), so the command itself may exit
-      // non-zero — that is a real-remote gap, not a governance deny.
+      // git.push — governance ALLOWS it all the way to the real effect (NOT denied; the `git push` command
+      // runs in the sandbox, onEffect fires). A *successful* push is then independently blocked by the
+      // SANDBOX EGRESS PROXY (defence in depth: the sandbox may only reach its egress allowlist, so a CONNECT
+      // to an arbitrary git host returns 403) AND the push is unauthenticated until EXEC2 — so the command
+      // itself exits non-zero. That is the egress containment working, NOT a governance deny.
       const push = await kit.drive("git.push", {
         url: "https://example.com/x.git",
         branch: "main",

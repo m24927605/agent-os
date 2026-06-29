@@ -53,8 +53,7 @@ An `onEffect` hook tracks effect firing: **approve** ⇒ `isError:false` + `onEf
 |---|---|---|
 | `exec.pwd/echo/ls/run`, `exec.write_file`→`cat/head/wc/grep` | benign args; `write_file` seeds the file the reads use | real OpenShell exec, exit 0, effect fires **after** commit |
 | `git.status/add/commit/diff/log` | a real in-sandbox git work-tree | git read + staged mutation + local commit (never a push) |
-| `net.fetch` | `https://example.com/`, `egressAllow:["example.com"]` | a **real** network fetch from inside the sandbox |
-| `git.push` | `egressAllow` + `approve→approved`; `https://example.com/x.git` | governance permits it **all the way to the real effect** (the `git push` runs in the sandbox, `onEffect` fires, NOT denied). A *successful* push additionally needs an anon-push **https** remote (the url validator is https-only; the push is unauthenticated until EXEC2) — an honest real-remote gap, **not** a governance deny. |
+| `net.fetch` + `git.push` (network-egress) | `egressAllow` + (push) `approve→approved` | governance permits each **all the way to the real effect** (the `curl` / `git push` runs in the sandbox, `onEffect` fires, NOT denied). The actual network op is then independently **contained by the sandbox egress proxy** — no arbitrary external host is reachable (curl exits `6`, git CONNECT gets `403`), so neither reaches the internet. Egress containment (defence in depth), **not** a governance deny; a successful external op would also need EXEC2 auth + the host on the sandbox's egress allowlist. |
 
 **DENY** (every tool refused for real, `onEffect` **never** fires):
 
@@ -66,8 +65,10 @@ An `onEffect` hook tracks effect firing: **approve** ⇒ `isError:false` + `onEf
 | `exec.echo` (extra mode) | `denied@screen` | a secret-**shaped** synthetic canary (`sk-` + 20 chars, built at runtime) |
 | `gmail.send` (extra mode) | `denied@policy` (deny-by-default) | `actionAdvertise` off ⇒ unregistered |
 
-→ **All 16 tools get a real ALLOW *and* a real DENY**; the screen + deny-by-default rows add extra mode
-coverage.
+→ **All 16 tools get a real ALLOW *and* a real DENY.** For the **14 in-sandbox tools** the ALLOW is a real
+success (`exit 0`); for the **2 network tools** (net.fetch / git.push) the ALLOW is
+governance-permitted-to-the-effect, with the actual external op held back by the sandbox egress proxy. The
+screen + deny-by-default rows add extra mode coverage.
 
 **KERNEL READBACK** (`createSignedChainReader({partitionId:"tenant-bin"})`): the partition has ≥ the
 approved-effect count of entries; every entry's `prevHash` equals the previous entry's `entryHash`
@@ -80,10 +81,14 @@ approved-effect count of entries; every entry's `prevHash` equals the previous e
 - **attester ≠ actor holds to the PROCESS boundary (TR1)** — the kernel signs/hash-chains in a separate
   process, but the key is in-process/operator-held. Operator-unforgeable HSM/KMS/remote-attestation is
   **TR2/deployment**, not proven here.
-- **`net.fetch`** runs a **real** fetch from inside the sandbox to an allowlisted host. **`git.push`** is
-  governance-**allowed all the way to the real effect** (the push command runs in the sandbox) and has a
-  real **deny** (approval); a *successful* push additionally needs an anon-push **https** remote (the url
-  validator is https-only and the push is unauthenticated until EXEC2) — a real-remote gap, never faked.
+- **`net.fetch` / `git.push` (network-egress):** governance ALLOWS each to the real effect (the command
+  runs in the sandbox, effect fires, not denied) and each has a real **deny** (egress / approval). But the
+  actual external network op is independently **contained by the sandbox egress proxy** — verified live, the
+  sandbox cannot reach an arbitrary external host (curl exits `6`, git CONNECT returns `403`). That is the
+  egress containment doing its job (defence in depth), not a governance deny; a successful external op would
+  additionally need EXEC2 credentials + the target host on the sandbox's own egress allowlist. The rigorous
+  `exit=0` assertion is exactly what surfaced that these network ops are contained (an `isError`-only check
+  would have passed vacuously) — verified, never faked.
 - **Action / browser families are tested REAL, not faked.** The runner also runs `e2e:live-gmail`
   (`gmail.send` → a **real** Google API call; real OAuth resolved at egress) and `e2e:live-browser`
   (`browser.navigate` + `browser.read` → a **real** Chromium driving a real page). Verified live: the
