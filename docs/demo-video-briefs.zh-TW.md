@@ -439,6 +439,5 @@ AGENT OS — 技術 / 架構片 · 製作 BRIEF(三支之三)
 
 ---
 
-*這些 brief 是製作規格;它們所拍的 live demo 是真的(`pnpm run e2e:live-gmail`、`e2e:live-browser`、
-`e2e:gmail-deny-demo`、`e2e:deny-demo`)。畫面上每條 trace 都要忠於實際 driver 輸出。合成 animatic 只是
+*這些 brief 是製作規格;它們所拍的 live demo 是真的(個別工具家族測試:`pnpm run e2e:live-gmail`、`e2e:live-browser`、`e2e:gmail-deny-demo`、`e2e:deny-demo`;完整 Hermes→OpenShell exec→WORM effect loop:`e2e:live-exec-mcp-stdio` —— 真 Hermes Agent 自主呼叫 `tools/call: exec.echo`,經 PDP allow,落到真 OpenShell 沙箱 exit=0,evidence 由獨立的 Go kernel 程序簽章並鏈進 WORM 記錄;attester≠actor 在此僅守到「程序邊界」(TR1),HSM/KMS/remote-attestation 等 operator-不可偽造屬 TR2/部署,本地未證)。畫面上每條 trace 都要忠於實際 driver 輸出。合成 animatic 只是
 時間軸參考 —— 真正的片子照這些 brief 拍。英文原版:[`demo-video-briefs.md`](./demo-video-briefs.md)。*

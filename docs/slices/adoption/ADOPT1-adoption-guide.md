@@ -22,7 +22,11 @@
   3. `bash scripts/install-hermes-desktop.sh` —— TTY 走 `hermes mcp add`(答一次 Enable all);headless 印出
      credential-blind `config.yaml` 內容直寫 `~/.hermes/config.yaml` 的 `mcp_servers`。
   4. Hermes `tools/list` 自動發現 → 呼叫即經 `runGovernedToolCall` → OpenShell 執行 → 進 WORM。
-  5. 驗:`pnpm run e2e:live-desktop-hermes`。
+  5. 驗:**發現層**見 `pnpm run e2e:live-desktop-hermes`(real `hermes mcp test` 連上、發現 16 支 governed 工具);
+     **全迴圈**見 `pnpm run e2e:live-exec-mcp-stdio`(real Hermes Agent v0.17.0 自主 `tools/call: exec.echo`
+     → `runGovernedToolCall` PDP allow → real OpenShell sandbox exec exit=0 → 進獨立 Go kernel WORM chain,
+     tamper-evident、hash-chained、由獨立簽章 process 驗證;attester != actor 守到 **process boundary**(TR1),
+     real key 外置 / HSM / KMS = TR2/deployment,未於此證,不宣稱 operator-proof)。
 - **任何其他 MCP host(Claude Desktop / Cursor / 自寫 client)— 淺層 C**:給一段**通用 config 範本**——
   以 stdio 啟動同一支 bin(`node dist/runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin.js`,帶同樣的
   非 secret env),掛進該 host 的 MCP servers 設定即可。**機制與 Hermes 相同,只是換 host。**

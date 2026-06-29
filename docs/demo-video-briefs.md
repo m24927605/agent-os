@@ -631,6 +631,10 @@ AGENT OS — ARCHITECTURE & FLOW FILM · PRODUCTION BRIEF  (cut 4)
 
 ---
 
-*These briefs are the production spec; the live demos they film are real (`pnpm run e2e:live-gmail`,
-`e2e:live-browser`, `e2e:gmail-deny-demo`, `e2e:deny-demo`). Keep every on-screen trace faithful to the
+*These briefs are the production spec; the live demos they film are real (individual tool-family tests:
+`pnpm run e2e:live-gmail`, `e2e:live-browser`, `e2e:gmail-deny-demo`, `e2e:deny-demo`; full
+Hermes→OpenShell exec→WORM effect loop: `e2e:live-exec-mcp-stdio`, where a real Hermes Agent autonomously
+calls `tools/call: exec.echo` → real OpenShell sandbox exit=0 → one tamper-evident, hash-chained WORM entry
+signed by a separate Go kernel process — attester≠actor to the process boundary, TR1; HSM/KMS externalization
+is TR2/deployment, not proven here). Keep every on-screen trace faithful to the
 actual driver output. The synthetic animatic is a timing reference only — the films are shot against these.*

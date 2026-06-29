@@ -126,7 +126,7 @@ Also: [`AGENTS.md`](./AGENTS.md) (the operating contract) and the per-slice buil
 ## Status
 
 - **Built and verified.** All three surfaces, the spine, the vendor-neutral ports, the evidence kernel and its offline verifier, and the no-vendor and cross-tenant gates pass `pnpm run verify`.
-- **Autonomous loop live (infra-gated).** A real Hermes Desktop discovers and calls Agent OS's governed tools, including `exec.run`, over a real OpenShell sandbox; every call routes through the single governed edge and lands in the shared, independently-verifiable WORM chain. Reproducing the live wires needs your own infrastructure.
+- **Autonomous loop — verified live.** A real Hermes Agent (v0.17.0) discovers and autonomously calls Agent OS's governed tools, e.g. `exec.echo`, over a real OpenShell sandbox; every call routes through the single governed edge, executes in the sandbox, and lands in the shared, independently-verifiable WORM chain signed by a separate Go kernel process — proven via `pnpm run e2e:live-exec-mcp-stdio`. Reproducing the live wires needs your own OpenShell + kernel.
 - **In-memory by default.** Composition roots default to in-memory log / cost / sandbox; live adapters are injected when you point at real infrastructure.
 - **What remains is deployment, not code.** An operator-unforgeable trust root (KMS / HSM), zero-credential sandbox provisioning, CI/CD, an observability backend, and real multi-tenant provisioning. Tracked in [`docs/slices/`](./docs/slices/).
 

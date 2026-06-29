@@ -316,7 +316,11 @@ live demos — a governed Gmail send and a governed real Chromium navigate+read 
 `e2e:live-*` scripts (`package.json`: `e2e:live-gmail` → `scripts/e2e-live-gmail.sh`, `e2e:live-browser` →
 `scripts/e2e-live-browser.sh`, etc.) that touch real external systems and credentials, so they are run
 out-of-band, never in the offline gate. They are **runtime-direct** (see §9): they demonstrate the full
-governed flow end-to-end against real effects, but they exercise the *runtime-direct* credential posture, not
+governed flow end-to-end against real effects — including the exec loop (`e2e:live-exec-mcp-stdio`), where a
+real Hermes Agent autonomously called `tools/call: exec.echo` through `runGovernedToolCall` (PDP allow,
+deny-by-default holding for its other tools) into real OpenShell (sandbox create→exec→delete over mTLS gRPC,
+exit=0), with the receipt committed before effect into the separate Go kernel's append-only, signed,
+hash-chained WORM log (read back at entries=1) — but they exercise the *runtime-direct* credential posture, not
 the future sandbox-resolver posture.
 
 ---

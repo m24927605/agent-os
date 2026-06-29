@@ -19,7 +19,9 @@ How to start using Agent OS, by where you're starting from. Pick the row that fi
 **Honest status:** there is **no single one-click executable yet**. The experience surface today is
 **Hermes Desktop** (Path B), and a fully bundled turnkey app (a default brain + a provisioned sandbox +
 the kernel, in one runnable) is still in progress — parts of it are deployment-gated (zero-credential
-sandbox provisioning, an operator-unforgeable trust root). Tracked in
+sandbox provisioning; remote attestation / HSM-backed signing for an operator-unforgeable trust root,
+which is TR2/deployment — today attester≠actor holds to the **process boundary** only: a separate Go
+kernel process signs and hash-chains a tamper-evident, independently-verifiable WORM chain). Tracked in
 [`docs/slices/adoption`](./slices/adoption/INDEX.md) (ADO-A1).
 
 **Closest thing you can run today:**
@@ -55,7 +57,14 @@ export AGENTOS_OPENSHELL_MTLS="$HOME/.config/openshell/gateways/openshell/mtls"
 export AGENTOS_KERNEL_INGEST_ENDPOINT=127.0.0.1:50051   # your kernel (the Go kernel binds 127.0.0.1:7777 by default)
 ```
 
-### Hermes Desktop — **verified** (`pnpm run e2e:live-desktop-hermes`)
+### Hermes Desktop — **verified end-to-end** (`pnpm run e2e:live-exec-mcp-stdio`)
+
+A real Hermes Agent v0.17.0 was handed the stdio MCP descriptor, spawned the governed bin, autonomously
+discovered tools (`tools/list`) and autonomously called one (`tools/call: exec.echo`); the call routed
+through the single governed edge (PDP `allow`, deny-by-default held for Hermes's other tools) → real
+OpenShell sandbox exec (exit=0) → a tamper-evident, hash-chained WORM entry written by a separate Go
+kernel process (attester ≠ actor to the **process boundary**; operator-unforgeable HSM/KMS/remote
+attestation is TR2/deployment, not proven here).
 
 ```bash
 bash scripts/install-hermes-desktop.sh
@@ -81,8 +90,9 @@ mcp_servers:
 ```
 
 Then: Hermes `tools/list` discovers Agent OS's governed tools (incl. `exec.run`); every call routes
-through the single governed edge → real OpenShell exec → the WORM evidence chain. Verify the whole
-loop: `pnpm run e2e:live-desktop-hermes`.
+through the single governed edge → real OpenShell exec → the WORM evidence chain. Verify it end-to-end: `pnpm run e2e:live-exec-mcp-stdio` (a real Hermes spawns the bin, autonomously calls
+`exec.echo` → real OpenShell exec `exit=0` → a hash-chained WORM entry signed by a separate Go kernel
+process). Discovery only: `pnpm run e2e:live-desktop-hermes`.
 
 ### Any other MCP host — **example, unverified**
 
@@ -110,14 +120,19 @@ Minimum assumptions: **stdio** transport · Node on PATH · quote paths containi
 
 | Host | Config | Transport | Launch | Status |
 |---|---|---|---|---|
-| **Hermes** (CLI / Desktop), v0.17.0 | `~/.hermes/config.yaml` → `mcp_servers` | stdio | `hermes mcp add` or direct-write | ✅ **verified** — `e2e:live-desktop-hermes`; and a live `hermes mcp test` connected (299 ms) and discovered all 16 governed tools |
-| Hermes TUI | same `~/.hermes/config.yaml` → `mcp_servers` | stdio | (shared with CLI/Desktop) | ✅ **discovery verified** — TUI reads the same `mcp_servers`, proven live via `hermes mcp test`; a TUI-driven tool call wasn't separately exercised |
+| **Hermes** (CLI / Desktop), v0.17.0 | `~/.hermes/config.yaml` → `mcp_servers` | stdio | `hermes mcp add` or direct-write | ✅ **verified end-to-end** — `e2e:live-exec-mcp-stdio`: real Hermes v0.17.0 autonomously `tools/call: exec.echo` → real OpenShell exec (exit=0) → hash-chained WORM entry in a separate Go kernel process (attester≠actor to the process boundary; HSM/KMS = TR2). `hermes mcp test` also discovered all 16 tools (299 ms). |
+| Hermes TUI | same `~/.hermes/config.yaml` → `mcp_servers` | stdio | (shared with CLI/Desktop) | ✅ **discovery verified** — TUI shares the same `mcp_servers` (live `hermes mcp test`); the full effect loop is verified for CLI/Desktop over the same stdio path (`e2e:live-exec-mcp-stdio`); a TUI-driven call wasn't separately run |
 | Claude Desktop / Cursor / custom MCP client | host-specific | stdio | `node …/runtime/mcp/server-bin.js` (bin `agent-os-mcp`) | ⚠️ example, unverified |
 
-> **Live verification (Hermes v0.17.0):** the `agent-os-mcp` entry was added to a real Hermes, `hermes mcp
-> test` connected and discovered all 16 governed tools (exec.* / git.* / net.fetch), then the entry was
-> removed. This proves the registration + discovery layer. Driving a tool through to a real effect
-> additionally needs the OpenShell sandbox and the WORM kernel running.
+> **Live verification (Hermes v0.17.0):** **Discovery layer** — `hermes mcp test` connected (299 ms) and
+> discovered all 16 governed tools (this step ran against the fake substrate). **Autonomous capstone (full
+> effect loop)** — `e2e:live-exec-mcp-stdio` proves the real Hermes was handed the stdio MCP descriptor,
+> spawned the governed bin, autonomously discovered tools (`tools/list`) and autonomously called one
+> (`tools/call: exec.echo`) — the call went through `runGovernedToolCall` → PDP `allow` (matched rule
+> `allow-exec`) while deny-by-default held for its other tools → a real OpenShell sandbox lifecycle over
+> mTLS gRPC (create→ready→exec→delete, exit=0) → a credential-blind receipt landed in the shared, append-only
+> WORM kernel chain, signed and hash-chained by a separate Go kernel process (attester ≠ actor to the
+> process boundary; HSM/KMS/remote-attestation is TR2/deployment, not proven here).
 
 ---
 
