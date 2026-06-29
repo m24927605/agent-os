@@ -28,10 +28,11 @@ Missing `AGENTOS_LIVE_OPENSHELL=1` or `openshell` ⇒ a **clean block** (exit 0)
 verify` (it spawns a kernel + drives real external effects); the matrix spec is `describe.skip` without the
 gates so the offline suite stays green.
 
-**Verified live (2026-06-29):** matrix 7/7 green (real exec/git/net.fetch + every deny mode + readback);
-real Chromium navigate+read EXECUTED on a real page (read back real content); the real Gmail send made a
-real Google egress call (real OAuth) and was governed-**denied** by the account allowlist — align the OAuth
-token's account with `AGENTOS_ACTION_TEST_ACCOUNT` for a green send (a real config gate, not a fake).
+**Verified live (2026-06-29) — all green, all real:** matrix 7/7 (real exec/git/net.fetch + every deny mode
++ readback); the real Gmail send **SENT** (a real `POST …/gmail/v1/users/me/messages/send`, a self-send to
+the test account); the real Chromium navigate+read **EXECUTED** on a real page (read back real content).
+The Gmail send needs `AGENTOS_APPROVE_PREAUTH=gmail.send` (pre-authorize the destructive send) and the OAuth
+token's account in `AGENTOS_ACTION_TEST_ACCOUNT` — both already aligned in `~/.env`.
 
 ## Driving mechanism — `composition-root-real`
 
@@ -84,10 +85,10 @@ approved-effect count of entries; every entry's `prevHash` equals the previous e
 - **Action / browser families are tested REAL, not faked.** The runner also runs `e2e:live-gmail`
   (`gmail.send` → a **real** Google API call; real OAuth resolved at egress) and `e2e:live-browser`
   (`browser.navigate` + `browser.read` → a **real** Chromium driving a real page). Verified live: the
-  browser drive navigated + read a real page; the Gmail send made a real Google egress call and was
-  governed-**denied** by the account allowlist (the OAuth token's account must equal
-  `AGENTOS_ACTION_TEST_ACCOUNT` for a green send — a real config gate, not a fake). `drive.*` / `calendar.*`
-  need their own OAuth tokens; absent those they cleanly **skip** — never faked.
+  browser drive navigated + read a real page, and the Gmail send **SENT** for real (a real `POST` to the
+  Gmail API). The send needs `AGENTOS_APPROVE_PREAUTH=gmail.send` + the OAuth token's account in
+  `AGENTOS_ACTION_TEST_ACCOUNT` (both already in `~/.env`). `drive.*` / `calendar.*` need their own OAuth
+  tokens; absent those they cleanly **skip** — never faked.
 
 ## Notes from building it (gotchas the harness encodes)
 
