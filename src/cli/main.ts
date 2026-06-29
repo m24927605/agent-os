@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Agent OS — `agentos` CLI (SLICE-P2R-R9-S3).
  *

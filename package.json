@@ -8,8 +8,21 @@
   "engines": {
     "node": ">=22"
   },
+  "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./personal": { "types": "./dist/personal/index.d.ts", "import": "./dist/personal/index.js" },
+    "./developer": { "types": "./dist/developer/index.d.ts", "import": "./dist/developer/index.js" },
+    "./enterprise": { "types": "./dist/enterprise/index.d.ts", "import": "./dist/enterprise/index.js" },
+    "./tools": { "types": "./dist/tools/index.d.ts", "import": "./dist/tools/index.js" },
+    "./sdk/templates": { "types": "./dist/sdk/templates/index.d.ts", "import": "./dist/sdk/templates/index.js" },
+    "./runtime/spendguard": { "types": "./dist/runtime/spendguard/index.d.ts", "import": "./dist/runtime/spendguard/index.js" },
+    "./policy/adapters/agt": { "types": "./dist/policy/adapters/agt/index.d.ts", "import": "./dist/policy/adapters/agt/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
   "bin": { "agentos": "./dist/cli/main.js" },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -17,6 +30,9 @@
     "lint:fix": "biome check --write src",
     "format": "biome format --write src",
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
+    "pkg:check": "pnpm run build && vitest run src/__tests__/package-exports.test.ts",
+    "pkg:pack-check": "bash scripts/pkg-pack-check.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "example:personal": "pnpm run build && node examples/surfaces/run-personal-shell.ts",
@@ -62,6 +78,12 @@
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",
     "zod": "^3.24.1"
+  },
+  "peerDependencies": {
+    "@types/node": ">=22"
+  },
+  "peerDependenciesMeta": {
+    "@types/node": { "optional": true }
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
