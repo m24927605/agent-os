@@ -42,10 +42,13 @@ import {
   makeExecEffect,
 } from "../../../substrate/index.js";
 import {
+  AGENTOS_EGRESS_PROXY_ENV,
   NET_FETCH_ARGV_PREFIX,
+  buildNetFetchArgvPrefix,
   netFetchAuthEnv,
   netFetchBinding,
   netFetchManifest,
+  resolveEgressProxy,
   seedBindings,
   seedRegistry,
 } from "./exec-seed-tools.js";
@@ -138,22 +141,22 @@ describe("CAP6-(b) the net.fetch manifest declares the network-egress read postu
 //          flag injection, no shell). NON-VACUITY: dropping `--`, or splitting the url, flips these RED.
 // ==================================================================================================
 describe("CAP6-(c) net.fetch builds its EXACT argv from the binding (config/proxy-disabled, `--` guard, no shell)", () => {
-  it("net.fetch {url} -> argv EXACTLY [curl,-q,--noproxy,*,-sS,--,<url>] (config + proxy disabled)", () => {
+  it("net.fetch {url} -> argv EXACTLY [curl,-q,--globoff,-x,<proxy>,-sS,--,<url>] (config-disabled, proxy-PINNED)", () => {
     const parsed = netFetchBinding.argSchema.safeParse({ url: "https://api.allowed.example/x" });
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
     const argv = [...netFetchBinding.argvPrefix, ...netFetchBinding.toArgv(parsed.data)];
     expect(argv).toEqual([...NET_FETCH_ARGV_PREFIX, "https://api.allowed.example/x"]);
-    // ⚠️ EGRESS-INTEGRITY: curl ignores config (`-q`, FIRST), URL globs (`--globoff`), + all proxies
-    // (`--noproxy *`), so an agent that can write the sandbox fs (exec.write_file) cannot plant a
-    // .curlrc/proxy — and a glob URL cannot fan out — to a host other than the one the PDP projected.
+    // ⚠️ EGRESS-INTEGRITY: curl ignores config (`-q`, FIRST) + URL globs (`--globoff`), and is PINNED via
+    // `-x <proxy>` to the Agent-OS-owned OpenShell egress proxy — a command-line `-x` OVERRIDES all `*_PROXY`
+    // env, so an agent that can write the sandbox fs/env (exec.write_file/exec.run) cannot move the route.
     expect(argv[0]).toBe("curl");
     expect(argv[1]).toBe("-q"); // FIRST flag => .curlrc / -K config files are IGNORED
     expect(argv).toContain("--globoff"); // URL globbing disabled (no [1-1000] fan-out / host glob)
-    expect(argv.slice(argv.indexOf("--noproxy"), argv.indexOf("--noproxy") + 2)).toEqual([
-      "--noproxy",
-      "*",
-    ]); // ALL proxy env neutralized
+    const xi = argv.indexOf("-x");
+    expect(xi).toBeGreaterThan(0); // `-x` PINS the proxy (route decided by Agent OS, not the brain)
+    expect(argv[xi + 1]).toMatch(/^https?:\/\/[A-Za-z0-9.-]+:\d{1,5}$/); // a scheme://host:port proxy URL
+    expect(argv).not.toContain("--noproxy"); // proxy is PINNED, NOT disabled (the old --noproxy is gone)
     expect(argv.at(-2)).toBe("--"); // the `--` guard immediately precedes the url
     // No shell wrapper, ever.
     expect(argv).not.toContain("sh");
@@ -416,5 +419,81 @@ describe("CAP6-(f) net.fetch's toEnv emits a credential PLACEHOLDER (never a lit
     // Fail-closed: the literal secret never reached the substrate.
     expect(spy.execCalls.length).toBe(0);
     expect(JSON.stringify(res)).not.toContain(canary);
+  });
+});
+
+// ==================================================================================================
+// CAP6d — net.fetch PINS curl to the Agent-OS control-plane egress proxy (`-x`): provenance + fail-closed.
+//   - resolveEgressProxy: UNSET => OpenShell convention default; valid scheme://host:port => that; invalid
+//     => undefined (fail-closed). Sourced from the Agent OS process env ONLY (NEVER the sandbox).
+//   - argvPrefix pins `-x <proxy>`; an INVALID explicit proxy => argSchema DENIES + the getter throws (no
+//     bare / `--noproxy` fallback). The route is decided by Agent OS, not a brain-writable ambient proxy.
+// ==================================================================================================
+describe("CAP6d net.fetch egress proxy is PINNED from Agent-OS control-plane config (provenance + fail-closed)", () => {
+  const save = process.env[AGENTOS_EGRESS_PROXY_ENV];
+  const restore = () => {
+    if (save === undefined) delete process.env[AGENTOS_EGRESS_PROXY_ENV];
+    else process.env[AGENTOS_EGRESS_PROXY_ENV] = save;
+  };
+
+  it("resolveEgressProxy: unset => OpenShell convention default; valid => that; invalid => undefined", () => {
+    expect(resolveEgressProxy(undefined)).toBe("http://10.200.0.1:3128");
+    expect(resolveEgressProxy("")).toBe("http://10.200.0.1:3128");
+    expect(resolveEgressProxy("   ")).toBe("http://10.200.0.1:3128");
+    expect(resolveEgressProxy("http://proxy.internal:3128")).toBe("http://proxy.internal:3128");
+    expect(resolveEgressProxy("https://10.200.0.1:8443")).toBe("https://10.200.0.1:8443");
+    // INVALID => undefined (fail-closed): no scheme, no port, bad port, a shell-y value.
+    expect(resolveEgressProxy("10.200.0.1:3128")).toBeUndefined();
+    expect(resolveEgressProxy("http://10.200.0.1")).toBeUndefined();
+    expect(resolveEgressProxy("http://10.200.0.1:0")).toBeUndefined();
+    expect(resolveEgressProxy("http://10.200.0.1:99999")).toBeUndefined();
+    expect(resolveEgressProxy("attacker; rm -rf /")).toBeUndefined();
+  });
+
+  it("buildNetFetchArgvPrefix pins -x to the given proxy (config/glob disabled, -- guard, no --noproxy)", () => {
+    expect(buildNetFetchArgvPrefix("http://10.200.0.1:3128")).toEqual([
+      "curl",
+      "-q",
+      "--globoff",
+      "-x",
+      "http://10.200.0.1:3128",
+      "-sS",
+      "--",
+    ]);
+    expect(buildNetFetchArgvPrefix("http://10.200.0.1:3128")).not.toContain("--noproxy");
+  });
+
+  it("argvPrefix: UNSET env => the default OpenShell proxy is pinned", () => {
+    delete process.env[AGENTOS_EGRESS_PROXY_ENV];
+    try {
+      expect([...netFetchBinding.argvPrefix]).toEqual([...NET_FETCH_ARGV_PREFIX]);
+      expect(netFetchBinding.argvPrefix).toContain("http://10.200.0.1:3128");
+    } finally {
+      restore();
+    }
+  });
+
+  it("argvPrefix: a VALID explicit proxy is pinned (operator override)", () => {
+    process.env[AGENTOS_EGRESS_PROXY_ENV] = "http://egress.corp:3128";
+    try {
+      const xi = netFetchBinding.argvPrefix.indexOf("-x");
+      expect(netFetchBinding.argvPrefix[xi + 1]).toBe("http://egress.corp:3128");
+    } finally {
+      restore();
+    }
+  });
+
+  it("FAIL-CLOSED: an INVALID explicit proxy => argvPrefix + projector THROW (no bare/--noproxy fallback)", () => {
+    process.env[AGENTOS_EGRESS_PROXY_ENV] = "attacker.evil"; // no scheme/port => invalid
+    try {
+      // No silent fallback to a bare / --noproxy curl: both the argv builder (effect path) and the
+      // governance projector fail closed, so the call cannot egress with an uncontrolled route.
+      expect(() => netFetchBinding.argvPrefix).toThrow();
+      expect(() =>
+        netFetchBinding.governanceProjector?.({ url: "https://api.allowed.example/x" }),
+      ).toThrow();
+    } finally {
+      restore();
+    }
   });
 });

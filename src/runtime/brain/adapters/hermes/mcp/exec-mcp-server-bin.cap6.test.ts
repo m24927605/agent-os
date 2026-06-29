@@ -389,10 +389,12 @@ describe("CAP6 — NON-VACUITY: net.fetch's projector is the egress gate's load-
     );
     expect(withoutProjector).toBeUndefined();
 
-    // The canonical builder agrees the host is "evil.com" (single source of truth for the gate input).
-    expect(
-      buildExecRunProjection({ argv: [...NET_FETCH_ARGV_PREFIX, "https://evil.com/x"] })
-        .networkHosts,
-    ).toEqual(["evil.com"]);
+    // The BINDING projector is the gate input: it OVERRIDES networkHosts to the bare url host "evil.com"
+    // (the pinned `-x` proxy is Agent-OS infra, NEVER a gated destination). NON-VACUITY: this override is
+    // load-bearing — and fail-SAFE: a stray proxy host left in networkHosts only DENIES (more restrictive).
+    const netFetchProjector = netFetchBinding.governanceProjector;
+    if (netFetchProjector === undefined)
+      throw new Error("net.fetch must define governanceProjector");
+    expect(netFetchProjector({ url: "https://evil.com/x" }).networkHosts).toEqual(["evil.com"]);
   });
 });

@@ -442,7 +442,7 @@ export const gitCommitBinding: ExecToolBinding = {
 };
 
 // ------------------------------------------------------------------------------------------------
-// SLICE-CAP6 — the FIRST real network-egress tool: `net.fetch` (config/proxy-disabled `curl`). It DECLARES
+// SLICE-CAP6 — the FIRST real network-egress tool: `net.fetch` (config-disabled, proxy-pinned `curl`). It DECLARES
 // `containment:"network-egress"` (CAP3 demands "egress-allowlist" WIRED to register), and its URL is IN
 // argv so `buildExecRunProjection` extracts `networkHosts = [URL host]` -> the bin egress fold (CAP5)
 // gates it in-repo. (git.push's egress target is NOT argv-visible -> CAP6b.) Posture: read / non-idempotent
@@ -451,7 +451,7 @@ export const gitCommitBinding: ExecToolBinding = {
 // resolution are deploy/EXEC2-gated (unauthenticated-to-allowlisted until EXEC2). See CAP6-net-fetch.md.
 // ------------------------------------------------------------------------------------------------
 
-/** A valid `net.fetch` ToolManifest — the FIRST real network-egress tool (config/proxy-disabled curl). */
+/** A valid `net.fetch` ToolManifest — the FIRST real network-egress tool (config-disabled, proxy-pinned curl). */
 export const netFetchManifest = {
   name: "net.fetch",
   version: "1.0.0",
@@ -561,48 +561,87 @@ export function isAllowedFetchUrl(raw: string): boolean {
 }
 
 /**
- * HARDENED net.fetch argv prefix. `-q` (FIRST, before any other flag) makes curl IGNORE every config file
- * (`.curlrc` / `-K`), so an agent that can write the sandbox fs (e.g. exec.write_file) CANNOT plant a
- * config that redirects/proxies the request to a host other than the one projected into networkHosts.
- * `--noproxy "*"` neutralizes ALL proxy env (HTTP(S)_PROXY/ALL_PROXY) so the real destination is the URL
- * host — NOT a proxy. `--globoff` disables curl URL globbing so `https://host/[1-1000]` is a LITERAL path
- * (no fan-out, no host-glob that would make the real destinations differ from the projected token). The
- * trailing `--` makes the url a SINGLE literal token (never a curl flag, never shell). So the PDP-projected
- * host == the real curl destination, the CAP6 egress claim holds.
+ * SLICE-CAP6d — the Agent-OS control-plane name for the OpenShell egress proxy net.fetch PINS curl to.
+ * Read ONLY from the Agent OS process env (control plane) — NEVER from the sandbox env/fs (brain-writable).
  */
-export const NET_FETCH_ARGV_PREFIX: readonly string[] = [
-  "curl",
-  "-q",
-  "--globoff",
-  "--noproxy",
-  "*",
-  "-sS",
-  "--",
-];
+export const AGENTOS_EGRESS_PROXY_ENV = "AGENTOS_OPENSHELL_EGRESS_PROXY";
 
 /**
- * net.fetch binding. argvPrefix = NET_FETCH_ARGV_PREFIX (config/proxy-disabled curl + `--` guard). The url
- * is validated by `isAllowedFetchUrl` (http/https + plain DNS host + no userinfo) so EVERY admitted url
- * produces a host subject to the egress fold. `.strict()` rejects a smuggled extra key. `toEnv` emits the
- * OPTIONAL credential PLACEHOLDER (never a literal secret; default unset => `{}`).
+ * The documented OpenShell per-sandbox egress proxy (the netns veth gateway CONNECT proxy): every sandbox
+ * force-routes ALL egress through it, nftables `LOG+REJECT`s any bypass, seccomp blocks AF_PACKET/AF_VSOCK
+ * (docs/research/openshell.md:38,133,135). This Agent-OS-OWNED constant is the default `-x` target when the
+ * env is unset; it is a CONSTANT in Agent OS source (brain-untouchable), NOT a value read from the sandbox.
+ */
+const DEFAULT_OPENSHELL_EGRESS_PROXY = "http://10.200.0.1:3128";
+
+/** A proxy URL: `http(s)://host:port` (plain-DNS or dotted-numeric host; port 1-65535). */
+const EGRESS_PROXY_URL = /^https?:\/\/[A-Za-z0-9.-]+:([1-9]\d{0,4})$/;
+
+/**
+ * Resolve net.fetch's `-x` egress proxy from the AGENT-OS control plane (NEVER the sandbox). UNSET => the
+ * documented OpenShell convention default (an Agent-OS-owned constant). SET + valid `scheme://host:port` =>
+ * that value. SET + INVALID => `undefined` => net.fetch FAILS CLOSED (deny; never a bare / `--noproxy`
+ * fallback that would let a brain-set ambient proxy choose the route). Pure over its argument.
+ */
+export function resolveEgressProxy(raw: string | undefined): string | undefined {
+  const v = (raw ?? "").trim();
+  if (v.length === 0) return DEFAULT_OPENSHELL_EGRESS_PROXY;
+  const m = EGRESS_PROXY_URL.exec(v);
+  if (m === null) return undefined;
+  const port = Number(m[1]);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? v : undefined;
+}
+
+/**
+ * HARDENED net.fetch argv prefix builder (SLICE-CAP6d). `-q` (FIRST) makes curl IGNORE every config file
+ * (`.curlrc`/`-K`), so a brain that can write the sandbox fs cannot plant a redirecting config. `-x <proxy>`
+ * PINS curl to the AGENT-OS-OWNED OpenShell egress proxy: a command-line `-x` OVERRIDES all `*_PROXY` env, so
+ * even a brain that sets `HTTPS_PROXY` in the sandbox cannot move the route (and OpenShell's nftables REJECTs
+ * any non-proxy egress regardless). The egress-integrity invariant — "the brain cannot choose the
+ * destination" — therefore holds via the Agent-OS pin (not the prior brain-co-resident `--noproxy *`, which
+ * bypassed OpenShell's enforcing proxy and could not egress at all). `--globoff` disables URL globbing (no
+ * fan-out). The trailing `--` makes the url a SINGLE literal token. The CONNECT host stays the URL host, so
+ * the PDP-projected host == the real curl CONNECT destination and the proxy's L7 allowlist gates it.
+ */
+export function buildNetFetchArgvPrefix(proxy: string): readonly string[] {
+  return ["curl", "-q", "--globoff", "-x", proxy, "-sS", "--"];
+}
+
+/** The default-case net.fetch argv prefix (egress proxy unset => the OpenShell convention). For tests. */
+export const NET_FETCH_ARGV_PREFIX: readonly string[] = buildNetFetchArgvPrefix(
+  DEFAULT_OPENSHELL_EGRESS_PROXY,
+);
+
+/**
+ * net.fetch binding. `argvPrefix` is RESOLVED per-read from the Agent-OS control-plane egress proxy
+ * (`resolveEgressProxy(process.env[AGENTOS_EGRESS_PROXY_ENV])`), pinning curl `-x` to OpenShell's proxy; an
+ * INVALID explicit proxy FAILS CLOSED — the getter throws so the call denies, never a bare / `--noproxy`
+ * curl. The url is validated by `isAllowedFetchUrl` (http/https + plain DNS host + no userinfo); `.strict()`
+ * rejects a smuggled extra key; `toEnv` emits the OPTIONAL credential PLACEHOLDER (never a literal secret).
  *
- * `governanceProjector` builds the credential-blind projection over the argv, then OVERRIDES `networkHosts`
- * to the BARE `new URL(url).hostname` (NO port). The bin's egress allowlist (`AGENTOS_EGRESS_ALLOW`) is a
- * HOST list, so the gated token must be host-only: `https://api.allowed.example:443/x` projects
- * `api.allowed.example` and matches the allowlist entry `api.allowed.example` (a default OR non-default
- * port no longer needs a separate `host:port` allowlist entry). NON-VACUITY: remove this projector => no
- * networkHosts => the network-egress fail-closed gate denies (the destination is unknown).
+ * `governanceProjector` builds the credential-blind projection over the SAME pinned argv, then OVERRIDES
+ * `networkHosts` to the BARE `new URL(url).hostname` (NO port; the proxy address is Agent-OS-owned and is
+ * NEVER gated). The bin's egress allowlist (`AGENTOS_EGRESS_ALLOW`) is a HOST list, so the gated token is
+ * host-only. NON-VACUITY: remove this projector => no networkHosts => the network-egress gate denies.
  */
 export const netFetchBinding: ExecToolBinding = {
-  argvPrefix: NET_FETCH_ARGV_PREFIX,
+  get argvPrefix(): readonly string[] {
+    const proxy = resolveEgressProxy(process.env[AGENTOS_EGRESS_PROXY_ENV]);
+    if (proxy === undefined)
+      throw new Error("net.fetch: AGENTOS_OPENSHELL_EGRESS_PROXY is set but invalid (fail-closed)");
+    return buildNetFetchArgvPrefix(proxy);
+  },
   argSchema: z.object({ url: z.string().min(1).refine(isAllowedFetchUrl) }).strict(),
   toArgv: (a) => [(a as { url: string }).url],
   toEnv: () => netFetchAuthEnv(process.env[NET_FETCH_AUTH_KEY_ENV]),
   governanceProjector: (a) => {
     const url = (a as { url: string }).url;
-    const base = buildExecRunProjection({ argv: [...NET_FETCH_ARGV_PREFIX, url] });
-    // Override networkHosts to the BARE hostname (no port): the egress allowlist is host-based. The url is
-    // already validated (http/https + plain DNS host), so `new URL` cannot throw here.
+    const proxy = resolveEgressProxy(process.env[AGENTOS_EGRESS_PROXY_ENV]);
+    if (proxy === undefined)
+      throw new Error("net.fetch: AGENTOS_OPENSHELL_EGRESS_PROXY is set but invalid (fail-closed)");
+    const base = buildExecRunProjection({ argv: [...buildNetFetchArgvPrefix(proxy), url] });
+    // Override networkHosts to the BARE url hostname (no port; the Agent-OS-owned proxy is never gated). The
+    // url is already validated (http/https + plain DNS host), so `new URL` cannot throw here.
     return { ...base, networkHosts: [new URL(url).hostname] };
   },
 };
