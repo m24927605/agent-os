@@ -662,12 +662,14 @@ export function buildRegistrationEnv(config: AgentOsConfig): Record<string, stri
   };
   // SLICE-SETUP3 Step 5 — compile the egress allowlist into the env the Option B provisioner reads. A
   // host list is comma-joined; absent/empty => no key => deny-by-default (byte-identical to today).
+  // De-dupe so the env matches the rendered policy + what the auto-provisioner effectively uses
+  // (parseEgressHosts de-dupes at provision time); a host listed twice yields ONE entry, order preserved.
   const np = config.openshell.networkPolicy;
   if (np?.egressAllow !== undefined && np.egressAllow.length > 0) {
-    env.AGENTOS_EGRESS_ALLOW = np.egressAllow.join(",");
+    env.AGENTOS_EGRESS_ALLOW = [...new Set(np.egressAllow)].join(",");
   }
   if (np?.gitEgressAllow !== undefined && np.gitEgressAllow.length > 0) {
-    env.AGENTOS_GIT_EGRESS_ALLOW = np.gitEgressAllow.join(",");
+    env.AGENTOS_GIT_EGRESS_ALLOW = [...new Set(np.gitEgressAllow)].join(",");
   }
   if (config.spendguard !== undefined) {
     env.SPENDGUARD_UDS_PATH = config.spendguard.udsPath;

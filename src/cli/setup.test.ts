@@ -704,6 +704,13 @@ describe("setup Step 5 — openshell.networkPolicy compiles the egress allowlist
     expect(env.AGENTOS_GIT_EGRESS_ALLOW).toBe("github.com");
   });
 
+  it("DE-DUPES a host listed twice (the env matches the rendered policy + the auto-provisioner's effective set)", () => {
+    const cfg = loadAgentOsConfig(
+      withNetworkPolicy({ egressAllow: ["api.github.com", "pypi.org", "api.github.com"] }),
+    );
+    expect(buildRegistrationEnv(cfg).AGENTOS_EGRESS_ALLOW).toBe("api.github.com,pypi.org"); // not the triple
+  });
+
   it("absent networkPolicy => NO egress env (deny-by-default, byte-identical to today)", () => {
     const env = buildRegistrationEnv(loadAgentOsConfig(validConfigJson()));
     expect(env.AGENTOS_EGRESS_ALLOW).toBeUndefined();
