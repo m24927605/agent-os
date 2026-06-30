@@ -292,8 +292,17 @@ export function loadAgentOsConfig(raw: string): AgentOsConfig {
   }
   const result = AgentOsConfigSchema.safeParse(json);
   if (!result.success) {
-    // zod's message names the offending path/type/unknown-key; surface it, never the values.
-    throw new Error(`agent-os.config.json is invalid: ${result.error.message}`);
+    // Format the zod issues as one PROSE line per offending field (path + message) + a pointer — NOT the raw
+    // JSON issue array (which was machine noise). `redactSecrets` is belt-and-braces: a zod message could echo
+    // a received enum value, so scrub it so a misplaced secret can never leak through a validation error.
+    const lines = result.error.issues.map(
+      (i) => `  - ${i.path.length > 0 ? i.path.join(".") : "(root)"}: ${i.message}`,
+    );
+    throw new Error(
+      redactSecrets(
+        `agent-os.config.json is invalid:\n${lines.join("\n")}\nSee \`agentos config schema\` for the full schema, or \`agentos setup --explain\` for the field → env map.`,
+      ),
+    );
   }
   return result.data;
 }
