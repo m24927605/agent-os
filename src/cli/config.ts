@@ -238,6 +238,9 @@ export async function configCommand(
     return EXIT_INVALID;
   }
   const artifacts = renderArtifacts(config);
+  // Hash the CANONICAL parsed config (not the raw bytes) so the configHash is insensitive to JSONC comments +
+  // whitespace — a comment-only edit re-renders identically and `config check` stays IN-SYNC.
+  const canonical = JSON.stringify(config);
   // CREDENTIAL-BLIND (the top invariant): screen EVERY rendered artifact for a secret-shaped value BEFORE it
   // touches disk or the drift compare. The schema admits free-form strings (endpoint/image/path/id), so a
   // misplaced secret could otherwise be written verbatim — mirror `setup`'s detector and fail-closed, value-free.
@@ -257,7 +260,7 @@ export async function configCommand(
     }
     deps.writeFile(
       LOCK_PATH,
-      `${JSON.stringify(buildRenderLock(AGENTOS_VERSION, raw, artifacts), null, 2)}\n`,
+      `${JSON.stringify(buildRenderLock(AGENTOS_VERSION, canonical, artifacts), null, 2)}\n`,
     );
     deps.print(
       `wrote ${LOCK_PATH} (${artifacts.length} target(s)). Commit it to gate drift in CI (\`config check\`).`,
@@ -286,7 +289,7 @@ export async function configCommand(
     );
     return EXIT_INVALID;
   }
-  const { inSync, lines } = driftReport(lock, raw, artifacts);
+  const { inSync, lines } = driftReport(lock, canonical, artifacts);
   for (const l of lines) deps.print(l);
   if (!inSync) {
     deps.print("DRIFT detected — run `agentos config render` and commit the result.");

@@ -38,10 +38,12 @@ import {
   buildExplainTable,
   buildRegistrationEnv,
   buildScaffoldConfig,
+  buildScaffoldJsonc,
   explainTargetEnvKeys,
   loadAgentOsConfig,
   scaffoldGuidance,
   setupCommand,
+  stripJsonComments,
 } from "./setup.js";
 
 /**
@@ -763,5 +765,52 @@ describe("setup Step 5 — secrets KEY-NAME registry", () => {
   it("D4 defense-in-depth: an ALL-CAPS secret shape (AWS AKIA key) passes the C-identifier regex but is REJECTED by the redactor", () => {
     const akia = ["AKIA", "IOSFODNN7EXAMPLE"].join(""); // matches ^[A-Z][A-Z0-9_]*$ yet is a secret shape
     expect(() => loadAgentOsConfig(withSecrets({ aws: akia }))).toThrow();
+  });
+});
+
+// ================================================================================================
+// (SLICE-SETUP3 #JSONC) comment support — the config file can carry // and block comments
+// ================================================================================================
+describe("stripJsonComments — JSONC, string-literal-aware", () => {
+  it("strips // line + block comments OUTSIDE strings", () => {
+    const jsonc = `{
+      // a line comment
+      "openshell": { "endpoint": "127.0.0.1:17670" }, /* block */
+      "kernel": { "ingestEndpoint": "127.0.0.1:50051" }
+    }`;
+    expect(() => JSON.parse(stripJsonComments(jsonc))).not.toThrow();
+  });
+
+  it("PRESERVES `//` and `/*` INSIDE string values (URLs, paths, digests) — never corrupts data", () => {
+    const jsonc = `{ "image": "ghcr.io//x", "url": "https://api.github.com", "p": "/a/*b" }`;
+    const parsed = JSON.parse(stripJsonComments(jsonc)) as Record<string, string>;
+    expect(parsed.url).toBe("https://api.github.com"); // the // in https:// survived
+    expect(parsed.image).toBe("ghcr.io//x");
+    expect(parsed.p).toBe("/a/*b");
+  });
+
+  it('honors an escaped quote (a // after \\" stays string data, not a comment)', () => {
+    const jsonc = `{ "x": "a\\"// still data" }`;
+    expect((JSON.parse(stripJsonComments(jsonc)) as { x: string }).x).toBe('a"// still data');
+  });
+
+  it("loadAgentOsConfig accepts a JSONC config (comments stripped) and still .strict()-rejects unknown keys", () => {
+    const jsonc = `{
+      // human + editor docs live here now
+      "openshell": { "endpoint": "127.0.0.1:17670", "mtlsDir": "/m", "image": "img@sha256:a" }, // the substrate
+      "kernel": { "ingestEndpoint": "127.0.0.1:50051" }
+    }`;
+    expect(loadAgentOsConfig(jsonc).openshell.endpoint).toBe("127.0.0.1:17670");
+    expect(() => loadAgentOsConfig(`{ ${"/* c */"} "bogus": 1 }`)).toThrow(); // .strict() still fires post-strip
+  });
+
+  it("buildScaffoldJsonc emits a COMMENTED config that still loads (+ keeps $schema + section comments)", () => {
+    const jsonc = buildScaffoldJsonc("enterprise");
+    expect(jsonc).toContain("// agent-os.config.json"); // header comment
+    expect(jsonc).toContain("// OpenShell substrate (REQUIRED)"); // section comment
+    expect(jsonc).toContain("// SpendGuard budget"); // enterprise-only section comment
+    const cfg = loadAgentOsConfig(jsonc);
+    expect(cfg.$schema).toBe("./agent-os.config.schema.json");
+    expect(cfg.spendguard).toBeDefined();
   });
 });

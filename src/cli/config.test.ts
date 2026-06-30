@@ -177,3 +177,15 @@ describe("config schema — print the JSON Schema", () => {
     expect(parsed.properties?.openshell).toBeDefined(); // it IS the agent-os.config schema
   });
 });
+
+// ================================================================================================
+// (SLICE-SETUP3 #JSONC) a comment-only edit must NOT trigger drift (canonical configHash)
+// ================================================================================================
+describe("config check — JSONC comment edits don't drift", () => {
+  it("adding a comment to the config keeps `config check` IN-SYNC (canonical hash ignores comments)", async () => {
+    const { deps, store } = makeDeps({ [CONFIG_PATH]: JSON.stringify(WITH_NP) });
+    expect(await configCommand(["render"], {}, deps)).toBe(0);
+    store[CONFIG_PATH] = `// a newly-added comment (semantically identical)\n${store[CONFIG_PATH]}`;
+    expect(await configCommand(["check"], {}, deps)).toBe(0); // still IN-SYNC despite the comment edit
+  });
+});

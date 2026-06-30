@@ -223,14 +223,70 @@ export const AgentOsConfigSchema = z
 export type AgentOsConfig = z.infer<typeof AgentOsConfigSchema>;
 
 /**
- * Parse + validate a raw `agent-os.config.json` string. Fail-closed: malformed JSON, an unknown key
- * (`.strict()`), a wrong type, a missing required section, or a PARTIAL spendguard all THROW a clear
- * message — never a partial config.
+ * SLICE-SETUP3 #JSONC — strip `//` line comments and block comments from a JSONC string so the config file can
+ * carry inline docs (the file becomes self-documenting, complementing the editor `$schema` hover-docs). A
+ * STRING-AWARE state machine: `//`/`/* *` inside a "string literal" (e.g. `"https://…"`, an mtls path) are
+ * PRESERVED — only comments OUTSIDE strings are removed. Escapes (`\"`) are honored. Trailing commas are NOT
+ * supported (comments only); the post-strip text must be valid JSON. Pure.
+ */
+export function stripJsonComments(text: string): string {
+  let out = "";
+  let inString = false;
+  let inLine = false;
+  let inBlock = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const next = text[i + 1];
+    if (inLine) {
+      if (c === "\n") {
+        inLine = false;
+        out += c;
+      }
+      continue;
+    }
+    if (inBlock) {
+      if (c === "*" && next === "/") {
+        inBlock = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (c === "\\") {
+        // an escape: copy the escaped char verbatim so a `\"` doesn't end the string early.
+        out += next ?? "";
+        i++;
+      } else if (c === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+    } else if (c === "/" && next === "/") {
+      inLine = true;
+      i++;
+    } else if (c === "/" && next === "*") {
+      inBlock = true;
+      i++;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse + validate a raw `agent-os.config.json` (JSONC — `//` and block comments allowed) string. Fail-closed:
+ * malformed JSON, an unknown key (`.strict()`), a wrong type, a missing required section, or a PARTIAL
+ * spendguard all THROW a clear message — never a partial config.
  */
 export function loadAgentOsConfig(raw: string): AgentOsConfig {
   let json: unknown;
   try {
-    json = JSON.parse(raw);
+    json = JSON.parse(stripJsonComments(raw));
   } catch (err) {
     throw new Error(`agent-os.config.json is not valid JSON: ${messageOf(err)}`);
   }
@@ -280,6 +336,36 @@ export function buildScaffoldConfig(profile: SetupProfile): AgentOsConfig {
     };
   }
   return base; // personal — the minimal openshell+kernel 30-second path
+}
+
+/** Section-level comments injected into the `--init` JSONC scaffold (top-level key -> one-liner). */
+const SECTION_COMMENTS: Record<string, string> = {
+  openshell:
+    'OpenShell substrate (REQUIRED). Add `networkPolicy: { egressAllow: ["api.github.com"] }` to let net.fetch reach hosts.',
+  kernel: "The attester != actor WORM kernel (REQUIRED) — commit-before-effect needs it.",
+  spendguard: "SpendGuard budget governance (optional; all four fields required if present).",
+  agt: "AGT policy advisory (optional; udsPath required if present).",
+  secrets: "Registry of env-key NAMES only — the VALUES are exported in your shell, never here.",
+  nemoclaw: "NemoClaw hosting (optional).",
+};
+
+/**
+ * SLICE-SETUP3 #JSONC — serialize the scaffold to a COMMENTED JSONC string for `--init`: a header explaining the
+ * file + a `//` comment before each top-level section. The file teaches itself even outside an editor (the
+ * loader strips the comments; the `$schema` ref additionally gives editors autocomplete + hover docs). Pure.
+ */
+export function buildScaffoldJsonc(profile: SetupProfile): string {
+  const obj = { $schema: `./${CONFIG_SCHEMA_FILENAME}`, ...buildScaffoldConfig(profile) };
+  let text = JSON.stringify(obj, null, 2);
+  for (const [key, comment] of Object.entries(SECTION_COMMENTS)) {
+    // inject before the 2-space-indented top-level key, only where the section is present (key is a literal).
+    text = text.replace(new RegExp(`^(  )("${key}":)`, "m"), `$1// ${comment}\n$1$2`);
+  }
+  const header =
+    "// agent-os.config.json — declarative, NON-SECRET Agent OS config (JSONC: // comments allowed).\n" +
+    "// `agentos setup --explain --resolved` shows what each field compiles to (with your values).\n" +
+    "// Secrets are NEVER here — export them in your shell; see `agentos doctor --secrets`.\n";
+  return `${header}${text}\n`;
 }
 
 /**
@@ -542,12 +628,9 @@ export async function setupCommand(
       );
       return EXIT_INVALID;
     }
-    // Stamp a `$schema` ref FIRST (key order preserved) so editors load the schema; then the scaffold.
-    const scaffold = {
-      $schema: `./${CONFIG_SCHEMA_FILENAME}`,
-      ...buildScaffoldConfig(flags.profile),
-    };
-    deps.writeConfigFile(flags.config, `${JSON.stringify(scaffold, null, 2)}\n`);
+    // Write a COMMENTED JSONC scaffold (header + per-section `//` docs + the `$schema` ref FIRST) — the file
+    // self-documents even outside an editor; loadAgentOsConfig strips the comments on read.
+    deps.writeConfigFile(flags.config, buildScaffoldJsonc(flags.profile));
     // Write the schema file NEXT TO the config so the relative `$schema` ref resolves — this is what gives
     // editors (VS Code et al.) autocomplete + inline validation + hover docs on the otherwise-bare JSON.
     const schemaPath = resolve(dirname(flags.config), CONFIG_SCHEMA_FILENAME);
