@@ -101,11 +101,39 @@ const BIN_REL_PATH = "dist/runtime/brain/adapters/hermes/mcp/exec-mcp-server-bin
  * • `.strict()` everywhere: an unknown top-level OR nested key is still REJECTED — honest over
  *   silently-ignored (e.g. an `agt.endpoint` key, which the AGT section does not define, fails-closed).
  */
+/**
+ * A plain DNS host (or `localhost`): the SAME contract net.fetch + the egress-provisioner admit — dotted
+ * `[A-Za-z0-9-]` labels with a letter-bearing TLD, NO scheme / port / path / IP-literal. Kept in sync with
+ * `egress-provisioner.ts`'s `PLAIN_DNS_HOST` (which stays the canonical FAIL-CLOSED gate at provision time);
+ * here it is a first-line config validation so a bad host fails `agentos setup`, not silently at runtime.
+ */
+const PLAIN_DNS_HOST = /^(?:localhost|(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*)$/;
+const HostListSchema = z.array(
+  z
+    .string()
+    .regex(PLAIN_DNS_HOST, "must be a plain DNS host (HTTPS-only egress; no scheme/port/path/IP)"),
+);
+
+/**
+ * SLICE-SETUP3 Step 5 — the OPTIONAL `openshell.networkPolicy` egress allowlist. `egressAllow` compiles to
+ * `AGENTOS_EGRESS_ALLOW` (the hosts net.fetch may reach) and `gitEgressAllow` to the SEPARATE
+ * `AGENTOS_GIT_EGRESS_ALLOW` (git.push) — the env the Option B egress auto-provisioner reads to materialize
+ * the OpenShell network-policy at sandbox creation. Absent => no env => deny-by-default (byte-identical to
+ * today). `.strict()` rejects any unknown key.
+ */
+const NetworkPolicySchema = z
+  .object({
+    egressAllow: HostListSchema.optional(),
+    gitEgressAllow: HostListSchema.optional(),
+  })
+  .strict();
+
 const OpenShellSchema = z
   .object({
     endpoint: z.string(),
     mtlsDir: z.string(),
     image: z.string(),
+    networkPolicy: NetworkPolicySchema.optional(),
   })
   .strict();
 
@@ -138,12 +166,31 @@ const AgtSchema = z
   })
   .strict();
 
+/**
+ * SLICE-SETUP3 Step 5 — the OPTIONAL `secrets` KEY-NAME registry: `{ logicalName: ENV_KEY_NAME }`. It maps a
+ * human label to the ENV KEY (UPPER_SNAKE) whose VALUE the operator exports in their shell — the config stays
+ * NON-SECRET. The value MUST be a C-identifier env-key NAME: a pasted secret VALUE (lowercase / hyphens /
+ * `sk-…`) fails the regex with a VALUE-FREE error, so a credential can never land in (or be echoed from) the
+ * config file. v1 = a validated, documented declaration; the runtime resolves the VALUE only at the egress
+ * boundary, never from this file.
+ */
+const SecretsRegistrySchema = z.record(
+  z.string().min(1),
+  z
+    .string()
+    .regex(
+      /^[A-Z][A-Z0-9_]*$/,
+      "a secrets value must be an ENV KEY NAME (UPPER_SNAKE_CASE), never a secret value — the value lives in env and is resolved only at egress",
+    ),
+);
+
 const AgentOsConfigSchema = z
   .object({
     openshell: OpenShellSchema,
     kernel: KernelSchema,
     spendguard: SpendGuardSchema.optional(),
     agt: AgtSchema.optional(),
+    secrets: SecretsRegistrySchema.optional(),
   })
   .strict();
 
@@ -266,6 +313,16 @@ export function buildExplainTable(): ExplainRow[] {
     },
     { field: "openshell.mtlsDir", target: "AGENTOS_OPENSHELL_MTLS", note: "gateway mTLS dir" },
     { field: "openshell.image", target: "AGENTOS_OPENSHELL_IMAGE", note: "pinned sandbox image" },
+    {
+      field: "openshell.networkPolicy.egressAllow[]",
+      target: "AGENTOS_EGRESS_ALLOW",
+      note: "net.fetch egress hosts; deny-by-default; the Option B auto-provisioner reads it (optional)",
+    },
+    {
+      field: "openshell.networkPolicy.gitEgressAllow[]",
+      target: "AGENTOS_GIT_EGRESS_ALLOW",
+      note: "git.push egress hosts; SEPARATE higher-bar allowlist (optional)",
+    },
     {
       field: "kernel.ingestEndpoint",
       target: "AGENTOS_KERNEL_INGEST_ENDPOINT",
@@ -583,6 +640,15 @@ export function buildRegistrationEnv(config: AgentOsConfig): Record<string, stri
     AGENTOS_OPENSHELL_IMAGE: config.openshell.image,
     AGENTOS_KERNEL_INGEST_ENDPOINT: config.kernel.ingestEndpoint,
   };
+  // SLICE-SETUP3 Step 5 — compile the egress allowlist into the env the Option B provisioner reads. A
+  // host list is comma-joined; absent/empty => no key => deny-by-default (byte-identical to today).
+  const np = config.openshell.networkPolicy;
+  if (np?.egressAllow !== undefined && np.egressAllow.length > 0) {
+    env.AGENTOS_EGRESS_ALLOW = np.egressAllow.join(",");
+  }
+  if (np?.gitEgressAllow !== undefined && np.gitEgressAllow.length > 0) {
+    env.AGENTOS_GIT_EGRESS_ALLOW = np.gitEgressAllow.join(",");
+  }
   if (config.spendguard !== undefined) {
     env.SPENDGUARD_UDS_PATH = config.spendguard.udsPath;
     env.SPENDGUARD_BUDGET_ID = config.spendguard.budgetId;

@@ -632,9 +632,14 @@ describe("setup --init — scaffold a starter agent-os.config.json", () => {
 // ================================================================================================
 describe("setup --explain — config-field -> native-output map", () => {
   it("explainTargetEnvKeys COVERS every env key buildRegistrationEnv emits (cannot drift behind the renderer)", () => {
-    // a FULL config (openshell+kernel+spendguard+agt) exercises every renderer branch.
+    // a FULL config (openshell+networkPolicy+kernel+spendguard+agt) exercises EVERY renderer branch.
+    const ent = buildScaffoldConfig("enterprise");
     const full: AgentOsConfig = {
-      ...buildScaffoldConfig("enterprise"),
+      ...ent,
+      openshell: {
+        ...ent.openshell,
+        networkPolicy: { egressAllow: ["api.github.com"], gitEgressAllow: ["github.com"] },
+      },
       agt: buildScaffoldConfig("developer").agt,
     };
     const documented = new Set(explainTargetEnvKeys());
@@ -659,5 +664,76 @@ describe("setup --explain — config-field -> native-output map", () => {
     expect(out).toContain("openshell.endpoint  ->  AGENTOS_OPENSHELL_ENDPOINT");
     expect(out).toContain("agt.udsPath  ->  AGT_UDS_PATH");
     expect(out).not.toContain("10.9.9.9"); // VALUE-FREE: the table maps field->KEY name, never a value
+  });
+});
+
+// ================================================================================================
+// (SLICE-SETUP3 Step 5A) openshell.networkPolicy egress allowlist -> AGENTOS_EGRESS_ALLOW env
+// ================================================================================================
+describe("setup Step 5 — openshell.networkPolicy compiles the egress allowlist into the env", () => {
+  const withNetworkPolicy = (np: unknown): string => {
+    const c = validConfigObject();
+    return JSON.stringify({ ...c, openshell: { ...c.openshell, networkPolicy: np } });
+  };
+
+  it("parses egressAllow/gitEgressAllow host lists; a non-plain-DNS host or unknown key fails closed", () => {
+    expect(() =>
+      loadAgentOsConfig(
+        withNetworkPolicy({ egressAllow: ["api.github.com", "raw.githubusercontent.com"] }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      loadAgentOsConfig(withNetworkPolicy({ egressAllow: ["https://api.github.com"] })),
+    ).toThrow(); // scheme
+    expect(() =>
+      loadAgentOsConfig(withNetworkPolicy({ egressAllow: ["api.github.com:443"] })),
+    ).toThrow(); // port
+    expect(() => loadAgentOsConfig(withNetworkPolicy({ egressAllow: ["1.2.3.4"] }))).toThrow(); // IP literal
+    expect(() => loadAgentOsConfig(withNetworkPolicy({ bogusKey: [] }))).toThrow(); // .strict()
+  });
+
+  it("compiles egressAllow -> AGENTOS_EGRESS_ALLOW (comma-joined) + gitEgressAllow -> AGENTOS_GIT_EGRESS_ALLOW", () => {
+    const cfg = loadAgentOsConfig(
+      withNetworkPolicy({
+        egressAllow: ["api.github.com", "pypi.org"],
+        gitEgressAllow: ["github.com"],
+      }),
+    );
+    const env = buildRegistrationEnv(cfg);
+    expect(env.AGENTOS_EGRESS_ALLOW).toBe("api.github.com,pypi.org"); // the env the Option B provisioner reads
+    expect(env.AGENTOS_GIT_EGRESS_ALLOW).toBe("github.com");
+  });
+
+  it("absent networkPolicy => NO egress env (deny-by-default, byte-identical to today)", () => {
+    const env = buildRegistrationEnv(loadAgentOsConfig(validConfigJson()));
+    expect(env.AGENTOS_EGRESS_ALLOW).toBeUndefined();
+    expect(env.AGENTOS_GIT_EGRESS_ALLOW).toBeUndefined();
+  });
+});
+
+// ================================================================================================
+// (SLICE-SETUP3 Step 5B) secrets KEY-NAME registry — config stays NON-SECRET (rejects a pasted value)
+// ================================================================================================
+describe("setup Step 5 — secrets KEY-NAME registry", () => {
+  const withSecrets = (secrets: unknown): string =>
+    JSON.stringify({ ...validConfigObject(), secrets });
+
+  it("parses a {logicalName: ENV_KEY_NAME} map of UPPER_SNAKE key names", () => {
+    const cfg = loadAgentOsConfig(
+      withSecrets({ gmail: "AGENTOS_GMAIL_OAUTH_KEY", netFetch: "AGENTOS_NET_FETCH_AUTH_KEY" }),
+    );
+    expect(cfg.secrets?.gmail).toBe("AGENTOS_GMAIL_OAUTH_KEY"); // a KEY NAME, not a value
+  });
+
+  it("REJECTS a pasted SECRET VALUE (not an env-key NAME) — fail-closed AND value-free (a credential can't land in the file)", () => {
+    let msg = "";
+    try {
+      loadAgentOsConfig(withSecrets({ gmail: SECRET_DETECTED_CANARY })); // a `sk-<alnum>` token, not UPPER_SNAKE
+    } catch (e) {
+      msg = String(e);
+    }
+    expect(msg).toMatch(/ENV KEY NAME|invalid/i); // it threw on the non-key-name value
+    expect(msg).not.toContain(SECRET_DETECTED_CANARY); // VALUE-FREE: the bad value is never echoed in the error
+    expect(() => loadAgentOsConfig(withSecrets({ gmail: "ya29.a0Af-lowercase-token" }))).toThrow();
   });
 });
