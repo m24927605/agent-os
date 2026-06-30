@@ -36,6 +36,29 @@ const EXIT_USAGE = 2;
 
 type Env = NodeJS.ProcessEnv;
 
+/** Multi-line help (discoverability) — printed by `help` / `--help` / `-h`. Grouped + one-line descriptions. */
+const HELP_TEXT = `agentos — Agent OS governance CLI
+
+Usage: agentos <command> [options]
+
+Onboarding & config:
+  setup --init [--profile personal|enterprise|developer]  Scaffold agent-os.config.json + its JSON Schema (no blank page)
+  setup --explain [--resolved] [--config <path>]          Field -> native-output map; --resolved shows YOUR values + what's missing
+  setup [--config <path>] [--print] [--non-interactive]   Compile + apply (hermes mcp add / print block) + run doctor
+  doctor [--secrets]                                      Preflight per-system PASS/FAIL/SKIP; --secrets = value-blind secret-key inventory
+  config render [--config <path>]                         Compile config -> .agentos/rendered/* + render.lock.json
+  config check [--config <path>]                          Re-render + fail-closed on drift (CI staleness guard)
+  config schema                                           Print the JSON Schema for agent-os.config.json
+
+Tooling:
+  manifest lint <file>                                    Validate a tool manifest (fail-closed)
+  verify --chain <f> --pubkey <f>                         Verify a WORM chain with the released verifier
+
+  -h, --help                                              Show this help
+
+Config reference: docs/configuration.md
+`;
+
 /**
  * Testable entrypoint (mirrors the verifier's `verifyMain` pattern). Returns the process exit code;
  * the bin wrapper passes it to `process.exit`. `env` is injectable so tests can point
@@ -55,10 +78,16 @@ export async function runCli(argv: string[], env: Env = process.env): Promise<nu
       return setupCommand(rest, env);
     case "config":
       return configCommand(rest, env);
+    case "help":
+    case "--help":
+    case "-h":
+      // Explicit help is a SUCCESS (stdout, exit 0) — the discoverable entry point.
+      process.stdout.write(HELP_TEXT);
+      return EXIT_OK;
     default:
-      // Unknown / missing subcommand — fail-closed, never a silent 0.
+      // Unknown / missing subcommand — fail-closed, never a silent 0; point at --help for the full list.
       process.stderr.write(
-        "usage: agentos <manifest lint <file> | verify --chain <f> --pubkey <f> | doctor [--secrets] | setup [--init] [--explain] [--config <path>] | config <render|check|schema> [--config <path>]>\n",
+        "agentos: unknown or missing command. Run `agentos --help` for usage.\n",
       );
       return EXIT_USAGE;
   }

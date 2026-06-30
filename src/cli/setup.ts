@@ -470,6 +470,8 @@ interface SetupFlags {
   force: boolean;
   /** SLICE-SETUP3 — print the config-field -> native-output map instead of applying (`--explain`). */
   explain: boolean;
+  /** SLICE-SETUP3 #1 — with `--explain`, also show YOUR resolved (non-secret) values from the config. */
+  resolved: boolean;
 }
 
 /** Parse `--config <path> | --print | --non-interactive`. Returns undefined on a malformed flag. */
@@ -482,6 +484,7 @@ function parseSetupFlags(args: string[]): SetupFlags | undefined {
     profile: "personal",
     force: false,
     explain: false,
+    resolved: false,
   };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -493,6 +496,8 @@ function parseSetupFlags(args: string[]): SetupFlags | undefined {
       out.init = true;
     } else if (flag === "--explain") {
       out.explain = true;
+    } else if (flag === "--resolved") {
+      out.resolved = true;
     } else if (flag === "--force") {
       out.force = true;
     } else if (flag === "--profile") {
@@ -553,13 +558,33 @@ export async function setupCommand(
     return EXIT_OK;
   }
 
-  // --- EXPLAIN (SLICE-SETUP3): print the config-field -> native-output map (no apply; VALUE-FREE). ----
+  // --- EXPLAIN (SLICE-SETUP3): print the config-field -> native-output map (no apply). VALUE-FREE by default;
+  //     `--resolved` additionally shows YOUR config's compiled NON-SECRET values (+ "(unset)") — fail-closed
+  //     on a missing/invalid config. The resolved values come from buildRegistrationEnv (non-secret by schema:
+  //     endpoints/paths/ids/egress hosts only — secrets are never compiled here). ------------------------------
+  let resolvedEnv: Record<string, string> | undefined;
+  if (flags.explain && flags.resolved) {
+    const raw = deps.readConfigFile(flags.config);
+    if (raw === undefined) {
+      deps.print(
+        `error: --resolved needs a config; cannot read '${flags.config}' — run \`agentos setup --init\` first`,
+      );
+      return EXIT_INVALID;
+    }
+    try {
+      resolvedEnv = buildRegistrationEnv(loadAgentOsConfig(raw));
+    } catch (err) {
+      deps.print(`error: ${messageOf(err)}`);
+      return EXIT_INVALID;
+    }
+  }
   if (flags.explain) {
     deps.print(
       "agent-os.config.json field -> native output (compiled into Hermes's mcp_servers.env for `agentos-exec`):",
     );
     for (const row of buildExplainTable()) {
-      deps.print(`  ${row.field}  ->  ${row.target}   # ${row.note}`);
+      const value = resolvedEnv !== undefined ? `  = ${resolvedEnv[row.target] ?? "(unset)"}` : "";
+      deps.print(`  ${row.field}  ->  ${row.target}${value}   # ${row.note}`);
     }
     deps.print(
       "Apply: `agentos setup` (TTY: `hermes mcp add`; else PRINTS the block for $HERMES_HOME/config.yaml). Secrets are env-only — never compiled here.",

@@ -667,6 +667,20 @@ describe("setup --explain — config-field -> native-output map", () => {
     expect(out).toContain("agt.udsPath  ->  AGT_UDS_PATH");
     expect(out).not.toContain("10.9.9.9"); // VALUE-FREE: the table maps field->KEY name, never a value
   });
+
+  it("`--explain --resolved` shows YOUR config's compiled NON-SECRET values inline (exit 0)", async () => {
+    const { deps, printed } = makeDeps({ configRaw: validConfigJson() }); // valid config present
+    const code = await setupCommand(["--explain", "--resolved"], {}, deps);
+    expect(code).toBe(0);
+    const out = printed.join("\n");
+    expect(out).toContain("AGENTOS_OPENSHELL_ENDPOINT  = 127.0.0.1:17670"); // your actual value, inline
+    expect(out).toContain("AGENTOS_EGRESS_ALLOW  = (unset)"); // an unconfigured target shows (unset)
+  });
+
+  it("`--explain --resolved` with NO config fails closed (non-zero) — it needs a config to resolve", async () => {
+    const { deps } = makeDeps({ configRaw: undefined });
+    expect(await setupCommand(["--explain", "--resolved"], {}, deps)).not.toBe(0);
+  });
 });
 
 // ================================================================================================

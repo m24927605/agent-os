@@ -19,7 +19,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCli } from "./main.js";
 
 let tmp: string;
@@ -126,5 +126,23 @@ describe("agentos — fail-closed dispatch", () => {
 
   it("returns non-zero for `manifest` with an unknown action", async () => {
     expect(await runCli(["manifest", "bogus", "x"])).not.toBe(0);
+  });
+});
+
+describe("agentos --help / -h / help — discoverable usage (SLICE-SETUP3 #1)", () => {
+  it("prints grouped help to stdout + exits 0 (unknown/empty stay fail-closed, tested above)", async () => {
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((c: string | Uint8Array) => {
+      out.push(String(c));
+      return true;
+    });
+    expect(await runCli(["--help"])).toBe(0);
+    expect(await runCli(["-h"])).toBe(0);
+    expect(await runCli(["help"])).toBe(0);
+    spy.mockRestore();
+    const text = out.join("");
+    expect(text).toContain("Usage: agentos");
+    expect(text).toContain("setup --init"); // commands are listed with descriptions
+    expect(text).toContain("config render");
   });
 });
