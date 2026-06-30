@@ -35,7 +35,10 @@ import { DEFAULT_KERNEL, DEFAULT_OPENSHELL } from "./doctor.js";
 import {
   type AgentOsConfig,
   type SetupDeps,
+  buildExplainTable,
+  buildRegistrationEnv,
   buildScaffoldConfig,
+  explainTargetEnvKeys,
   loadAgentOsConfig,
   scaffoldGuidance,
   setupCommand,
@@ -621,5 +624,40 @@ describe("setup --init — scaffold a starter agent-os.config.json", () => {
     const { deps, writes } = makeDeps({ configRaw: undefined });
     expect(await setupCommand(["--init", "--profile", "bogus"], {}, deps)).not.toBe(0);
     expect(writes.length).toBe(0);
+  });
+});
+
+// ================================================================================================
+// (SLICE-SETUP3) setup --explain — the config-field -> native-output map (drift-guarded, value-free)
+// ================================================================================================
+describe("setup --explain — config-field -> native-output map", () => {
+  it("explainTargetEnvKeys COVERS every env key buildRegistrationEnv emits (cannot drift behind the renderer)", () => {
+    // a FULL config (openshell+kernel+spendguard+agt) exercises every renderer branch.
+    const full: AgentOsConfig = {
+      ...buildScaffoldConfig("enterprise"),
+      agt: buildScaffoldConfig("developer").agt,
+    };
+    const documented = new Set(explainTargetEnvKeys());
+    for (const key of Object.keys(buildRegistrationEnv(full))) {
+      expect(documented.has(key)).toBe(true); // every produced env key is in the explain table
+    }
+    expect(buildExplainTable().length).toBeGreaterThan(0);
+  });
+
+  it("`setup --explain` prints the field->target map, exits 0, applies NOTHING, leaks no env VALUE", async () => {
+    const { deps, printed, hermesCalls, writes } = makeDeps({ configRaw: undefined });
+    // an env secret is present but --explain prints only the STATIC map — no env value is ever read.
+    const code = await setupCommand(
+      ["--explain"],
+      { AGENTOS_OPENSHELL_ENDPOINT: "10.9.9.9:1" },
+      deps,
+    );
+    expect(code).toBe(0);
+    expect(hermesCalls.length).toBe(0); // --explain never applies
+    expect(writes.length).toBe(0);
+    const out = printed.join("\n");
+    expect(out).toContain("openshell.endpoint  ->  AGENTOS_OPENSHELL_ENDPOINT");
+    expect(out).toContain("agt.udsPath  ->  AGT_UDS_PATH");
+    expect(out).not.toContain("10.9.9.9"); // VALUE-FREE: the table maps field->KEY name, never a value
   });
 });

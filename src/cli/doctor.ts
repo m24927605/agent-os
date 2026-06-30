@@ -44,6 +44,20 @@ const EXIT_DOCTOR_FAIL = 1;
 export const DEFAULT_OPENSHELL = "127.0.0.1:17670";
 export const DEFAULT_KERNEL = "127.0.0.1:50051";
 
+/**
+ * SLICE-SETUP3 — the known Agent OS SECRET env KEYS that gate optional features. `doctor --secrets` reports
+ * each as SET/UNSET (the KEY NAME + a boolean ONLY — NEVER the value), catching the #1 onboarding miss:
+ * "set the key NAME but forgot to export the VALUE". Each is OPTIONAL (the feature is off when unset), so the
+ * inventory is informational and never changes the fail-closed exit. The VALUES live in env and are resolved
+ * only at the OpenShell egress boundary — never in a config file, a log, or this output.
+ */
+const KNOWN_SECRET_ENV_KEYS: { readonly key: string; readonly feature: string }[] = [
+  { key: "AGENTOS_NET_FETCH_AUTH_KEY", feature: "net.fetch auth" },
+  { key: "AGENTOS_GIT_PUSH_AUTH_KEY", feature: "git.push auth" },
+  { key: "AGENTOS_GMAIL_OAUTH_KEY", feature: "Gmail action" },
+  { key: "AGENTOS_GCAL_OAUTH_KEY", feature: "Google Calendar action" },
+];
+
 /** Short TCP-connect timeout (ms): a refused/timed-out connect is fail-closed (treated as down). */
 const TCP_TIMEOUT_MS = 750;
 
@@ -143,7 +157,7 @@ function splitEndpoint(endpoint: string): { host: string; port: number } {
  * fakes to drive each PASS/FAIL/SKIP branch deterministically.
  */
 export async function doctorCommand(
-  _rest: string[],
+  rest: string[],
   env: Env,
   probes: DoctorProbes = realProbes(),
 ): Promise<number> {
@@ -195,7 +209,9 @@ export async function doctorCommand(
   report(
     openshellOk ? "PASS" : "FAIL",
     "OpenShell reachable",
-    openshellOk ? `connected ${osTarget.host}:${osTarget.port}` : "start the OpenShell gateway",
+    openshellOk
+      ? `connected ${osTarget.host}:${osTarget.port}`
+      : "start the OpenShell gateway (config: openshell.endpoint in agent-os.config.json, then `agentos setup`)",
     true,
   );
 
@@ -209,7 +225,7 @@ export async function doctorCommand(
     "kernel reachable",
     kernelOk
       ? `connected ${kTarget.host}:${kTarget.port}`
-      : "start the partitioned WORM kernel (`--partitions tenant-bin`) — commit-before-effect needs it",
+      : "start the partitioned WORM kernel (`--partitions tenant-bin`) — commit-before-effect needs it (config: kernel.ingestEndpoint in agent-os.config.json, then `agentos setup`)",
     true,
   );
 
@@ -230,7 +246,7 @@ export async function doctorCommand(
       "SpendGuard sidecar",
       udsOk
         ? "SPENDGUARD_UDS_PATH socket present"
-        : "SPENDGUARD_UDS_PATH set but socket unreachable — start the SpendGuard sidecar",
+        : "SPENDGUARD_UDS_PATH set but socket unreachable — start the SpendGuard sidecar (config: spendguard.udsPath)",
       true,
     );
   }
@@ -249,9 +265,25 @@ export async function doctorCommand(
       "AGT advisory",
       agtOk
         ? "AGT_UDS_PATH socket present"
-        : "AGT_UDS_PATH set but socket unreachable — start the AGT sidecar",
+        : "AGT_UDS_PATH set but socket unreachable — start the AGT sidecar (config: agt.udsPath)",
       true,
     );
+  }
+
+  // 8. Secrets inventory (SLICE-SETUP3, `--secrets`) — list the known Agent OS secret env KEYS as SET/UNSET
+  //    (the KEY NAME + a boolean ONLY, NEVER a value; credential-blind, reusing report()'s discipline).
+  //    Informational (each gates an OPTIONAL feature), so it never changes the fail-closed exit — it catches
+  //    "set the key NAME, forgot the VALUE". The VALUE is resolved only at egress; it is never read here.
+  if (rest.includes("--secrets")) {
+    for (const s of KNOWN_SECRET_ENV_KEYS) {
+      const isSet = (env[s.key] ?? "").length > 0;
+      report(
+        isSet ? "PASS" : "SKIP",
+        `secret: ${s.key}`,
+        isSet ? `set -> ${s.feature} enabled` : `unset -> ${s.feature} off`,
+        false,
+      );
+    }
   }
 
   // Fail-closed tally: non-zero if ANY required check FAILed; 0 only if all required checks PASSed.

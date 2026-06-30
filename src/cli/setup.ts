@@ -243,6 +243,61 @@ export function scaffoldGuidance(profile: SetupProfile): string[] {
   return lines;
 }
 
+/** One row of the `setup --explain` config-field -> native-output map. */
+export interface ExplainRow {
+  readonly field: string;
+  readonly target: string;
+  readonly note: string;
+}
+
+/**
+ * SLICE-SETUP3 — the config-field -> native-output MAP (`setup --explain`): one row per declarative field,
+ * naming the env KEY it compiles to (the bin's `mcp_servers.env`) + how it's verified. VALUE-FREE by
+ * construction — it documents the MAPPING (field -> KEY name), NEVER a config value or a secret. The set of
+ * targets is asserted (in tests) to COVER every key `buildRegistrationEnv` emits, so the table cannot silently
+ * drift behind the renderer (the reverse of the hand-written docs/configuration.md table).
+ */
+export function buildExplainTable(): ExplainRow[] {
+  return [
+    {
+      field: "openshell.endpoint",
+      target: "AGENTOS_OPENSHELL_ENDPOINT",
+      note: "the OpenShell gateway; doctor TCP-probes it",
+    },
+    { field: "openshell.mtlsDir", target: "AGENTOS_OPENSHELL_MTLS", note: "gateway mTLS dir" },
+    { field: "openshell.image", target: "AGENTOS_OPENSHELL_IMAGE", note: "pinned sandbox image" },
+    {
+      field: "kernel.ingestEndpoint",
+      target: "AGENTOS_KERNEL_INGEST_ENDPOINT",
+      note: "the WORM kernel; doctor TCP-probes it",
+    },
+    {
+      field: "spendguard.udsPath",
+      target: "SPENDGUARD_UDS_PATH",
+      note: "SpendGuard sidecar socket; doctor checks it (optional section)",
+    },
+    { field: "spendguard.budgetId", target: "SPENDGUARD_BUDGET_ID", note: "budget id" },
+    { field: "spendguard.unitId", target: "SPENDGUARD_UNIT_ID", note: "unit id" },
+    {
+      field: "spendguard.windowInstanceId",
+      target: "SPENDGUARD_WINDOW_INSTANCE_ID",
+      note: "window instance id",
+    },
+    {
+      field: "agt.udsPath",
+      target: "AGT_UDS_PATH",
+      note: "AGT advisory sidecar socket; doctor checks it (optional section)",
+    },
+    { field: "agt.scope", target: "AGT_SCOPE", note: "effectful|all (optional)" },
+    { field: "agt.timeoutMs", target: "AGT_TIMEOUT_MS", note: "advisory timeout (optional)" },
+  ];
+}
+
+/** The native env targets the explain table documents — asserted to COVER `buildRegistrationEnv`'s output. */
+export function explainTargetEnvKeys(): string[] {
+  return buildExplainTable().map((r) => r.target);
+}
+
 // ================================================================================================
 // Injectable deps seam — defaults to real node-built-in implementations; tests inject fakes.
 // ================================================================================================
@@ -331,6 +386,8 @@ interface SetupFlags {
   profile: SetupProfile;
   /** Overwrite an existing config on `--init` (`--force`); default false => refuse-if-exists (fail-closed). */
   force: boolean;
+  /** SLICE-SETUP3 — print the config-field -> native-output map instead of applying (`--explain`). */
+  explain: boolean;
 }
 
 /** Parse `--config <path> | --print | --non-interactive`. Returns undefined on a malformed flag. */
@@ -342,6 +399,7 @@ function parseSetupFlags(args: string[]): SetupFlags | undefined {
     init: false,
     profile: "personal",
     force: false,
+    explain: false,
   };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -351,6 +409,8 @@ function parseSetupFlags(args: string[]): SetupFlags | undefined {
       out.nonInteractive = true;
     } else if (flag === "--init") {
       out.init = true;
+    } else if (flag === "--explain") {
+      out.explain = true;
     } else if (flag === "--force") {
       out.force = true;
     } else if (flag === "--profile") {
@@ -399,6 +459,20 @@ export async function setupCommand(
     deps.writeConfigFile(flags.config, `${JSON.stringify(scaffold, null, 2)}\n`);
     deps.print(`wrote ${flags.config} (profile: ${flags.profile}) — NON-SECRET config only`);
     for (const line of scaffoldGuidance(flags.profile)) deps.print(line);
+    return EXIT_OK;
+  }
+
+  // --- EXPLAIN (SLICE-SETUP3): print the config-field -> native-output map (no apply; VALUE-FREE). ----
+  if (flags.explain) {
+    deps.print(
+      "agent-os.config.json field -> native output (compiled into Hermes's mcp_servers.env for `agentos-exec`):",
+    );
+    for (const row of buildExplainTable()) {
+      deps.print(`  ${row.field}  ->  ${row.target}   # ${row.note}`);
+    }
+    deps.print(
+      "Apply: `agentos setup` (TTY: `hermes mcp add`; else PRINTS the block for $HERMES_HOME/config.yaml). Secrets are env-only — never compiled here.",
+    );
     return EXIT_OK;
   }
 
@@ -502,7 +576,7 @@ export async function setupCommand(
  * secondary. All values come straight from the validated config; no value is a secret (paths / ids /
  * enums / a number). Absent `agt` -> NO `AGT_*` keys -> byte-identical to today (no AGT secondary).
  */
-function buildRegistrationEnv(config: AgentOsConfig): Record<string, string> {
+export function buildRegistrationEnv(config: AgentOsConfig): Record<string, string> {
   const env: Record<string, string> = {
     AGENTOS_OPENSHELL_ENDPOINT: config.openshell.endpoint,
     AGENTOS_OPENSHELL_MTLS: config.openshell.mtlsDir,

@@ -100,6 +100,17 @@ describe("agentos doctor — fail-closed on a required FAIL", () => {
     expect(allOutput()).toMatch(/FAIL\s+OpenShell reachable/);
   });
 
+  it("SLICE-SETUP3: a FAIL hint NAMES the responsible config FIELD (teaches the fix in config terms, not the 41 env vars)", async () => {
+    const probes: DoctorProbes = {
+      ...okProbes(),
+      tcpReachable: async (_host: string, port: number) => port !== 50051, // kernel down, openshell up
+    };
+    await doctorCommand([], {}, probes);
+    const out = allOutput();
+    expect(out).toMatch(/FAIL\s+kernel reachable/);
+    expect(out).toContain("config: kernel.ingestEndpoint"); // names the JSON field, not AGENTOS_KERNEL_INGEST_ENDPOINT
+  });
+
   it("returns NON-ZERO when the bin is not built (required)", async () => {
     const probes: DoctorProbes = { ...okProbes(), fileExists: () => false };
     const code = await doctorCommand([], {}, probes);
@@ -261,5 +272,28 @@ describe("agentos — doctor via runCli + unchanged fail-closed default", () => 
 
   it("an unknown subcommand still returns EXIT_USAGE (existing fail-closed default unchanged)", async () => {
     expect(await runCli(["frobnicate"], {})).toBe(2);
+  });
+});
+
+// ================================================================================================
+// (SLICE-SETUP3) doctor --secrets — value-blind inventory of the known Agent OS secret env KEYS
+// ================================================================================================
+describe("agentos doctor --secrets — value-blind secret inventory", () => {
+  it("lists known secret env KEYS as SET/UNSET (names + boolean only), NEVER echoing a value", async () => {
+    const code = await doctorCommand(
+      ["--secrets"],
+      { AGENTOS_GMAIL_OAUTH_KEY: SECRET_CANARY },
+      okProbes(),
+    );
+    expect(code).toBe(0); // informational (optional features) — required checks all pass under okProbes
+    const out = allOutput();
+    expect(out).toMatch(/PASS\s+secret: AGENTOS_GMAIL_OAUTH_KEY/); // the SET one
+    expect(out).toMatch(/SKIP\s+secret: AGENTOS_NET_FETCH_AUTH_KEY/); // an UNSET one
+    expect(out).not.toContain(SECRET_CANARY); // CREDENTIAL-BLIND: the VALUE is never printed
+  });
+
+  it("WITHOUT --secrets the inventory is absent (no behavior change)", async () => {
+    await doctorCommand([], { AGENTOS_GMAIL_OAUTH_KEY: SECRET_CANARY }, okProbes());
+    expect(allOutput()).not.toContain("secret: AGENTOS_GMAIL_OAUTH_KEY");
   });
 });
