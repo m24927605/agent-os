@@ -736,4 +736,9 @@ describe("setup Step 5 — secrets KEY-NAME registry", () => {
     expect(msg).not.toContain(SECRET_DETECTED_CANARY); // VALUE-FREE: the bad value is never echoed in the error
     expect(() => loadAgentOsConfig(withSecrets({ gmail: "ya29.a0Af-lowercase-token" }))).toThrow();
   });
+
+  it("D4 defense-in-depth: an ALL-CAPS secret shape (AWS AKIA key) passes the C-identifier regex but is REJECTED by the redactor", () => {
+    const akia = ["AKIA", "IOSFODNN7EXAMPLE"].join(""); // matches ^[A-Z][A-Z0-9_]*$ yet is a secret shape
+    expect(() => loadAgentOsConfig(withSecrets({ aws: akia }))).toThrow();
+  });
 });

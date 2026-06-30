@@ -126,3 +126,40 @@ describe("configCommand render | check", () => {
     expect(await configCommand(["frobnicate"], {}, makeDeps().deps)).toBe(2); // unknown action
   });
 });
+
+// ================================================================================================
+// Independent-Verifier fixes (D1 credential-blind render, D2 malformed-lock, D3 host de-dupe)
+// ================================================================================================
+describe("config compiler — IV hardening", () => {
+  // an AWS-key-shaped value, assembled at runtime so no contiguous secret literal lives in the file.
+  const SECRET_SHAPED = ["AKIA", "IOSFODNN7EXAMPLE"].join("");
+
+  it("D1 CREDENTIAL-BLIND: a secret-shaped value in a free-form field => render fail-closed, value-free, NO write", async () => {
+    const cfg = { ...BASE, openshell: { ...BASE.openshell, image: SECRET_SHAPED } };
+    const { deps, store, printed } = makeDeps({ [CONFIG_PATH]: JSON.stringify(cfg) });
+    expect(await configCommand(["render"], {}, deps)).not.toBe(0);
+    expect(store[LOCK_PATH]).toBeUndefined(); // screened BEFORE any write
+    expect(printed.join("\n")).not.toContain(SECRET_SHAPED); // value-free error (names the artifact, not the value)
+  });
+
+  it("D2: a MALFORMED lock (valid JSON, missing targets[]) fails closed CLEANLY (no uncaught crash)", async () => {
+    const { deps, store } = makeDeps({ [CONFIG_PATH]: JSON.stringify(BASE) });
+    store[LOCK_PATH] = "{}"; // older-schema / hand-edited committed lock
+    await expect(configCommand(["check"], {}, deps)).resolves.not.toBe(0); // returns, never throws
+  });
+
+  it("D3: duplicate egress hosts are de-duped to match the live auto-provisioner", () => {
+    const dup = {
+      ...BASE,
+      openshell: {
+        ...BASE.openshell,
+        networkPolicy: { egressAllow: ["api.github.com", "api.github.com"] },
+      },
+    };
+    const egress = renderArtifacts(dup).find((a) => a.relPath === "openshell-egress.json");
+    const parsed = JSON.parse(egress?.content ?? "{}") as {
+      network_policies: { agentos_net_fetch: { endpoints: unknown[] } };
+    };
+    expect(parsed.network_policies.agentos_net_fetch.endpoints.length).toBe(1); // de-duped, not 2
+  });
+});

@@ -17,7 +17,8 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { buildEgressNetworkPolicies } from "../runtime/openshell/index.js";
+import { redactSecrets } from "../audit/index.js";
+import { buildEgressNetworkPolicies, parseEgressHosts } from "../runtime/openshell/index.js";
 import { type AgentOsConfig, buildRegistrationEnv, loadAgentOsConfig } from "./setup.js";
 
 type Env = NodeJS.ProcessEnv;
@@ -71,9 +72,11 @@ export function renderArtifacts(config: AgentOsConfig): RenderedArtifact[] {
 
   // 2. OpenShell egress policy (REFERENCE) — only when an egress allowlist is configured. Built from the SAME
   //    `buildEgressNetworkPolicies` the Option B auto-provisioner uses, so the reference matches the live apply.
+  // De-dupe through parseEgressHosts exactly as the live path does (env join -> auto-provisioner parse), so
+  // the rendered reference matches the live apply even when the operator lists a host twice.
   const np = config.openshell.networkPolicy;
-  const egress = np?.egressAllow ?? [];
-  const git = np?.gitEgressAllow ?? [];
+  const egress = parseEgressHosts((np?.egressAllow ?? []).join(","));
+  const git = parseEgressHosts((np?.gitEgressAllow ?? []).join(","));
   if (egress.length > 0 || git.length > 0) {
     const policy = { network_policies: buildEgressNetworkPolicies(egress, git) };
     out.push({
@@ -227,6 +230,17 @@ export async function configCommand(
     return EXIT_INVALID;
   }
   const artifacts = renderArtifacts(config);
+  // CREDENTIAL-BLIND (the top invariant): screen EVERY rendered artifact for a secret-shaped value BEFORE it
+  // touches disk or the drift compare. The schema admits free-form strings (endpoint/image/path/id), so a
+  // misplaced secret could otherwise be written verbatim — mirror `setup`'s detector and fail-closed, value-free.
+  for (const a of artifacts) {
+    if (redactSecrets(a.content) !== a.content) {
+      deps.print(
+        `error: refusing to render '${a.relPath}' — it contains a secret-shaped value; secrets live in env (resolved only at egress), never in agent-os.config.json`,
+      );
+      return EXIT_INVALID;
+    }
+  }
 
   if (parsed.action === "render") {
     for (const a of artifacts) {
@@ -254,6 +268,14 @@ export async function configCommand(
     lock = JSON.parse(lockRaw) as RenderLock;
   } catch {
     deps.print(`error: ${LOCK_PATH} is not valid JSON`);
+    return EXIT_INVALID;
+  }
+  // Validate the lock SHAPE before use — a truncated / hand-edited / older-schema lock (the committed GitOps
+  // artifact) must fail-closed CLEANLY here, not crash with an uncaught TypeError in driftReport.
+  if (typeof lock !== "object" || lock === null || !Array.isArray(lock.targets)) {
+    deps.print(
+      `error: ${LOCK_PATH} is malformed (expected { version, configHash, targets[] }) — run \`agentos config render\``,
+    );
     return EXIT_INVALID;
   }
   const { inSync, lines } = driftReport(lock, raw, artifacts);

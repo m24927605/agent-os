@@ -57,6 +57,7 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { redactSecrets } from "../audit/index.js";
 import {
   type HermesMcpAddOptions,
   buildHermesMcpAddArgv,
@@ -181,6 +182,12 @@ const SecretsRegistrySchema = z.record(
     .regex(
       /^[A-Z][A-Z0-9_]*$/,
       "a secrets value must be an ENV KEY NAME (UPPER_SNAKE_CASE), never a secret value — the value lives in env and is resolved only at egress",
+    )
+    // Defense-in-depth: an all-caps token (e.g. an AWS `AKIA…` key) passes the C-identifier regex but IS a
+    // secret shape — reject it via the same redactor the audit plane uses, so no secret can rest in the config.
+    .refine(
+      (v) => redactSecrets(v) === v,
+      "a secrets value must be an ENV KEY NAME, never a secret-shaped value",
     ),
 );
 
