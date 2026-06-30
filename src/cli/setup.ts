@@ -184,6 +184,18 @@ const SecretsRegistrySchema = z.record(
     ),
 );
 
+/**
+ * SLICE-SETUP3 Step 5C — the OPTIONAL `nemoclaw` hosting section. NemoClaw has no live auto-provisioner (unlike
+ * the OpenShell egress path), so `config render` emits an onboard stanza the operator applies via NemoClaw's
+ * own CLI. `gateway` is the gateway NAME to host the in-sandbox Hermes brain. NON-secret. `.strict()`.
+ */
+const NemoClawSchema = z
+  .object({
+    gateway: z.string().min(1),
+    image: z.string().optional(),
+  })
+  .strict();
+
 const AgentOsConfigSchema = z
   .object({
     openshell: OpenShellSchema,
@@ -191,6 +203,7 @@ const AgentOsConfigSchema = z
     spendguard: SpendGuardSchema.optional(),
     agt: AgtSchema.optional(),
     secrets: SecretsRegistrySchema.optional(),
+    nemoclaw: NemoClawSchema.optional(),
   })
   .strict();
 

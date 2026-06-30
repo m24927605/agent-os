@@ -41,6 +41,14 @@ export {
 // port's buffered `ExecCapableSandboxAdapter`, so the credential-blind `makeExecEffect` can drive a
 // REAL OpenShell sandbox.
 export { makeOpenShellExecCapable } from "./exec-buffered.js";
+// SLICE-CAP6e — the egress auto-provisioner's PURE helpers, re-exported for the config compiler
+// (`agentos config render`) so the rendered OpenShell egress policy matches the live auto-provision.
+export {
+  AGENTOS_EGRESS_ALLOW_ENV,
+  AGENTOS_GIT_EGRESS_ALLOW_ENV,
+  buildEgressNetworkPolicies,
+  parseEgressHosts,
+} from "./egress-provisioner.js";
 export {
   type OpenShellGrpcTransportOpts,
   type ExecStreamHandle,

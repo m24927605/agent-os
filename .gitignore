@@ -5,3 +5,10 @@ dist/
 coverage/
 .gstack/
 .e2e/
+
+# SLICE-SETUP3 Step 5C — generated native configs from `agentos config render`. Personal-default:
+# ignore the rendered artifacts; `.agentos/render.lock.json` stays trackable so CI `config check` can
+# gate drift (enterprise operators commit the lock; `git add -f` a rendered file if they want it reviewed).
+.agentos/rendered/
+
+.ait/
