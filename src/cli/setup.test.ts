@@ -593,6 +593,12 @@ describe("setup --init — scaffold a starter agent-os.config.json", () => {
     }
   });
 
+  it("guidance tips the editor experience: the $schema hover + setting the file's language to JSONC", () => {
+    const g = scaffoldGuidance("personal").join("\n");
+    expect(g).toContain("agent-os.config.schema.json"); // the co-located schema (autocomplete + hover)
+    expect(g).toContain("jsonc"); // tip to set the language so // comments aren't flagged on a .json file
+  });
+
   it("`setup --init` writes the config + JSON Schema, exits 0, the config parses + carries $schema, applies NOTHING", async () => {
     const { deps, writes, hermesCalls } = makeDeps({ configRaw: undefined }); // no existing file
     const code = await setupCommand(["--init"], {}, deps);

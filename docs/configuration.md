@@ -300,6 +300,12 @@ Omitting `spendguard`, `agt`, `openshell.networkPolicy`, `secrets`, and/or `nemo
 those features simply stay off (the deny-by-default "off" state, not an error). `secrets` holds env-key
 **names** only; the VALUES are exported in your shell and resolved only at the egress boundary.
 
+**Editor support.** `agentos setup --init` writes a co-located `agent-os.config.schema.json` and stamps a
+`"$schema"` ref, so editors (VS Code et al.) give autocomplete, inline validation, and per-field hover docs.
+The file is **JSONC** (inline `//` and block comments are allowed; the loader strips them). Because the file
+is named `*.json`, set its editor language to **JSONC** so the comments aren't flagged — in VS Code, the
+bottom-right language picker, or `"files.associations": { "agent-os.config.json": "jsonc" }`.
+
 ---
 
 ## Onboarding & compiler commands (the `agentos` CLI)

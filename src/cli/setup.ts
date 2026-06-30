@@ -369,9 +369,9 @@ export function buildScaffoldJsonc(profile: SetupProfile): string {
 }
 
 /**
- * Human guidance printed AFTER `--init` (the file is clean JSON — `.strict()` + `JSON.parse` forbid inline
- * comments — so the teaching lives in stdout). Explains each scaffolded section and, critically, names the
- * SECRET env-vars to export (which are NEVER in the file; resolved only at the OpenShell egress boundary).
+ * Human guidance printed AFTER `--init`. Explains each scaffolded section, names the SECRET env-vars to export
+ * (NEVER in the file; resolved only at the OpenShell egress boundary), and tips the editor experience — the
+ * file ships with a `$schema` ref (autocomplete + hover docs) and is JSONC (inline comments).
  */
 export function scaffoldGuidance(profile: SetupProfile): string[] {
   const lines = [
@@ -395,6 +395,10 @@ export function scaffoldGuidance(profile: SetupProfile): string[] {
     "  export AGENTOS_NET_FETCH_AUTH_KEY=<KEY-NAME>   # net.fetch auth (the KEY name; value via egress SecretResolver)",
     "  export AGENTOS_GMAIL_OAUTH_KEY=<KEY-NAME>      # Gmail action",
     "  export AGENTOS_EGRESS_ALLOW=api.github.com,... # hosts net.fetch may reach (deny-by-default)",
+    "",
+    "Editor: the co-located agent-os.config.schema.json gives autocomplete + hover docs (via $schema). The file",
+    "is JSONC — for comment-aware editing without warnings, set its language to JSONC (VS Code: the bottom-right",
+    'language picker, or "files.associations": { "agent-os.config.json": "jsonc" }).',
     "",
     "Next: run `agentos setup` to compile + apply + verify, then `agentos doctor`.",
   );
