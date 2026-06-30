@@ -31,7 +31,15 @@
  *       setup) THROW; the wizard never echoes a runtime-built `sk-` canary to stdout/stderr.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type AgentOsConfig, type SetupDeps, loadAgentOsConfig, setupCommand } from "./setup.js";
+import { DEFAULT_KERNEL, DEFAULT_OPENSHELL } from "./doctor.js";
+import {
+  type AgentOsConfig,
+  type SetupDeps,
+  buildScaffoldConfig,
+  loadAgentOsConfig,
+  scaffoldGuidance,
+  setupCommand,
+} from "./setup.js";
 
 /**
  * Canary secrets, built at runtime so no literal lives in the file (secret-scan stays clean).
@@ -116,13 +124,20 @@ function makeDeps(overrides: Partial<SetupDeps> & { configRaw?: string | undefin
   printed: string[];
   hermesCalls: string[][];
   promptCalls: string[];
+  writes: { path: string; content: string }[];
 } {
   const printed: string[] = [];
   const hermesCalls: string[][] = [];
   const promptCalls: string[] = [];
+  const writes: { path: string; content: string }[] = [];
   const configRaw = "configRaw" in overrides ? overrides.configRaw : validConfigJson();
   const deps: SetupDeps = {
     readConfigFile: overrides.readConfigFile ?? ((_path: string) => configRaw),
+    writeConfigFile:
+      overrides.writeConfigFile ??
+      ((path: string, content: string) => {
+        writes.push({ path, content });
+      }),
     prompt:
       overrides.prompt ??
       (async (question: string) => {
@@ -145,7 +160,7 @@ function makeDeps(overrides: Partial<SetupDeps> & { configRaw?: string | undefin
     // real terminal; tests that want the headless print path pass `--print` (which short-circuits this).
     isInteractiveTty: overrides.isInteractiveTty ?? (() => true),
   };
-  return { deps, printed, hermesCalls, promptCalls };
+  return { deps, printed, hermesCalls, promptCalls, writes };
 }
 
 // ================================================================================================
@@ -539,5 +554,72 @@ describe("setupCommand — AGT_* env build (R9b-2b integrationsFromEnv picks it 
     const argv = hermesCalls[0];
     if (argv === undefined) throw new Error("expected runHermesMcpAdd to have been called");
     expect(argv.some((a) => a.startsWith("AGT_UDS_PATH="))).toBe(true);
+  });
+});
+
+// ================================================================================================
+// (SLICE-SETUP3) setup --init — scaffold a starter config (fixes the blank page); scaffold == doctor
+// ================================================================================================
+describe("setup --init — scaffold a starter agent-os.config.json", () => {
+  it("buildScaffoldConfig(personal): openshell+kernel use the SAME doctor defaults; no spendguard/agt; valid", () => {
+    const cfg = buildScaffoldConfig("personal");
+    expect(cfg.openshell.endpoint).toBe(DEFAULT_OPENSHELL); // scaffold == doctor (one canonical value)
+    expect(cfg.kernel.ingestEndpoint).toBe(DEFAULT_KERNEL);
+    expect(cfg.spendguard).toBeUndefined();
+    expect(cfg.agt).toBeUndefined();
+    expect(() => loadAgentOsConfig(`${JSON.stringify(cfg, null, 2)}\n`)).not.toThrow();
+  });
+
+  it("buildScaffoldConfig(enterprise) adds spendguard; (developer) adds agt; both parse", () => {
+    const ent = buildScaffoldConfig("enterprise");
+    expect(ent.spendguard).toBeDefined();
+    expect(ent.agt).toBeUndefined();
+    expect(() => loadAgentOsConfig(JSON.stringify(ent))).not.toThrow();
+    const dev = buildScaffoldConfig("developer");
+    expect(dev.agt).toBeDefined();
+    expect(dev.spendguard).toBeUndefined();
+    expect(() => loadAgentOsConfig(JSON.stringify(dev))).not.toThrow();
+  });
+
+  it("the scaffold is NON-SECRET (no secret-shaped value); guidance NAMES the secret env-vars (stdout only)", () => {
+    for (const p of ["personal", "enterprise", "developer"] as const) {
+      expect(JSON.stringify(buildScaffoldConfig(p))).not.toMatch(/sk-[A-Za-z0-9]{16,}/);
+      expect(scaffoldGuidance(p).join("\n")).toContain("AGENTOS_NET_FETCH_AUTH_KEY");
+    }
+  });
+
+  it("`setup --init` writes the scaffold ONCE, exits 0, the written config parses, applies NOTHING", async () => {
+    const { deps, writes, hermesCalls } = makeDeps({ configRaw: undefined }); // no existing file
+    const code = await setupCommand(["--init"], {}, deps);
+    expect(code).toBe(0);
+    expect(writes.length).toBe(1);
+    expect(hermesCalls.length).toBe(0); // --init only scaffolds; it never applies
+    const w = writes[0];
+    if (w === undefined) throw new Error("expected a scaffold write");
+    expect(() => loadAgentOsConfig(w.content)).not.toThrow();
+  });
+
+  it("`setup --init --profile enterprise` scaffolds the enterprise config (with spendguard)", async () => {
+    const { deps, writes } = makeDeps({ configRaw: undefined });
+    const code = await setupCommand(["--init", "--profile", "enterprise"], {}, deps);
+    expect(code).toBe(0);
+    const w = writes[0];
+    if (w === undefined) throw new Error("expected a scaffold write");
+    expect(loadAgentOsConfig(w.content).spendguard).toBeDefined();
+  });
+
+  it("REFUSE-IF-EXISTS: `--init` over an existing file fails closed (no write); `--force` overwrites", async () => {
+    const existing = makeDeps({ configRaw: validConfigJson() }); // a file is already present
+    expect(await setupCommand(["--init"], {}, existing.deps)).not.toBe(0);
+    expect(existing.writes.length).toBe(0); // never clobbered
+    const forced = makeDeps({ configRaw: validConfigJson() });
+    expect(await setupCommand(["--init", "--force"], {}, forced.deps)).toBe(0);
+    expect(forced.writes.length).toBe(1);
+  });
+
+  it("an invalid `--profile` value fails closed (usage error, NO write)", async () => {
+    const { deps, writes } = makeDeps({ configRaw: undefined });
+    expect(await setupCommand(["--init", "--profile", "bogus"], {}, deps)).not.toBe(0);
+    expect(writes.length).toBe(0);
   });
 });

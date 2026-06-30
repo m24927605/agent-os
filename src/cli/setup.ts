@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 /**
@@ -62,7 +62,7 @@ import {
   buildHermesMcpAddArgv,
   renderHermesMcpServersConfigYaml,
 } from "../runtime/brain/adapters/hermes/index.js";
-import { doctorCommand } from "./doctor.js";
+import { DEFAULT_KERNEL, DEFAULT_OPENSHELL, doctorCommand } from "./doctor.js";
 
 type Env = NodeJS.ProcessEnv;
 
@@ -170,6 +170,79 @@ export function loadAgentOsConfig(raw: string): AgentOsConfig {
   return result.data;
 }
 
+/** The pinned default openclaw sandbox image — mirrors the bin's buildSubstrate default (one source). */
+const DEFAULT_OPENSHELL_IMAGE =
+  "ghcr.io/nvidia/openshell-community/sandboxes/openclaw@sha256:c116946b3f9e84791630f21f115ac35c9c9f669af70ec0eef3035d79833a9550";
+
+/**
+ * SLICE-SETUP3 — build a STARTER `agent-os.config.json` for a profile (the `--init` scaffold). openshell +
+ * kernel (REQUIRED) use the SAME `DEFAULT_OPENSHELL`/`DEFAULT_KERNEL` constants doctor probes, so scaffold ==
+ * doctor and the kernel endpoint has ONE canonical value. `enterprise` adds a SpendGuard budget block;
+ * `developer` adds the AGT advisory block (sensible placeholders the operator edits). NON-SECRET ONLY — a
+ * credential is NEVER scaffolded into the file (secrets are env-only; see `scaffoldGuidance`). Pure.
+ */
+export function buildScaffoldConfig(profile: SetupProfile): AgentOsConfig {
+  const base: AgentOsConfig = {
+    openshell: {
+      endpoint: DEFAULT_OPENSHELL,
+      mtlsDir: resolve(homedir(), ".config/openshell/gateways/openshell/mtls"),
+      image: DEFAULT_OPENSHELL_IMAGE,
+    },
+    kernel: { ingestEndpoint: DEFAULT_KERNEL },
+  };
+  if (profile === "enterprise") {
+    return {
+      ...base,
+      spendguard: {
+        udsPath: "/run/agentos/spendguard.sock",
+        budgetId: "default",
+        unitId: "default",
+        windowInstanceId: "default",
+      },
+    };
+  }
+  if (profile === "developer") {
+    return {
+      ...base,
+      agt: { udsPath: "/run/agentos/agt.sock", scope: "effectful", timeoutMs: 1000 },
+    };
+  }
+  return base; // personal — the minimal openshell+kernel 30-second path
+}
+
+/**
+ * Human guidance printed AFTER `--init` (the file is clean JSON — `.strict()` + `JSON.parse` forbid inline
+ * comments — so the teaching lives in stdout). Explains each scaffolded section and, critically, names the
+ * SECRET env-vars to export (which are NEVER in the file; resolved only at the OpenShell egress boundary).
+ */
+export function scaffoldGuidance(profile: SetupProfile): string[] {
+  const lines = [
+    "  openshell.endpoint    -> the OpenShell gateway (doctor TCP-probes it)",
+    "  openshell.mtlsDir      -> the gateway mTLS dir;  openshell.image -> the pinned sandbox image",
+    "  kernel.ingestEndpoint  -> the WORM kernel ingest endpoint (doctor TCP-probes it)",
+  ];
+  if (profile === "enterprise") {
+    lines.push(
+      "  spendguard.*           -> SpendGuard budget (edit budgetId/unitId/windowInstanceId/udsPath)",
+    );
+  }
+  if (profile === "developer") {
+    lines.push(
+      "  agt.*                  -> AGT policy advisory (edit udsPath; scope/timeoutMs optional)",
+    );
+  }
+  lines.push(
+    "",
+    "SECRETS are NEVER in this file — export them in your shell (resolved only at egress, never logged):",
+    "  export AGENTOS_NET_FETCH_AUTH_KEY=<KEY-NAME>   # net.fetch auth (the KEY name; value via egress SecretResolver)",
+    "  export AGENTOS_GMAIL_OAUTH_KEY=<KEY-NAME>      # Gmail action",
+    "  export AGENTOS_EGRESS_ALLOW=api.github.com,... # hosts net.fetch may reach (deny-by-default)",
+    "",
+    "Next: run `agentos setup` to compile + apply + verify, then `agentos doctor`.",
+  );
+  return lines;
+}
+
 // ================================================================================================
 // Injectable deps seam — defaults to real node-built-in implementations; tests inject fakes.
 // ================================================================================================
@@ -177,6 +250,8 @@ export function loadAgentOsConfig(raw: string): AgentOsConfig {
 export interface SetupDeps {
   /** Read the config file at `path`; undefined if absent/unreadable (real: `fs.readFileSync`). */
   readConfigFile(path: string): string | undefined;
+  /** Write the scaffolded config to `path` (real: `fs.writeFileSync`). SLICE-SETUP3 `--init`. */
+  writeConfigFile(path: string, content: string): void;
   /** Prompt the user for a NON-secret value (real: `node:readline`). */
   prompt(question: string): Promise<string>;
   /** Run `hermes mcp add <argv>` non-destructively (real: `spawnSync("hermes", argv)`). */
@@ -211,6 +286,9 @@ function realDeps(): SetupDeps {
         return undefined;
       }
     },
+    writeConfigFile(path: string, content: string): void {
+      writeFileSync(path, content);
+    },
     async prompt(question: string): Promise<string> {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
@@ -241,10 +319,18 @@ function realDeps(): SetupDeps {
 // Flag parsing — the CLI's minimal flag style.
 // ================================================================================================
 
+type SetupProfile = "personal" | "enterprise" | "developer";
+
 interface SetupFlags {
   config: string;
   print: boolean;
   nonInteractive: boolean;
+  /** SLICE-SETUP3 — scaffold a starter `agent-os.config.json` instead of loading one (`--init`). */
+  init: boolean;
+  /** Which sections `--init` scaffolds (`--profile`); defaults to "personal" (openshell+kernel only). */
+  profile: SetupProfile;
+  /** Overwrite an existing config on `--init` (`--force`); default false => refuse-if-exists (fail-closed). */
+  force: boolean;
 }
 
 /** Parse `--config <path> | --print | --non-interactive`. Returns undefined on a malformed flag. */
@@ -253,6 +339,9 @@ function parseSetupFlags(args: string[]): SetupFlags | undefined {
     config: DEFAULT_CONFIG_PATH,
     print: false,
     nonInteractive: false,
+    init: false,
+    profile: "personal",
+    force: false,
   };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -260,6 +349,15 @@ function parseSetupFlags(args: string[]): SetupFlags | undefined {
       out.print = true;
     } else if (flag === "--non-interactive") {
       out.nonInteractive = true;
+    } else if (flag === "--init") {
+      out.init = true;
+    } else if (flag === "--force") {
+      out.force = true;
+    } else if (flag === "--profile") {
+      const value = args[i + 1];
+      if (value !== "personal" && value !== "enterprise" && value !== "developer") return undefined;
+      out.profile = value;
+      i++;
     } else if (flag === "--config") {
       const value = args[i + 1];
       if (value === undefined) return undefined;
@@ -283,8 +381,25 @@ export async function setupCommand(
 ): Promise<number> {
   const flags = parseSetupFlags(rest);
   if (flags === undefined) {
-    deps.print("error: setup accepts only --config <path>, --print, --non-interactive");
+    deps.print(
+      "error: setup accepts only --init, --profile <personal|enterprise|developer>, --force, --config <path>, --print, --non-interactive",
+    );
     return EXIT_USAGE;
+  }
+
+  // --- INIT (SLICE-SETUP3): scaffold a starter config instead of loading one (fixes the blank page). ---
+  if (flags.init) {
+    if (deps.readConfigFile(flags.config) !== undefined && !flags.force) {
+      deps.print(
+        `error: '${flags.config}' already exists — pass --force to overwrite (refuse-if-exists)`,
+      );
+      return EXIT_INVALID;
+    }
+    const scaffold = buildScaffoldConfig(flags.profile);
+    deps.writeConfigFile(flags.config, `${JSON.stringify(scaffold, null, 2)}\n`);
+    deps.print(`wrote ${flags.config} (profile: ${flags.profile}) — NON-SECRET config only`);
+    for (const line of scaffoldGuidance(flags.profile)) deps.print(line);
+    return EXIT_OK;
   }
 
   // --- LOAD: read the config file. -------------------------------------------------------------

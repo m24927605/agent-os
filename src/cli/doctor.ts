@@ -36,9 +36,13 @@ type Env = NodeJS.ProcessEnv;
 const EXIT_OK = 0;
 const EXIT_DOCTOR_FAIL = 1;
 
-/** Default endpoints used when the corresponding env var is unset. */
-const DEFAULT_OPENSHELL = "127.0.0.1:17670";
-const DEFAULT_KERNEL = "127.0.0.1:50051";
+/**
+ * Default endpoints used when the corresponding env var is unset. EXPORTED (SLICE-SETUP3) so `setup --init`
+ * scaffolds `agent-os.config.json` from the SAME constants doctor probes — scaffold == doctor, and the
+ * kernel endpoint has ONE canonical value (no installer/doctor skew).
+ */
+export const DEFAULT_OPENSHELL = "127.0.0.1:17670";
+export const DEFAULT_KERNEL = "127.0.0.1:50051";
 
 /** Short TCP-connect timeout (ms): a refused/timed-out connect is fail-closed (treated as down). */
 const TCP_TIMEOUT_MS = 750;
