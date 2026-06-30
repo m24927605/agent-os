@@ -7,7 +7,8 @@
 This document is the reference for **what each switch gates, its accepted values, its default, and
 what happens when it is unset, blank, or invalid**. It does **not** teach you how to stand up a
 surface — for that, read the [Composition Root Guide](./sdk/composition-root-guide.md). For the
-config-file onboarding flow (`agentos setup` / `agentos doctor`), see the
+config-file onboarding flow (`agentos setup --init` / `setup --explain` / `agentos doctor`) and the
+config **compiler** (`agentos config render` / `config check`), see the
 [config file section](#agent-osconfigjson-the-onboarding-config-file) below.
 
 ## How to read this reference
@@ -245,13 +246,18 @@ half-config (`src/cli/setup.ts:153`–`:165`).
 | `openshell` | `endpoint` | yes | string `host:port` | `AGENTOS_OPENSHELL_ENDPOINT` |
 | `openshell` | `mtlsDir` | yes | string path | `AGENTOS_OPENSHELL_MTLS` |
 | `openshell` | `image` | yes | string | `AGENTOS_OPENSHELL_IMAGE` |
+| `openshell.networkPolicy` | `egressAllow` | optional | string[] of plain-DNS hosts | `AGENTOS_EGRESS_ALLOW` (comma-joined) — the hosts `net.fetch` may reach; **read by the egress auto-provisioner** at sandbox creation |
+| `openshell.networkPolicy` | `gitEgressAllow` | optional | string[] of plain-DNS hosts | `AGENTOS_GIT_EGRESS_ALLOW` (comma-joined) — the SEPARATE, higher-bar `git.push` allowlist |
 | `kernel` | `ingestEndpoint` | yes | string `host:port` | `AGENTOS_KERNEL_INGEST_ENDPOINT` |
 | `spendguard` | `udsPath`, `budgetId`, `unitId`, `windowInstanceId` | **whole section optional; all four required if present** | strings | `SPENDGUARD_UDS_PATH` / `_BUDGET_ID` / `_UNIT_ID` / `_WINDOW_INSTANCE_ID` |
 | `agt` | `udsPath` | required when `agt` present | string | `AGT_UDS_PATH` |
 | `agt` | `scope` | optional | `"effectful"` \| `"all"` | `AGT_SCOPE` (only written when present) |
 | `agt` | `timeoutMs` | optional | positive integer | `AGT_TIMEOUT_MS` (only written when present) |
+| `secrets` | `{ logicalName: ENV_KEY_NAME }` | optional | record of UPPER_SNAKE env-key **names** | none (a non-secret registry of the env KEYS whose VALUES you export; a pasted secret value is rejected value-free) |
+| `nemoclaw` | `gateway` | required when `nemoclaw` present | string | none (compiled to the NemoClaw onboard stanza by `config render`) |
+| `nemoclaw` | `image` | optional | string | none |
 
-(Schema: `src/cli/setup.ts:104`–`:148`. Env mapping: `:390`–`:412`.)
+(Generated source of truth: run `agentos setup --explain` for the live field → env map. Schema: `src/cli/setup.ts` `AgentOsConfigSchema`; env mapping: `buildRegistrationEnv`.)
 
 Example `agent-os.config.json` (non-secret only — no credentials ever):
 
@@ -260,7 +266,11 @@ Example `agent-os.config.json` (non-secret only — no credentials ever):
   "openshell": {
     "endpoint": "127.0.0.1:17670",
     "mtlsDir": "/home/you/.config/openshell/gateways/openshell/mtls",
-    "image": "ghcr.io/example/openshell-sandbox:latest"
+    "image": "ghcr.io/example/openshell-sandbox:latest",
+    "networkPolicy": {
+      "egressAllow": ["api.github.com", "pypi.org"],
+      "gitEgressAllow": ["github.com"]
+    }
   },
   "kernel": {
     "ingestEndpoint": "127.0.0.1:50051"
@@ -275,12 +285,68 @@ Example `agent-os.config.json` (non-secret only — no credentials ever):
     "udsPath": "/var/run/agt/decision.sock",
     "scope": "effectful",
     "timeoutMs": 750
+  },
+  "secrets": {
+    "gmail": "AGENTOS_GMAIL_OAUTH_KEY",
+    "netFetch": "AGENTOS_NET_FETCH_AUTH_KEY"
+  },
+  "nemoclaw": {
+    "gateway": "benevolent-buck"
   }
 }
 ```
 
-Omitting `spendguard` and/or `agt` is valid — those features simply stay off (the deny-by-default
-"off" state, not an error).
+Omitting `spendguard`, `agt`, `openshell.networkPolicy`, `secrets`, and/or `nemoclaw` is valid —
+those features simply stay off (the deny-by-default "off" state, not an error). `secrets` holds env-key
+**names** only; the VALUES are exported in your shell and resolved only at the egress boundary.
+
+---
+
+## Onboarding & compiler commands (the `agentos` CLI)
+
+```bash
+# 1) scaffold a starter config (no blank page; --profile personal|enterprise|developer; refuse-if-exists)
+agentos setup --init --profile personal
+
+# 2) see what each config field compiles to, value-free (the field → native-output map)
+agentos setup --explain
+
+# 3) compile + apply (hermes mcp add on a TTY, else prints the block) + run doctor
+agentos setup
+
+# 4) preflight: per-system PASS/FAIL/SKIP; --secrets adds a value-blind SET/UNSET inventory of secret env KEYs
+agentos doctor
+agentos doctor --secrets
+```
+
+### `agentos config render` / `agentos config check` — the config compiler
+
+`config render` compiles the one declarative `agent-os.config.json` into each system's **native** artifact
+under `.agentos/rendered/` plus a `.agentos/render.lock.json` (sha256 of the source + each target). Each
+artifact is **applied through that system's own CLI** (printed alongside it); Agent OS never auto-rewrites a
+foreign system's file. `config check` re-renders in memory and **fails closed (non-zero) on any drift** from
+the lock — the GitOps / CI staleness guard.
+
+```bash
+agentos config render        # writes .agentos/rendered/* + .agentos/render.lock.json, prints each apply command
+agentos config check         # exit 0 IN-SYNC, non-zero on DRIFT (run in CI after committing the lock)
+agentos config render --config ./prod.config.json   # any path
+```
+
+Rendered targets (each section renders **only when present**):
+
+| Target | From | Apply via |
+|--------|------|-----------|
+| `registration.env` | the non-secret `AGENTOS_*` / `SPENDGUARD_*` / `AGT_*` env | exported into Hermes's `mcp_servers.env` by `agentos setup` (reference) |
+| `openshell-egress.json` | `openshell.networkPolicy` | **reference** — the egress auto-provisioner applies it **merge-aware** at sandbox creation (canonical); a manual `openshell policy set` REPLACES the whole policy, so prefer the auto-provisioner |
+| `nemoclaw-onboard.txt` | `nemoclaw` | `nemohermes onboard --gateway <name>` (NemoClaw has no auto-provisioner, so this is the real apply path) |
+
+**Credential-blind:** every rendered artifact and the lock hold **non-secret bytes only** — `config render`
+screens each artifact and **fails closed, value-free**, if a secret-shaped value slipped into a free-form
+field. Secrets live in env (resolved at egress), never in a rendered file.
+
+**GitOps:** `.agentos/rendered/` is git-ignored by default (personal). Enterprise operators commit
+`.agentos/render.lock.json` and gate drift in CI with `agentos config check`.
 
 ---
 
