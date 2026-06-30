@@ -591,15 +591,17 @@ describe("setup --init — scaffold a starter agent-os.config.json", () => {
     }
   });
 
-  it("`setup --init` writes the scaffold ONCE, exits 0, the written config parses, applies NOTHING", async () => {
+  it("`setup --init` writes the config + JSON Schema, exits 0, the config parses + carries $schema, applies NOTHING", async () => {
     const { deps, writes, hermesCalls } = makeDeps({ configRaw: undefined }); // no existing file
     const code = await setupCommand(["--init"], {}, deps);
     expect(code).toBe(0);
-    expect(writes.length).toBe(1);
+    expect(writes.length).toBe(2); // the config + agent-os.config.schema.json (editor autocomplete/hover)
     expect(hermesCalls.length).toBe(0); // --init only scaffolds; it never applies
-    const w = writes[0];
-    if (w === undefined) throw new Error("expected a scaffold write");
-    expect(() => loadAgentOsConfig(w.content)).not.toThrow();
+    const cfg = writes[0];
+    if (cfg === undefined) throw new Error("expected a config write");
+    expect(() => loadAgentOsConfig(cfg.content)).not.toThrow();
+    expect(loadAgentOsConfig(cfg.content).$schema).toBe("./agent-os.config.schema.json"); // editor ref stamped
+    expect(writes.some((w) => w.path.endsWith("agent-os.config.schema.json"))).toBe(true); // schema file written
   });
 
   it("`setup --init --profile enterprise` scaffolds the enterprise config (with spendguard)", async () => {
@@ -617,7 +619,7 @@ describe("setup --init — scaffold a starter agent-os.config.json", () => {
     expect(existing.writes.length).toBe(0); // never clobbered
     const forced = makeDeps({ configRaw: validConfigJson() });
     expect(await setupCommand(["--init", "--force"], {}, forced.deps)).toBe(0);
-    expect(forced.writes.length).toBe(1);
+    expect(forced.writes.length).toBe(2); // overwrites the config + (re)writes the schema file
   });
 
   it("an invalid `--profile` value fails closed (usage error, NO write)", async () => {

@@ -63,6 +63,7 @@ import {
   buildHermesMcpAddArgv,
   renderHermesMcpServersConfigYaml,
 } from "../runtime/brain/adapters/hermes/index.js";
+import { CONFIG_SCHEMA_FILENAME, configJsonSchemaText } from "./config-json-schema.js";
 import { DEFAULT_KERNEL, DEFAULT_OPENSHELL, doctorCommand } from "./doctor.js";
 
 type Env = NodeJS.ProcessEnv;
@@ -203,8 +204,12 @@ const NemoClawSchema = z
   })
   .strict();
 
-const AgentOsConfigSchema = z
+export const AgentOsConfigSchema = z
   .object({
+    // SLICE-SETUP3 #1 — an OPTIONAL editor schema pointer (ignored at runtime; `setup --init` stamps it so
+    // editors give autocomplete/validation/hover-docs). Declared here so `.strict()` admits it (else a config
+    // carrying `"$schema"` would fail-closed).
+    $schema: z.string().optional(),
     openshell: OpenShellSchema,
     kernel: KernelSchema,
     spendguard: SpendGuardSchema.optional(),
@@ -532,9 +537,18 @@ export async function setupCommand(
       );
       return EXIT_INVALID;
     }
-    const scaffold = buildScaffoldConfig(flags.profile);
+    // Stamp a `$schema` ref FIRST (key order preserved) so editors load the schema; then the scaffold.
+    const scaffold = {
+      $schema: `./${CONFIG_SCHEMA_FILENAME}`,
+      ...buildScaffoldConfig(flags.profile),
+    };
     deps.writeConfigFile(flags.config, `${JSON.stringify(scaffold, null, 2)}\n`);
+    // Write the schema file NEXT TO the config so the relative `$schema` ref resolves — this is what gives
+    // editors (VS Code et al.) autocomplete + inline validation + hover docs on the otherwise-bare JSON.
+    const schemaPath = resolve(dirname(flags.config), CONFIG_SCHEMA_FILENAME);
+    deps.writeConfigFile(schemaPath, configJsonSchemaText());
     deps.print(`wrote ${flags.config} (profile: ${flags.profile}) — NON-SECRET config only`);
+    deps.print(`wrote ${schemaPath} — editors use it for autocomplete + validation + hover docs`);
     for (const line of scaffoldGuidance(flags.profile)) deps.print(line);
     return EXIT_OK;
   }

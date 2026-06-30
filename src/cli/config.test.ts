@@ -163,3 +163,17 @@ describe("config compiler — IV hardening", () => {
     expect(parsed.network_policies.agentos_net_fetch.endpoints.length).toBe(1); // de-duped, not 2
   });
 });
+
+// ================================================================================================
+// (SLICE-SETUP3 #1) config schema — print the JSON Schema (editor autocomplete; no config needed)
+// ================================================================================================
+describe("config schema — print the JSON Schema", () => {
+  it("prints valid JSON Schema for agent-os.config, exit 0, reads/writes NOTHING", async () => {
+    const { deps, store, printed } = makeDeps(); // empty store: no config on disk
+    const code = await configCommand(["schema"], {}, deps);
+    expect(code).toBe(0);
+    expect(Object.keys(store).length).toBe(0); // schema action neither reads a config nor writes
+    const parsed = JSON.parse(printed.join("\n")) as { properties?: Record<string, unknown> };
+    expect(parsed.properties?.openshell).toBeDefined(); // it IS the agent-os.config schema
+  });
+});

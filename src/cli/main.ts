@@ -58,7 +58,7 @@ export async function runCli(argv: string[], env: Env = process.env): Promise<nu
     default:
       // Unknown / missing subcommand — fail-closed, never a silent 0.
       process.stderr.write(
-        "usage: agentos <manifest lint <file> | verify --chain <f> --pubkey <f> | doctor [--secrets] | setup [--init] [--explain] [--config <path>] | config <render|check> [--config <path>]>\n",
+        "usage: agentos <manifest lint <file> | verify --chain <f> --pubkey <f> | doctor [--secrets] | setup [--init] [--explain] [--config <path>] | config <render|check|schema> [--config <path>]>\n",
       );
       return EXIT_USAGE;
   }

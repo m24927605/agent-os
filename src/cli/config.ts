@@ -19,6 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { redactSecrets } from "../audit/index.js";
 import { buildEgressNetworkPolicies, parseEgressHosts } from "../runtime/openshell/index.js";
+import { configJsonSchemaText } from "./config-json-schema.js";
 import { type AgentOsConfig, buildRegistrationEnv, loadAgentOsConfig } from "./setup.js";
 
 type Env = NodeJS.ProcessEnv;
@@ -179,12 +180,12 @@ function realConfigDeps(): ConfigDeps {
   };
 }
 
-/** Parse `[render|check] [--config <path>]`; undefined on a malformed/unknown flag (fail-closed). */
+/** Parse `[render|check|schema] [--config <path>]`; undefined on a malformed/unknown flag (fail-closed). */
 function parseConfigArgs(
   rest: string[],
-): { action: "render" | "check"; configPath: string } | undefined {
+): { action: "render" | "check" | "schema"; configPath: string } | undefined {
   const [action, ...flags] = rest;
-  if (action !== "render" && action !== "check") return undefined;
+  if (action !== "render" && action !== "check" && action !== "schema") return undefined;
   let configPath = DEFAULT_CONFIG_PATH;
   for (let i = 0; i < flags.length; i++) {
     if (flags[i] === "--config") {
@@ -211,8 +212,15 @@ export async function configCommand(
 ): Promise<number> {
   const parsed = parseConfigArgs(rest);
   if (parsed === undefined) {
-    deps.print("error: config accepts `render` | `check` [--config <path>]");
+    deps.print("error: config accepts `render` | `check` | `schema` [--config <path>]");
     return EXIT_USAGE;
+  }
+
+  // `schema`: print the JSON Schema for agent-os.config.json (no config read) — pipe it to a file for CI /
+  // editor use: `agentos config schema > agent-os.config.schema.json`.
+  if (parsed.action === "schema") {
+    deps.print(configJsonSchemaText());
+    return EXIT_OK;
   }
 
   const raw = deps.readFile(parsed.configPath);
