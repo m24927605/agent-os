@@ -85,6 +85,10 @@ type Status = "PASS" | "FAIL" | "SKIP";
 
 interface CheckResult {
   status: Status;
+  /** The check's short name (credential-blind — a fixed label, never a value). */
+  name: string;
+  /** The credential-blind hint / next action (a fixed string, never a secret). */
+  hint: string;
   /** True when this check participates in the fail-closed exit code (a required FAIL => non-zero). */
   required: boolean;
 }
@@ -162,11 +166,14 @@ export async function doctorCommand(
   probes: DoctorProbes = realProbes(),
 ): Promise<number> {
   const results: CheckResult[] = [];
+  // SLICE-PERSONAL0 — `doctor --json` emits the structured (credential-blind) check list instead of the human
+  // lines, so the Personal orchestrator maps checks → a tray health chip + recovery cards (never scrapes text).
+  const jsonMode = rest.includes("--json");
 
-  /** Emit one credential-blind line and record the result for the fail-closed tally. */
+  /** Record a credential-blind result; print the human line unless in --json mode. */
   const report = (status: Status, name: string, hint: string, required: boolean): void => {
-    process.stdout.write(`${status}  ${name} — ${hint}\n`);
-    results.push({ status, required });
+    if (!jsonMode) process.stdout.write(`${status}  ${name} — ${hint}\n`);
+    results.push({ status, name, hint, required });
   };
 
   // 1. Hermes on PATH (REQUIRED).
@@ -288,5 +295,10 @@ export async function doctorCommand(
 
   // Fail-closed tally: non-zero if ANY required check FAILed; 0 only if all required checks PASSed.
   const anyRequiredFail = results.some((r) => r.required && r.status === "FAIL");
+  // `--json`: emit the structured, credential-blind check list. `ok` mirrors the exit code (the orchestrator's
+  // tray is a PURE function of this — green ⇔ ok/exit 0, never a fake green). Names/hints only, never a value.
+  if (jsonMode) {
+    process.stdout.write(`${JSON.stringify({ ok: !anyRequiredFail, checks: results })}\n`);
+  }
   return anyRequiredFail ? EXIT_DOCTOR_FAIL : EXIT_OK;
 }
