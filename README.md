@@ -38,6 +38,18 @@ pnpm test                  # the TypeScript unit + contract suite (~1808 cases)
 pnpm run example:personal  # run the self-operating computer end to end (in-memory defaults)
 ```
 
+Configure & preflight the runtime from one declarative, **non-secret** `agent-os.config.json`:
+
+```bash
+agentos setup --init    # scaffold agent-os.config.json (+ its JSON Schema) — no blank page, editor hover-docs + JSONC
+agentos config render   # compile it to each system's native config + a drift-lockable render.lock.json
+agentos doctor          # per-system PASS/FAIL/SKIP preflight — fails closed honestly, never a fake green
+agentos --help          # the grouped command list (setup / doctor / config / explain --resolved / …)
+```
+
+Full reference: [Configuration](./docs/configuration.md). How the onboarding UX is measured (a living CI guard):
+[AOS-UX Standard](./docs/aos-ux-standard.md).
+
 Verify an evidence chain the way an auditor would, with only the chain bytes and the signer's public key:
 
 ```bash
@@ -118,7 +130,8 @@ Start with the one that fits you:
 - **Individual** — [Personal Quickstart](./docs/personal-quickstart.md): run the self-operating computer and watch a governed intent flow end to end.
 - **Developer** — [Developer Quickstart](./docs/sdk/developer-quickstart.md), then [Composition Root Guide](./docs/sdk/composition-root-guide.md), [Build a Tool Family](./docs/sdk/build-a-tool-family.md), [Tool Manifest Authoring](./docs/sdk/tool-manifest-authoring.md), [Verifier Release](./docs/sdk/verifier-release.md).
 - **Enterprise** — [Security, Trust & Compliance Whitepaper](./docs/security-model.md), then [Deployment Checklist](./docs/enterprise-deployment.md), [Operator Runbook](./docs/enterprise-operator-runbook.md), [Auditor Guide](./docs/auditor-guide.md).
-- **Reference** — [Environment & Configuration](./docs/configuration.md): every `AGENTOS_*` switch and `agent-os.config.json`.
+- **Reference** — [Environment & Configuration](./docs/configuration.md): every `AGENTOS_*` switch, `agent-os.config.json`, and the `agentos setup`/`doctor`/`config` CLI.
+- **UX** — [AOS-UX Standard](./docs/aos-ux-standard.md): how the onboarding/config user experience is measured (7 dimensions + a living CI conformance guard).
 - **Video** — [Production Briefs](./docs/demo-video-briefs.md) ([繁中](./docs/demo-video-briefs.zh-TW.md)) and the built cuts in [`docs/videos/`](./docs/videos/).
 
 Also: [`AGENTS.md`](./AGENTS.md) (the operating contract) and the per-slice build records in [`docs/slices/`](./docs/slices/).

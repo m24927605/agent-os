@@ -316,6 +316,7 @@ agentos setup --init --profile personal
 
 # 2) see what each config field compiles to, value-free (the field → native-output map)
 agentos setup --explain
+agentos setup --explain --resolved   # + YOUR config's compiled non-secret values inline, `(unset)` for missing
 
 # 3) compile + apply (hermes mcp add on a TTY, else prints the block) + run doctor
 agentos setup
@@ -323,6 +324,9 @@ agentos setup
 # 4) preflight: per-system PASS/FAIL/SKIP; --secrets adds a value-blind SET/UNSET inventory of secret env KEYs
 agentos doctor
 agentos doctor --secrets
+
+# discover everything: grouped, described command list
+agentos --help
 ```
 
 ### `agentos config render` / `agentos config check` — the config compiler
@@ -336,6 +340,7 @@ the lock — the GitOps / CI staleness guard.
 ```bash
 agentos config render        # writes .agentos/rendered/* + .agentos/render.lock.json, prints each apply command
 agentos config check         # exit 0 IN-SYNC, non-zero on DRIFT (run in CI after committing the lock)
+agentos config schema        # print the JSON Schema (e.g. `agentos config schema > agent-os.config.schema.json`)
 agentos config render --config ./prod.config.json   # any path
 ```
 
@@ -362,3 +367,5 @@ field. Secrets live in env (resolved at egress), never in a rendered file.
 - [Tool Manifest Authoring](./sdk/tool-manifest-authoring.md) — authoring the manifests the verifier
   checks.
 - [Verifier Release](./sdk/verifier-release.md) — building and pinning `agentos-verifier`.
+- [AOS-UX Standard](./aos-ux-standard.md) — the fail-closed UX conformance standard + the living CI guard
+  (`src/cli/aos-ux-conformance.test.ts`) that measures the onboarding/config UX.
