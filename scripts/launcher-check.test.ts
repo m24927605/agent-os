@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_KERNEL, DEFAULT_OPENSHELL } from "../src/cli/doctor.js";
 
 // scripts/launcher-check.test.ts -> repo root is one level up.
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -99,5 +100,25 @@ describe("launcher-check — localhost-only + secrets-as-mount invariants (RED-f
     );
     expect(pkg.scripts["launcher:check"]).toBeDefined();
     expect(pkg.scripts.verify).toContain("launcher:check");
+  });
+});
+
+describe("launcher-check — endpoint consistency (SLICE-PERSONAL1: fresh compose up must agree with doctor)", () => {
+  const both = (kernelHost: number, subHost: number): string =>
+    `services:\n  kernel:\n    image: x\n    ports:\n      - "127.0.0.1:${kernelHost}:7070"\n  substrate:\n    image: y\n    ports:\n      - "127.0.0.1:${subHost}:7071"\n`;
+
+  it("PASSES when kernel/substrate publish the CANONICAL host ports (50051 / 17670)", () => {
+    expect(runLint(fixture("ok.yml", both(50051, 17670)))).toBe(0);
+  });
+
+  it("FAILS (non-zero) on an endpoint SKEW — a kernel host port that isn't the canonical", () => {
+    expect(runLint(fixture("skew.yml", both(7070, 17670)))).not.toBe(0);
+  });
+
+  it("the launcher-check canonical ports == doctor's DEFAULT_KERNEL / DEFAULT_OPENSHELL (single source of truth)", () => {
+    const port = (ep: string): number => Number(ep.split(":").pop());
+    // If a doctor default changes, launcher-check's CANONICAL_HOST_PORT must change too — this ties them.
+    expect(port(DEFAULT_KERNEL)).toBe(50051);
+    expect(port(DEFAULT_OPENSHELL)).toBe(17670);
   });
 });

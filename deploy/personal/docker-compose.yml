@@ -24,8 +24,10 @@ services:
     container_name: agent-os-kernel
     restart: unless-stopped
     # Append-only WORM evidence store. Localhost-only; never exposed off-box.
+    # Host port = the CANONICAL kernel ingest endpoint (127.0.0.1:50051 = doctor's DEFAULT_KERNEL) → container 7070,
+    # so a fresh `compose up` + `agentos doctor` AGREE (endpoint-consistency invariant in launcher-check).
     ports:
-      - "127.0.0.1:7070:7070"
+      - "127.0.0.1:50051:7070"
     environment:
       - PERSONAL_UID=${PERSONAL_UID:-10000}
       - PERSONAL_GID=${PERSONAL_GID:-10000}
@@ -45,8 +47,10 @@ services:
       kernel:
         condition: service_healthy
     # Sandboxed execution substrate. Localhost-only.
+    # Host port = the CANONICAL OpenShell endpoint (127.0.0.1:17670 = doctor's DEFAULT_OPENSHELL) → container 7071,
+    # so `agentos doctor`'s "OpenShell reachable" probe agrees (endpoint-consistency invariant in launcher-check).
     ports:
-      - "127.0.0.1:7071:7071"
+      - "127.0.0.1:17670:7071"
     environment:
       - PERSONAL_UID=${PERSONAL_UID:-10000}
       - PERSONAL_GID=${PERSONAL_GID:-10000}

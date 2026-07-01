@@ -78,6 +78,14 @@ const violations = [];
 let bracketDepth = 0;
 let sawServices = false;
 
+// Invariant 3 — ENDPOINT CONSISTENCY (SLICE-PERSONAL1): a fresh `compose up` must agree with `agentos doctor`.
+// The published 127.0.0.1 HOST ports for kernel/substrate MUST equal the CANONICAL endpoints (= doctor's
+// DEFAULT_KERNEL / DEFAULT_OPENSHELL host ports) — else a fresh-box start→doctor FAILs on an endpoint skew.
+// Kept in one place; launcher-check.test.ts asserts these equal the actual doctor constants (single source).
+const CANONICAL_HOST_PORT = { kernel: 50051, substrate: 17670 };
+const serviceHostPort = {};
+let currentService = null;
+
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
   const lineNo = i + 1;
@@ -88,6 +96,12 @@ for (let i = 0; i < lines.length; i++) {
     violations.push(`${target}:${lineNo} tab indentation is illegal YAML (fail-closed)`);
   }
   if (/^\s*services\s*:/.test(stripped)) sawServices = true;
+
+  // Track the current service (a 2-space `  name:` header) + its published 127.0.0.1 host port.
+  const svcHeader = line.match(/^ {2}([\w-]+):\s*$/);
+  if (svcHeader) currentService = svcHeader[1];
+  const localPort = stripped.match(/127\.0\.0\.1:(\d+):\d+/);
+  if (localPort && currentService) serviceHostPort[currentService] = Number(localPort[1]);
 
   // Bracket/brace balance for inline flow scalars.
   for (const ch of stripped) {
@@ -123,6 +137,18 @@ if (bracketDepth !== 0) {
 }
 if (!sawServices) {
   violations.push(`${target}:0 no \`services:\` block found (malformed compose, fail-closed)`);
+}
+
+// Invariant 3 — endpoint consistency: IF a canonical service is present with a published 127.0.0.1 port, that
+// port MUST be its canonical endpoint (a fixture without kernel/substrate is not the Personal stack — skip it).
+for (const [svc, expected] of Object.entries(CANONICAL_HOST_PORT)) {
+  const got = serviceHostPort[svc];
+  if (got !== undefined && got !== expected) {
+    const which = svc === "kernel" ? "DEFAULT_KERNEL" : "DEFAULT_OPENSHELL";
+    violations.push(
+      `${target}:0 endpoint skew — service '${svc}' publishes 127.0.0.1:${got} but the canonical endpoint is ${expected} (doctor ${which}); a fresh compose up + doctor would disagree`,
+    );
+  }
 }
 
 if (violations.length > 0) fail(violations);
